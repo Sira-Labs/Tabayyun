@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = ["tabayyun-core", "tabayyun-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "UNLICENSED"
+repository = "https://github.com/thedatadudech/Tabayyun"
+
+[workspace.dependencies]
+arrow = { version = "60", default-features = false }
+parquet = { version = "60", default-features = false, features = ["arrow", "snap", "zstd"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+clap = { version = "4", features = ["derive"] }
+csv = "1"
+proptest = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

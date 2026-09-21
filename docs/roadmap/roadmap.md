@@ -10,6 +10,10 @@ Effort assumes AI-assisted development. "Solo" = one senior engineer full time.
 
 ## R1 — Running core (target: 12 weeks solo, 6–7 weeks with 2 people)
 
+Progress log: **2026-09-21** sprint 1 started: Rust workspace, frame/profile/score/synth,
+checks 1, 2, 4, 5, 7, 8, 9, 11 with tests, `tabayyun` CLI (CSV/Parquet in, JSON out), FastAPI
+and Vite skeletons, CI.
+
 Goal: a self-hosted install that ingests from Parquet/CSV, PI Web API and OPC UA, runs the
 30 checks on a schedule, scores series, shows findings in a dashboard, lets a user correct a
 selected window with lineage and see the corrected layer re-scored, and lets a user log in

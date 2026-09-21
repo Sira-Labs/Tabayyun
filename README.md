@@ -9,7 +9,25 @@ untrustworthy, routes findings to the people who can fix them, and lets them cor
 with full lineage and deliver the corrected series downstream. First target vertical:
 **energy** (PV, wind, grid, metering, storage).
 
-Status: **R0 — research and design complete; implementation starts in R1.**
+Status: **R1 sprint 1 in progress.** The Rust core runs the first eight structural checks
+end to end on CSV/Parquet files; API and web are skeletons.
+
+## Quick start
+
+```bash
+# Rust core: generate a faulty synthetic series and run all built-in checks on it
+cd core && cargo run -q --bin tabayyun -- synth --out /tmp/f.csv --faults gap,flatline,nans,negative
+cargo run -q --bin tabayyun -- run --input /tmp/f.csv --quality-col quality --unit "m3/h" --pretty
+
+# API (FastAPI) and web (Vite) in development
+make dev-infra            # Postgres+TimescaleDB, Keycloak (docker compose)
+make api-dev              # http://localhost:8000/api/docs
+make web-dev              # http://localhost:5173
+```
+
+Checks implemented so far: `tby.completeness`, `tby.staleness`, `tby.timestamp_integrity`,
+`tby.sampling_regularity`, `tby.value_type`, `tby.flatline`, `tby.physical_range`,
+`tby.non_negative` (catalogue #1, 2, 4, 5, 7, 8, 9, 11).
 
 ## Documentation
 

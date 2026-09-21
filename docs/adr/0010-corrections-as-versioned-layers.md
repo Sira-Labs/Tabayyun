@@ -21,6 +21,10 @@ to downstream systems, without ever losing the original measurement.
   impute.like_day, impute.seasonal, impute.kalman, align.resample/shift/timezone,
   transform.affine/offset, replace.with_reference, reconcile.balance.
 - Corrected layers are re-scored with the same checks so the quality gain is measurable.
+- **Reads are opt-in.** Every read (API, chart, export, publish) names a layer explicitly:
+  `raw` (default), `corrected@latest` or `corrected@v{n}`. No consumer receives corrected
+  data without asking for it; a workspace may set a default layer for named publish targets
+  only.
 - Corrections are published to separate destinations (Parquet/SQL export, a separate
   historian tag, API); Tabayyun never overwrites the source tag.
 - RepairFlows (R2) chain operations and run on a schedule or after a suite run, under an
