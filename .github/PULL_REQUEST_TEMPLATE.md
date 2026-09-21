@@ -4,6 +4,7 @@
 
 ## Checks
 
+- [ ] Implements a spec in `docs/specs/` (linked above); its acceptance criteria are ticked and `TASKS.md` is updated
 - [ ] `make lint` and `make test` pass locally (or the relevant subset: `cargo`, `uv`, `pnpm`)
 - [ ] New or changed checks have synthetic-fault unit tests, evidence JSON and a plain-language summary
 - [ ] Design deviations are recorded as a new ADR in `docs/adr/` (not silently)
