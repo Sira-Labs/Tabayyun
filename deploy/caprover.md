@@ -17,8 +17,9 @@ Internet ──▶ CapRover nginx (TLS) ──▶ tabayyun-web (Caddy :80) ─�
   named `tabayyun-db` with **Has Persistent Data** ticked.
 - Deployment tab → *Deploy via ImageName*: `timescale/timescaledb:2.30.1-pg17`
 - App Configs:
-  - Environment variables: `POSTGRES_USER=tabayyun`, `POSTGRES_PASSWORD=<strong>`,
-    `POSTGRES_DB=tabayyun`
+  - Environment variables: `POSTGRES_USER=tabayyun`, `POSTGRES_PASSWORD=<generated>`,
+    `POSTGRES_DB=tabayyun`. Generate the password with `openssl rand -hex 24`: hex is safe
+    inside the database URL, while base64 may contain `/` or `+`.
   - Persistent directory: path in app `/var/lib/postgresql/data`, label `tabayyun-pgdata`
   - Do not map a host port; the API reaches it as `srv-captain--tabayyun-db:5432`.
 
@@ -32,7 +33,7 @@ Internet ──▶ CapRover nginx (TLS) ──▶ tabayyun-web (Caddy :80) ─�
     |---|---|
     | `TABAYYUN_ENV` | `prod` |
     | `TABAYYUN_DATABASE_URL` | `postgresql+psycopg://tabayyun:<password>@srv-captain--tabayyun-db:5432/tabayyun` |
-    | `TABAYYUN_SESSION_SECRET` | output of `openssl rand -base64 48` |
+    | `TABAYYUN_SESSION_SECRET` | a generated value, e.g. the output of `openssl rand -base64 48` |
     | `TABAYYUN_CACHE_DIR` | `/data/cache` |
 
   - Persistent directory: `/data/cache`, label `tabayyun-cache`
@@ -102,6 +103,19 @@ Trade-offs against the GHCR path in section 4:
   as long as `CAPROVER_SERVER` is unset.
 
 Do not enable both paths for the same app, or each push deploys it twice.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `deploy-caprover` job fails with an HTML `404 Not Found` from nginx | `CAPROVER_SERVER` points at an app domain instead of the dashboard | Set it to `https://captain.<root-domain>` |
+| API log: `refusing to start in prod: ... ['TABAYYUN_DATABASE_URL']` | password is `tabayyun`, `changeme` or similar; prod rejects placeholders | Use a generated password in both the db app and the URL |
+| API log: same message naming `TABAYYUN_SESSION_SECRET` | secret missing, shorter than 16 characters or a placeholder | Generate one and Save & Update |
+| Web log: `dial tcp: lookup api ... no such host` | `TABAYYUN_API_UPSTREAM` missing or misspelled on the **web** app | Set it to `srv-captain--tabayyun-api:8000` (two dashes) and Save & Update |
+| Web log: `lookup srv-captain--... no such host` | the API app has a different name | Match the upstream to `srv-captain--<api app name>:8000` |
+| DB log: `superuser password is not specified` | image deployed before the env vars were saved | Save & Update the db app; it initialises on the next start |
+
+Environment variable changes only take effect after **Save & Update** on that app's App Configs tab.
 
 ## Notes
 
