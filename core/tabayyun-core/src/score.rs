@@ -1,12 +1,13 @@
 //! Scoring v2 (see `docs/architecture/02-domain-model.md`).
 //!
-//! Within a dimension, findings are merged on the time axis. Each finding is spread evenly
-//! over its window with density `score_impact × window_duration / finding_duration`
-//! (capped at its severity weight), so a finding that covers the whole window but affects
-//! one sample in ten thousand stays negligible, while a gap keeps its full severity weight.
-//! The impact is the integral of the *maximum* density among findings covering each
-//! instant, divided by the window duration: two checks flagging the same minute count once
-//! (at the higher density) instead of twice.
+//! Within a dimension, span findings are merged on the time axis. Each is spread evenly
+//! over its window with density `score_impact × window_duration / finding_duration`, so a
+//! finding that covers the whole window but affects one sample in ten thousand stays
+//! negligible, while a gap keeps its full severity weight. The impact is the integral of
+//! the *maximum* density among findings covering each instant, divided by the window
+//! duration: two checks flagging the same minute count once (at the higher density).
+//! Point findings (windows too narrow to carry their impact at the severity weight, such
+//! as spikes) add their own `score_impact`; identical point windows count once.
 //! Series dimension score = 100 × (1 − clip(impact)); overall = weighted mean of dimensions.
 
 use crate::finding::{Dimension, Finding};
@@ -85,10 +86,13 @@ pub fn merged_coverage(intervals: &[(i64, i64, f64)], start: i64, end: i64) -> f
 impl Scorer {
     /// Score with the evaluation window used to normalise merged coverage.
     ///
-    /// Each finding is spread over its (clipped) window with density
-    /// `score_impact × window_duration / finding_duration`, capped at its severity weight,
-    /// so the affected fraction survives the merge: a whole-window finding that touched one
-    /// sample in ten thousand contributes almost nothing, a gap keeps its full weight.
+    /// Span findings are spread over their (clipped) window with density
+    /// `score_impact × window_duration / finding_duration` and merged by maximum, so the
+    /// affected fraction survives: a whole-window finding that touched one sample in ten
+    /// thousand contributes almost nothing, a gap keeps its full weight. A finding whose
+    /// window is too narrow to carry its impact at the severity weight (a point finding
+    /// such as a spike) keeps its `score_impact` additively; identical point windows are
+    /// deduplicated by maximum impact.
     pub fn score_window(
         &self,
         series_id: &str,
@@ -98,23 +102,28 @@ impl Scorer {
         let mut impact: BTreeMap<Dimension, f64> = BTreeMap::new();
         let span = window.duration().max(1) as f64;
         for d in Dimension::ALL {
-            let intervals: Vec<(i64, i64, f64)> = findings
-                .iter()
-                .filter(|f| f.series_id == series_id && f.dimension == d)
-                .filter_map(|f| {
-                    if f.window.end <= window.start || f.window.start >= window.end {
-                        return None;
-                    }
-                    let s = f.window.start.max(window.start);
-                    let e = f.window.end.min(window.end).max(s + 1);
-                    let density = (f.score_impact * span / (e - s) as f64).min(f.severity.weight());
-                    Some((s, e, density))
-                })
-                .collect();
-            if intervals.is_empty() {
+            let mut spans: Vec<(i64, i64, f64)> = Vec::new();
+            let mut points: BTreeMap<(i64, i64), f64> = BTreeMap::new();
+            for f in findings.iter().filter(|f| f.series_id == series_id && f.dimension == d) {
+                if f.window.end <= window.start || f.window.start >= window.end {
+                    continue;
+                }
+                let s = f.window.start.max(window.start);
+                let e = f.window.end.min(window.end).max(s + 1);
+                let density = f.score_impact * span / (e - s) as f64;
+                if density > f.severity.weight() {
+                    let slot = points.entry((s, e)).or_insert(0.0);
+                    *slot = slot.max(f.score_impact);
+                } else {
+                    spans.push((s, e, density));
+                }
+            }
+            if spans.is_empty() && points.is_empty() {
                 continue;
             }
-            impact.insert(d, merged_coverage(&intervals, window.start, window.end));
+            let merged = merged_coverage(&spans, window.start, window.end);
+            let additive: f64 = points.values().sum();
+            impact.insert(d, (merged + additive).clamp(0.0, 1.0));
         }
         self.finish(series_id, findings, impact)
     }
@@ -214,8 +223,15 @@ mod tests {
             })
             .collect();
         let r = Scorer::default().score_window("s", &spikes, w);
-        let expected = 100.0 - 100.0 * 3.0 * 0.3 / 1000.0;
-        assert!((r.dimensions[&Dimension::Plausibility] - expected).abs() < 0.1, "{:?}", r.dimensions);
+        // 3 × 0.3 / 1000 = 0.0009 impact → 99.91 → 99.9 after rounding; the one-nanosecond
+        // windows must not lose their impact to the density cap.
+        assert_eq!(r.dimensions[&Dimension::Plausibility], 99.9);
+        // Identical point windows count once (max), not three times: 0.3 × 0.1 = 0.03 → 97.0.
+        let same: Vec<Finding> = (0..3)
+            .map(|_| finding("tby.spikes", Dimension::Plausibility, Severity::Medium, Window::new(0, 1), 0.1))
+            .collect();
+        let r = Scorer::default().score_window("s", &same, w);
+        assert_eq!(r.dimensions[&Dimension::Plausibility], 97.0);
         // Attenuated findings (changepoint uses overlap × 0.5) keep their attenuation.
         let c = finding("tby.changepoint", Dimension::Plausibility, Severity::Medium, w, 0.5);
         let r = Scorer::default().score_window("s", &[c], w);
