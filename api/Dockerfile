@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # Stage 1: build the Rust core wheel (manylinux-compatible via maturin in a Debian image).
-FROM rust:1.85-bookworm AS core
+FROM rust:1.94-bookworm AS core
 RUN apt-get update && apt-get install -y --no-install-recommends python3-pip \
  && pip3 install --break-system-packages "maturin>=1.7,<2" \
  && rm -rf /var/lib/apt/lists/*

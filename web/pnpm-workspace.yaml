@@ -1,0 +1,3 @@
+# pnpm >= 10 refuses to run dependency install scripts unless they are approved here.
+onlyBuiltDependencies:
+  - esbuild
