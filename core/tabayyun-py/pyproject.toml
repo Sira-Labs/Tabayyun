@@ -1,0 +1,23 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "tabayyun-core"
+version = "0.1.0"
+description = "Tabayyun time-series data-quality core (Rust) with Arrow-native Python bindings"
+requires-python = ">=3.11"
+classifiers = ["Programming Language :: Rust", "Programming Language :: Python :: 3"]
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pyarrow>=17", "polars>=1.2"]
+
+[tool.maturin]
+python-source = "python"
+module-name = "tabayyun_core._native"
+features = ["pyo3/extension-module"]
+manifest-path = "Cargo.toml"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
