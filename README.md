@@ -24,7 +24,7 @@ Status: **R0 — research and design complete; implementation starts in R1.**
 | Frontend design | [docs/frontend/01-frontend-design.md](docs/frontend/01-frontend-design.md) |
 | Security baseline (ASVS L2) | [docs/frontend/02-security-baseline.md](docs/frontend/02-security-baseline.md) |
 | Roadmap and repo layout | [docs/roadmap/roadmap.md](docs/roadmap/roadmap.md) |
-| Decisions (ADRs) | [docs/adr/](docs/adr/) |
+| Decisions (ADRs 0001–0010) | [docs/adr/](docs/adr/) |
 
 Research reports (with verified sources):
 
