@@ -20,7 +20,7 @@ jobs:
     defaults:
       run: { working-directory: core }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with: { components: "rustfmt, clippy" }
       - uses: Swatinem/rust-cache@v2
@@ -39,7 +39,7 @@ jobs:
     defaults:
       run: { working-directory: core/tabayyun-py }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: core }
@@ -55,7 +55,7 @@ jobs:
     defaults:
       run: { working-directory: api }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: core }
@@ -75,7 +75,7 @@ jobs:
     defaults:
       run: { working-directory: web }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with: { package_json_file: web/package.json }
       - uses: actions/setup-node@v4
