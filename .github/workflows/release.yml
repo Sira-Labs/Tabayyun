@@ -33,7 +33,7 @@ jobs:
           - name: web
             dockerfile: web/Dockerfile
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: tag
         run: echo "tag=sha-$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
@@ -78,7 +78,7 @@ jobs:
         id: gate
         run: |
           if [ -n "${{ vars.DEPLOY_HOST }}" ]; then echo "on=true" >> "$GITHUB_OUTPUT"; else echo "on=false" >> "$GITHUB_OUTPUT"; echo "DEPLOY_HOST not set on environment 'production'; skipping deploy"; fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.gate.outputs.on == 'true'
       - name: copy compose bundle
         if: steps.gate.outputs.on == 'true'
