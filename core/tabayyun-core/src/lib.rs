@@ -13,6 +13,7 @@
 //! the baseline-profile checks (ADR-0002 allows kernels where a plan adds nothing).
 
 pub mod checks;
+pub mod downsample;
 pub mod error;
 pub mod finding;
 pub mod frame;

@@ -6,9 +6,15 @@
 
 pub mod completeness;
 pub mod flatline;
+pub mod interpolation_artifacts;
 pub mod non_negative;
+pub mod operational_range;
 pub mod physical_range;
+pub mod quality_flags;
+pub mod rate_of_change;
+pub mod resolution_loss;
 pub mod sampling_regularity;
+pub mod spikes;
 pub mod staleness;
 pub mod timestamp_integrity;
 pub mod value_type;
