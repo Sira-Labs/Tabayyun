@@ -147,6 +147,37 @@ pub(crate) fn segments(frame: &SeriesFrame, segment_ns: i64) -> Vec<(usize, usiz
     out
 }
 
+/// Merge flagged segments into episodes: items whose segment indices are consecutive form one
+/// group whose window spans them all. Segment checks report one finding per episode rather
+/// than one per segment, so a shift that lasts a month is one finding, not thirty.
+pub(crate) fn episodes<T>(mut flagged: Vec<(usize, Window, T)>) -> Vec<(Window, Vec<T>)> {
+    flagged.sort_by_key(|(k, _, _)| *k);
+    let mut out: Vec<(usize, Window, Vec<T>)> = Vec::new();
+    for (k, w, item) in flagged {
+        match out.last_mut() {
+            Some((last_k, last_w, items)) if k == *last_k + 1 => {
+                *last_k = k;
+                last_w.end = last_w.end.max(w.end);
+                items.push(item);
+            }
+            _ => out.push((k, w, vec![item])),
+        }
+    }
+    out.into_iter().map(|(_, w, items)| (w, items)).collect()
+}
+
+/// Which of the per-segment statistics `xs` are unusual among the segments of the window:
+/// more than `k` robust sigmas (1.4826 × MAD) above the median, or on either side when
+/// `two_sided`. With fewer than `min_segments` values the siblings say nothing and every
+/// segment counts as unusual, leaving the absolute thresholds alone to decide.
+pub(crate) fn unusual_among(xs: &[f64], min_segments: usize, k: f64, two_sided: bool) -> Vec<bool> {
+    let Some((med, mad)) = crate::profile::median_mad(xs).filter(|_| xs.len() >= min_segments.max(1)) else {
+        return vec![true; xs.len()];
+    };
+    let limit = k * 1.4826 * mad;
+    xs.iter().map(|&x| if two_sided { (x - med).abs() > limit } else { x - med > limit }).collect()
+}
+
 /// Baseline profile for adaptive thresholds: the run's profile when present, otherwise a
 /// profile of the frame itself. The label says which one was used, for evidence.
 pub(crate) fn baseline<'a>(ctx: &'a CheckContext, frame: &SeriesFrame) -> (Cow<'a, Profile>, &'static str) {
@@ -198,5 +229,26 @@ pub(crate) mod testutil {
 
     pub fn ids<'a>(out: &'a CheckOutput, id: &str) -> Vec<&'a Finding> {
         out.findings.iter().filter(|f| f.check_id == id).collect()
+    }
+
+    #[test]
+    fn unusual_among_flags_outliers_once_there_are_enough_segments() {
+        let xs = [1.0, 1.1, 0.9, 1.0, 1.05, 0.95, 1.0, 4.0, 0.2];
+        let u = unusual_among(&xs, 8, 3.0, false);
+        assert_eq!(u, [false, false, false, false, false, false, false, true, false]);
+        let u = unusual_among(&xs, 8, 3.0, true);
+        assert_eq!(u, [false, false, false, false, false, false, false, true, true]);
+        assert!(unusual_among(&xs[..4], 8, 3.0, false).iter().all(|b| *b));
+    }
+
+    #[test]
+    fn episodes_merge_consecutive_segments_only() {
+        let seg = |k: usize| (k, Window::new(k as i64 * 10, k as i64 * 10 + 9), k);
+        let groups = episodes(vec![seg(5), seg(1), seg(2), seg(3), seg(7)]);
+        assert_eq!(groups.len(), 3);
+        assert_eq!(groups[0].0, Window::new(10, 39));
+        assert_eq!(groups[0].1, vec![1, 2, 3]);
+        assert_eq!(groups[1].1, vec![5]);
+        assert_eq!(groups[2].1, vec![7]);
     }
 }
