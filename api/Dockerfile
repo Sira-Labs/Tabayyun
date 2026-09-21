@@ -21,9 +21,12 @@ WORKDIR /app
 COPY --from=core /wheels /wheels
 COPY api/pyproject.toml api/uv.lock ./
 COPY api/src ./src
-# Install runtime deps from the lock (except the path dependency), then the built wheel.
+# Install runtime deps from the lock (except the path dependency), then the built wheel, then
+# the API itself with --no-deps: its deps are already present, and resolving them would make
+# uv follow the ../core/tabayyun-py path source, which does not exist in this image.
 RUN uv export --no-dev --no-emit-project --no-emit-package tabayyun-core --frozen -o /tmp/req.txt \
- && uv pip install --no-cache -r /tmp/req.txt /wheels/*.whl . \
+ && uv pip install --no-cache -r /tmp/req.txt /wheels/*.whl \
+ && uv pip install --no-cache --no-deps . \
  && rm -rf /wheels
 RUN useradd --system --uid 10001 --create-home tabayyun \
  && mkdir -p /data/cache && chown -R tabayyun /data
