@@ -78,6 +78,9 @@ impl Check for LevelDrift {
         let (f, _) = frame.normalized();
         let (profile, source) = baseline(ctx, &f);
         let Some(mad) = profile.mad else { return Ok(out) };
+        if f.is_empty() {
+            return Ok(out);
+        }
         let spread =
             profile.noise_mad.unwrap_or(0.0).max(0.1 * 1.4826 * mad).max(profile.resolution.unwrap_or(0.0));
         let span = (f.ts[f.len() - 1] - f.ts[0]).max(1);
@@ -142,6 +145,14 @@ mod tests {
         let out = c.run(&f, &ctx(&f)).unwrap();
         // No drift in the base signal, and the run must finish quickly with ≤ 50 segments.
         assert!(ids(&out, ID).is_empty());
+    }
+
+    #[test]
+    fn empty_frame_with_baseline_does_not_panic() {
+        let profile = Profile::compute(&base(14 * 1440));
+        let f = base(0);
+        let c = CheckContext { now_ns: 0, window: crate::finding::Window::new(0, 1), profile: Some(profile) };
+        assert!(LevelDrift::default().run(&f, &c).unwrap().findings.is_empty());
     }
 
     #[test]

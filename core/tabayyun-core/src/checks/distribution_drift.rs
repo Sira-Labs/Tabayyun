@@ -73,13 +73,17 @@ impl Check for DistributionDrift {
         let q = &profile.quantiles;
         let iqr = (q[15] - q[5]).max(profile.resolution.unwrap_or(0.0)).max(1e-12);
         let edges: Vec<f64> = (1..10).map(|k| q[2 * k]).collect(); // deciles 10..90 %
+                                                                   // PSI assumes 10 % of the baseline in every bin; with tied deciles (constant or heavily
+                                                                   // quantised baseline) that assumption is false, so PSI is skipped and only the
+                                                                   // Wasserstein distance is used for such series.
+        let psi_valid = edges.windows(2).all(|w| w[1] > w[0]);
         for (s, e, w) in segments(&f, self.segment_ns) {
             let mut seg = usable_values(&f, s, e);
             if seg.len() < self.min_samples {
                 continue;
             }
             seg.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            let psi_v = psi(&seg, &edges);
+            let psi_v = if psi_valid { psi(&seg, &edges) } else { 0.0 };
             let wass = (0..=20).map(|k| (quantile_f64(&seg, k as f64 / 20.0) - q[k]).abs()).sum::<f64>()
                 / 21.0
                 / iqr;
@@ -93,7 +97,7 @@ impl Check for DistributionDrift {
                     ctx.window.overlap_fraction(&w),
                     format!("Value distribution shifted: PSI {psi_v:.3} (warn {:.2}, alert {:.2}), normalised Wasserstein {wass:.3}",
                         self.psi_warn, self.psi_alert),
-                    serde_json::json!({"psi": psi_v, "wasserstein_norm": wass, "psi_warn": self.psi_warn, "psi_alert": self.psi_alert,
+                    serde_json::json!({"psi": psi_v, "psi_valid": psi_valid, "wasserstein_norm": wass, "psi_warn": self.psi_warn, "psi_alert": self.psi_alert,
                         "wasserstein_alert": self.wasserstein_alert, "baseline": source}),
                 ));
             }
@@ -120,6 +124,18 @@ mod tests {
         let fs = ids(&out, ID);
         assert_eq!(fs.len(), 1, "{:?}", out.findings);
         assert_eq!(fs[0].severity, Severity::Medium);
+    }
+
+    #[test]
+    fn constant_baseline_does_not_alert_on_unchanged_constant() {
+        let mut f = base(3 * 1440);
+        for v in f.values.iter_mut() {
+            *v = 42.0;
+        }
+        let profile = Profile::compute(&f);
+        let c = ctx(&f).with_profile(profile);
+        let out = DistributionDrift::default().run(&f, &c).unwrap();
+        assert!(ids(&out, ID).is_empty(), "{:?}", out.findings);
     }
 
     #[test]

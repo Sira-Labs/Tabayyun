@@ -8,7 +8,10 @@ Two images are built by `.github/workflows/release.yml` on every push to `main` 
 | `ghcr.io/thedatadudech/tabayyun-api` | Python API with the Rust core wheel built in-image (no compiler at runtime) |
 | `ghcr.io/thedatadudech/tabayyun-web` | Static SPA served by Caddy with security headers; proxies `/api` to the API |
 
-Tags: `latest` (main), `main`, `sha-<short>`, and `<version>` for tags.
+Tags: `latest` (main), `main`, `sha-<short>`, and `<version>` for tags. The compose bundle
+requires `TABAYYUN_TAG`; the CD job sets it to the `sha-<short>` tag of the images it just
+built, so a deployment never depends on a moving tag. The TimescaleDB image is pinned by
+digest; bump it deliberately, together with a database upgrade note.
 
 ## Run on any Docker host
 

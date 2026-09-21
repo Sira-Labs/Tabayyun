@@ -229,10 +229,15 @@ Profiles are versioned and stored; findings link to the profile they used.
 
 ### 19. `tby.distribution_drift` — Distribution changed vs reference
 - **Dim:** plausibility. **Sev:** medium.
-- **Algorithm:** PSI over 10 quantile bins of the baseline; KS for n ≤ 1000, normalized
-  Wasserstein for larger n. Excludes windows with open changepoint findings that the user
-  accepted as legitimate (re-baseline).
-- **Params:** PSI warn 0.1, alert 0.25; KS p 0.05; Wasserstein 0.1.
+- **Algorithm:** per segment (default one day) compare usable values with the baseline's
+  21-point quantile grid: PSI over 10 bins bounded by the baseline deciles (skipped when the
+  deciles are tied, e.g. constant or heavily quantised baselines), and a Wasserstein-1
+  distance approximated on the quantile grid and normalised by the baseline inter-quartile
+  range. Findings on PSI ≥ alert or Wasserstein ≥ alert (medium); PSI ≥ warn alone is low.
+  Excludes windows with open changepoint findings that the user accepted as legitimate
+  (re-baseline).
+- **Params:** `psi_warn` 0.1, `psi_alert` 0.25, `wasserstein_alert` 0.1, `segment_ns` 1 d,
+  `min_samples` 100.
 - **Sources:** Evidently defaults; PSI literature; DQSOps drift-aware re-baselining.
 
 ### 20. `tby.changepoint` — Abrupt regime change

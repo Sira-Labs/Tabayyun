@@ -83,8 +83,12 @@ pub fn merged_coverage(intervals: &[(i64, i64, f64)], start: i64, end: i64) -> f
 }
 
 impl Scorer {
-    /// Score with the evaluation window used to normalise merged coverage. When findings
-    /// carry no usable span (all point findings) the additive impact is used.
+    /// Score with the evaluation window used to normalise merged coverage.
+    ///
+    /// Each finding is spread over its (clipped) window with density
+    /// `score_impact × window_duration / finding_duration`, capped at its severity weight,
+    /// so the affected fraction survives the merge: a whole-window finding that touched one
+    /// sample in ten thousand contributes almost nothing, a gap keeps its full weight.
     pub fn score_window(
         &self,
         series_id: &str,
@@ -92,21 +96,25 @@ impl Scorer {
         window: crate::finding::Window,
     ) -> ScoreReport {
         let mut impact: BTreeMap<Dimension, f64> = BTreeMap::new();
+        let span = window.duration().max(1) as f64;
         for d in Dimension::ALL {
-            let mine: Vec<&Finding> =
-                findings.iter().filter(|f| f.series_id == series_id && f.dimension == d).collect();
-            if mine.is_empty() {
+            let intervals: Vec<(i64, i64, f64)> = findings
+                .iter()
+                .filter(|f| f.series_id == series_id && f.dimension == d)
+                .filter_map(|f| {
+                    if f.window.end <= window.start || f.window.start >= window.end {
+                        return None;
+                    }
+                    let s = f.window.start.max(window.start);
+                    let e = f.window.end.min(window.end).max(s + 1);
+                    let density = (f.score_impact * span / (e - s) as f64).min(f.severity.weight());
+                    Some((s, e, density))
+                })
+                .collect();
+            if intervals.is_empty() {
                 continue;
             }
-            // Point findings (spikes, single samples) are additive; spans are merged.
-            let point_threshold = window.duration() / 10_000;
-            let (points, spans): (Vec<&Finding>, Vec<&Finding>) =
-                mine.iter().partition(|f| f.window.duration() <= point_threshold.max(1));
-            let additive: f64 = points.iter().map(|f| f.score_impact).sum();
-            let intervals: Vec<(i64, i64, f64)> =
-                spans.iter().map(|f| (f.window.start, f.window.end, f.severity.weight())).collect();
-            let merged = merged_coverage(&intervals, window.start, window.end);
-            impact.insert(d, (merged + additive).clamp(0.0, 1.0));
+            impact.insert(d, merged_coverage(&intervals, window.start, window.end));
         }
         self.finish(series_id, findings, impact)
     }
@@ -158,22 +166,67 @@ mod tests {
     use super::*;
     use crate::finding::{Severity, Window};
 
+    fn finding(id: &str, d: Dimension, sev: Severity, w: Window, frac: f64) -> Finding {
+        Finding::new(id, "s", d, sev, w, frac, "x", serde_json::json!({}))
+    }
+
     #[test]
-    fn scores_clip_and_weight() {
-        let f = Finding::new(
-            "tby.x",
-            "s",
-            Dimension::Validity,
-            Severity::Critical,
-            Window::new(0, 10),
-            0.5,
-            "x",
-            serde_json::json!({}),
-        );
-        let r = Scorer::default().score("s", &[f.clone(), f]);
-        assert_eq!(r.dimensions[&Dimension::Validity], 0.0);
+    fn overlapping_findings_count_once_at_max_density() {
+        let w = Window::new(0, 1_000_000_000);
+        let a = finding("tby.a", Dimension::Validity, Severity::Critical, Window::new(0, 500_000_000), 0.5);
+        let b = finding("tby.b", Dimension::Validity, Severity::High, Window::new(0, 500_000_000), 0.5);
+        let r = Scorer::default().score_window("s", &[a.clone(), b], w);
+        // Half the window at density 1.0 → impact 0.5 → score 50, not 0.
+        assert_eq!(r.dimensions[&Dimension::Validity], 50.0);
         assert_eq!(r.dimensions[&Dimension::Completeness], 100.0);
-        assert!(r.overall < 100.0 && r.overall > 70.0);
         assert_eq!(r.n_findings, 2);
+        assert_eq!(r.method_version, "v2");
+        assert_eq!(Scorer::default().score_window("s", &[a], w).dimensions[&Dimension::Validity], 50.0);
+    }
+
+    #[test]
+    fn whole_window_finding_with_tiny_fraction_stays_negligible() {
+        let w = Window::new(0, 1_000_000_000);
+        // One conflicting timestamp in 10,000 samples: High severity, affected 1/10000.
+        let f = finding("tby.timestamp_integrity", Dimension::Integrity, Severity::High, w, 1.0 / 10_000.0);
+        let r = Scorer::default().score_window("s", &[f], w);
+        assert!(r.dimensions[&Dimension::Integrity] > 99.9, "{:?}", r.dimensions);
+        // A gap covering half the window at High keeps its full weight: 100 − 60 × 0.5 = 70.
+        let g = finding(
+            "tby.completeness",
+            Dimension::Completeness,
+            Severity::High,
+            Window::new(0, 500_000_000),
+            0.5,
+        );
+        let r = Scorer::default().score_window("s", &[g], w);
+        assert_eq!(r.dimensions[&Dimension::Completeness], 70.0);
+        // Point findings (spikes) add up: three spikes of impact 0.3/1000 each.
+        let spikes: Vec<Finding> = (0..3)
+            .map(|i| {
+                finding(
+                    "tby.spikes",
+                    Dimension::Plausibility,
+                    Severity::Medium,
+                    Window::new(i * 1000, i * 1000 + 1),
+                    1.0 / 1000.0,
+                )
+            })
+            .collect();
+        let r = Scorer::default().score_window("s", &spikes, w);
+        let expected = 100.0 - 100.0 * 3.0 * 0.3 / 1000.0;
+        assert!((r.dimensions[&Dimension::Plausibility] - expected).abs() < 0.1, "{:?}", r.dimensions);
+        // Attenuated findings (changepoint uses overlap × 0.5) keep their attenuation.
+        let c = finding("tby.changepoint", Dimension::Plausibility, Severity::Medium, w, 0.5);
+        let r = Scorer::default().score_window("s", &[c], w);
+        assert_eq!(r.dimensions[&Dimension::Plausibility], 85.0);
+    }
+
+    #[test]
+    fn merged_coverage_handles_nesting() {
+        let iv = [(0, 100, 0.3), (10, 20, 1.0), (50, 150, 0.6)];
+        let c = merged_coverage(&iv, 0, 100);
+        // 0-10 @0.3 = 3, 10-20 @1.0 = 10, 20-50 @0.3 = 9, 50-100 @0.6 = 30 → 52/100
+        assert!((c - 0.52).abs() < 1e-9, "{c}");
     }
 }
