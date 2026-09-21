@@ -82,7 +82,7 @@ jobs:
         if: steps.gate.outputs.on == 'true'
       - name: copy compose bundle
         if: steps.gate.outputs.on == 'true'
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ vars.DEPLOY_HOST }}
           username: ${{ vars.DEPLOY_USER }}
