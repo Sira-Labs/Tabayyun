@@ -47,6 +47,13 @@ impl Check for ScaleShift {
         if base_med.abs() < 1e-12 {
             return Ok(out);
         }
+        // A rescaling must move the spread by the same factor (×r for ratios, ×1.8 for
+        // °C→°F). With a zero-spread (constant) baseline a median alone cannot tell a unit
+        // change from a legitimate setpoint move (a constant 20 becoming 68 fits both), so the
+        // check deliberately does not run rather than guess; flatline/changepoint cover it.
+        if base_mad <= 0.0 {
+            return Ok(out);
+        }
         for (s, e, w) in segments(&f, self.segment_ns) {
             let seg = usable_values(&f, s, e);
             if seg.len() < self.min_samples {
@@ -57,9 +64,7 @@ impl Check for ScaleShift {
             out.metrics.push(metric(ID, &f, "median_ratio", w.end, ratio));
             let mut candidate: Option<(String, f64)> = None;
             for r in RATIOS {
-                if ((ratio - r) / r).abs() <= self.ratio_tol
-                    && (base_mad <= 0.0 || ((mad / base_mad - r) / r).abs() <= 0.5)
-                {
+                if ((ratio - r) / r).abs() <= self.ratio_tol && ((mad / base_mad - r) / r).abs() <= 0.5 {
                     candidate = Some((format!("×{r}"), r));
                     break;
                 }
@@ -132,6 +137,21 @@ mod tests {
     fn clean_passes() {
         let f = base(3 * 1440);
         assert!(ids(&ScaleShift::default().run(&f, &ctx(&f)).unwrap(), ID).is_empty());
+    }
+
+    #[test]
+    fn constant_baseline_is_not_judged() {
+        let mut f = base(3 * 1440);
+        for v in f.values.iter_mut() {
+            *v = 20.0;
+        }
+        let profile = Profile::compute(&f);
+        for v in f.values.iter_mut().skip(2880) {
+            *v = 68.0; // could be °C→°F or a setpoint move: no finding, no NaN arithmetic
+        }
+        let c = ctx(&f).with_profile(profile);
+        let out = ScaleShift::default().run(&f, &c).unwrap();
+        assert!(ids(&out, ID).is_empty(), "{:?}", out.findings);
     }
 
     #[test]
