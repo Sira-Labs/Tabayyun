@@ -9,6 +9,9 @@ Organisation ─┬─ Workspace ─┬─ Source ─── Series (tag) ──�
               │             ├─ Run ─── Finding ─── Evidence
               │             ├─ Score (per Series / Dataset / Workspace, per dimension)
               │             ├─ AlertRule ─── Notification
+              │             ├─ RepairFlow ─── RepairStep
+              │             ├─ Correction ─── CorrectedRange (per Series, versioned, with lineage)
+              │             ├─ PublishTarget (where corrected series are delivered)
               │             └─ Share (grant on any resource above)
               ├─ Member (User × Role)
               └─ AuditEvent
@@ -32,8 +35,20 @@ Organisation ─┬─ Workspace ─┬─ Source ─── Series (tag) ──�
 | **Evidence** | Machine-readable facts backing a finding (statistic, threshold, baseline window, sample points). | JSON blob following the check's evidence schema |
 | **Score** | 0–100 per Series per dimension and overall, plus roll-ups. | dimension, value, computed_at, method_version |
 | **AlertRule** | Condition over findings/scores → notification channel. | condition, channel (email, webhook, slack, teams), throttle |
+| **RepairFlow** | Ordered steps applied to a Dataset on a schedule or on demand: filter, impute, align, resample, clamp, replace, custom Python. | steps[], trigger (manual / after run / cron), approval_policy |
+| **Correction** | One applied repair (manual or from a flow) creating a new version of a Series' corrected layer. Never mutates raw data. | series_id, version, method (`linear`, `like_day`, `kalman`, `drop`, `clamp`, `manual_value`...), source (user / flow / finding), status (proposed / approved / rejected / published), approved_by, reason |
+| **CorrectedRange** | Point-level lineage inside a Correction: which timestamps changed, from what, to what, why. | correction_id, window, original_values_ref, new_values_ref, finding_id?, method_params |
+| **PublishTarget** | Destination for corrected series: Parquet export, SQL table, PI/OPC write-back tag, API. | type, config, mapping raw→corrected tag names |
 | **Share** | Grant of a permission on a resource to a user, team or link. | resource_type, resource_id, principal (user/team/link), role, expires_at, token_hash |
 | **AuditEvent** | Immutable who/what/when. | actor, action, target, ip, ua, ts |
+
+## Raw vs corrected layers
+
+A Series has an immutable **raw layer** (what the source delivered) and zero or more
+**corrected layers** (versions). Reads specify a layer: `raw`, `corrected@latest`, or
+`corrected@v3`. Scores are computed for both layers so the effect of a correction is
+visible ("raw 61 → corrected 94"). Every corrected point carries lineage back to a
+Correction and optionally to the Finding that motivated it.
 
 ## Quality dimensions
 

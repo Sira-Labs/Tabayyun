@@ -325,6 +325,26 @@ Profiles are versioned and stored; findings link to the profile they used.
 
 ---
 
+## Suggested repair per check
+
+Each finding offers the repair operations that make sense for it; the user or a RepairFlow
+chooses. Operations are implemented in `core::repair` and always produce lineage.
+
+| Finding from | Offered operations (default first) |
+|---|---|
+| 1 completeness, 4 timestamp_integrity | `impute.linear` (gaps ≤ 2 h), `impute.like_day` (longer gaps, metering), `impute.seasonal` (strong seasonality), `impute.kalman`; duplicates: `dedupe.keep_first` / `dedupe.mean` |
+| 5 sampling_regularity, 28 pv.time_shift | `align.resample` to expected interval; `align.shift` by detected offset; `align.timezone` reassign |
+| 6 quality_flags | `mask.by_quality` (drop bad/uncertain), then imputation as above |
+| 7 value_type, 9 physical_range, 11 non_negative, 27 pv.irradiance_limits | `mask.window` (drop), `clamp` to limits, `impute.*` |
+| 8 flatline, 17 interpolation_artifacts | `mask.window`, `impute.*` (never keep the flat run as real data) |
+| 12 scale_shift | `transform.scale` / `transform.affine` (undo ×1000, °F→°C) on the affected segment |
+| 13 spikes, 14 rate_of_change | `mask.points` then `impute.linear`; `filter.hampel` for automated flows |
+| 15 noise_level | `filter.median` / `filter.savgol` (produces a smoothed layer, raw kept) |
+| 18 level_drift, 23 redundant_disagreement | `transform.offset` (bias removal vs reference), `replace.with_reference` (use redundant sensor) |
+| 20 changepoint | no repair; triage decides "accept and re-baseline" or "mask segment" |
+| 24 balance_residual, 25 register_reconciliation | `reconcile.balance` (data reconciliation distributing the residual by measurement uncertainty), `replace.with_register_apportionment` |
+| 29 pv.clipping, 30 wind.power_curve_outlier | `mask.window` tagged as curtailment/clipping (excluded from performance KPIs, not treated as missing) |
+
 ## Implementation order (R1)
 
 | Sprint | Checks | Why first |
@@ -334,6 +354,7 @@ Profiles are versioned and stored; findings link to the profile they used.
 | 3 | 3, 12, 15, 18, 19, 20 | Drift/change family |
 | 4 | 21, 22, 23, 24 | Cross-series; needs related-series metadata |
 | 5 | 25–30 | Energy pack; needs asset metadata (lat/lon, capacity, registers) |
+| 6 | repair ops: mask, clamp, dedupe, impute.linear, impute.like_day, align.resample, transform.affine | Manual corrections from the chart with lineage, corrected layer, re-scoring |
 
 ## Deferred to R2+ (from the research list)
 

@@ -233,6 +233,32 @@ checks; everything else is tabular DQ, cleansing, or anomaly detection without D
   [Moritz](https://arxiv.org/pdf/1510.03924)). Mass-balance data reconciliation is the
   domain-native repair for flows/energy.
 
+## 5b. Correction and repair as a product capability (added 2026-09-21)
+
+The generic tools in §3 only *detect*. Two commercial products make correction a
+first-class workflow, from public material only:
+
+| Product | What is public | Notes |
+|---|---|---|
+| Timeseer.AI "Resolve" and flows | Platform is framed as Detect → Validate → Resolve. Resolve: "fix the sensor, clean the data, or confidently accept the data"; manual cleaning by selecting a period on the chart; fully automated cleaning on a schedule; incident grouping and follow-up actions; "full visibility into every change and decision". Configurable **flows** chain blocks (data analysis, filter, imputation, alignment) and the final block publishes the cleaned data to a data service as a new, reliable copy consumed downstream (e.g. Databricks) ([timeseer.ai/platform](https://www.timeseer.ai/platform), [element61 case](https://www.element61.be/en/resource/ensuring-time-series-data-quality-timeseerai)). | No public product called "Seer" was found; block internals and algorithms are not documented publicly. |
+| Seeq | Formula-based cleansing (`remove()`, `within()`, `agileFilter()`, `removeOutliers()`) producing derived signals; no scoring, no write-back workflow. | Cleansing lives in the analyst's workbook, not as governed data. |
+| MDM systems (Oracle, Itron, L+G) | VEE "Editing": estimation with substitution codes, manual edits with audit, resubmission to settlement. | Metering only; strongest audit model of the three. |
+
+Academic repair (§5) and product repair differ in what matters: products need **period
+selection, a small set of understandable operations, lineage per point, approval, and a
+published corrected copy**, not the best imputation MAE.
+
+### Gap analysis addendum
+
+10. **Corrections without a version model.** Public material shows corrections produce a
+    new dataset copy; none describes per-point lineage (which check, which method, who
+    approved), reversibility, or a diff between raw and corrected. MDM substitution codes are
+    the closest prior art and only exist in metering.
+11. **Corrections that feed back into detection.** No tool documents re-scoring a corrected
+    series against the raw one or using accepted corrections to tune thresholds.
+12. **Physics-aware repair** (balance-preserving imputation, quality-flag-aware estimation)
+    remains unaddressed (see gap 7).
+
 ## 6. Gap analysis — what nobody does well yet
 
 1. **Compression-aware checks.** No OSS tool models historian exception/compression settings,
@@ -259,7 +285,8 @@ parameters, tsfresh/TSFEL/Elementary details.
 
 ## Implications for Tabayyun
 
-The nine gaps above are the product's differentiation list. In particular: compression-aware
+The twelve gaps above (nine generic, three on correction) are the product's differentiation list. In particular: compression-aware
 checks, quality flags as input, operating-mode segmentation, fleet baselines, a labelled DQ
-benchmark corpus (which we should build and publish), and a feedback loop from user
-triage to thresholds.
+benchmark corpus (which we should build and publish), a feedback loop from user
+triage to thresholds, and corrections modelled as versioned, lineage-carrying layers rather than
+overwritten copies.

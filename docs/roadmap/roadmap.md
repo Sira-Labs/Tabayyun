@@ -11,7 +11,8 @@ Effort assumes AI-assisted development. "Solo" = one senior engineer full time.
 ## R1 — Running core (target: 12 weeks solo, 6–7 weeks with 2 people)
 
 Goal: a self-hosted install that ingests from Parquet/CSV, PI Web API and OPC UA, runs the
-30 checks on a schedule, scores series, shows findings in a dashboard, and lets a user log in
+30 checks on a schedule, scores series, shows findings in a dashboard, lets a user correct a
+selected window with lineage and see the corrected layer re-scored, and lets a user log in
 with Google.
 
 | Week | Rust core | Python API / workers | Frontend | Platform |
@@ -20,8 +21,8 @@ with Google.
 | 3–4 | baseline profile job; checks 6,10,13,14,16,17; PyO3 wheel with Arrow capsules; M4 downsampling | connector framework; Parquet/CSV and PI Web API connectors; runs, findings, scores persistence; SSE | overview, series catalogue, series detail with uPlot + findings overlay | synthetic data generator (Rust+Python parity); golden fixtures |
 | 5–6 | checks 3,12,15,18,19,20 | OPC UA connector (asyncua first, Rust later); alert rules + email/webhook; audit log | findings inbox with triage actions; suites and threshold editing with "why this threshold" | Helm chart draft; air-gap tarball script; SBOM + image signing |
 | 7–8 | checks 21–24 (related series, balance groups) | related-series suggestion job; workspace/member/team admin APIs; share by user/team | admin panel (workspaces, members, teams, audit); share dialog | pen-test prep; ASVS L2 self-assessment; threat model |
-| 9–10 | energy pack 25–30 (solar position, bins) | share links (hashed tokens, locked scope); reports export (CSV/PDF) | link viewer; reports; mobile layouts + PWA | performance run: 100k tags × 1 year synthetic; profiling |
-| 11–12 | hardening, benchmarks, docs | plugin host (sandboxed Python checks, YAML DSL) | polish, a11y pass, i18n scaffolding | beta install at one pilot site; release 0.1 |
+| 9–10 | energy pack 25–30 (solar position, bins); `repair` ops (mask, clamp, dedupe, impute.linear/like_day, align.resample, transform.affine) with lineage frames | corrections API (propose/approve/reject), corrected-layer versions in cache, re-scoring; share links (hashed tokens, locked scope) | "select window → correct" on the series chart with raw/corrected diff; link viewer; mobile layouts + PWA | performance run: 100k tags × 1 year synthetic; profiling |
+| 11–12 | hardening, benchmarks, docs | plugin host (sandboxed Python checks, YAML DSL); Parquet/SQL publish targets for corrected series; reports export (CSV/PDF) | reports; polish, a11y pass, i18n scaffolding | beta install at one pilot site; release 0.1 |
 
 Exit criteria: ≥95 % of injected faults in the synthetic corpus detected with ≤2 % false
 positives per check; 100k series profiled in under one hour on 8 cores; all security
@@ -37,8 +38,10 @@ baseline items checked; one pilot installation running.
   event-log correlation.
 - Grid pack: PMU STAT-word decoding, completeness attributes per NASPI, state-estimation
   residual import, CGMES SHACL validation hook, market-interval count checks.
-- Balance groups UI; repair/estimation with lineage (linear ≤2 h, like-day, Kalman/seasonal);
-  human feedback → threshold suggestions.
+- Balance groups UI; **RepairFlows** (scheduled, block-based: filter → impute → align →
+  publish) with approval policies; regulatory estimation methods with substitution codes
+  (UBP/AEMO/Elexon precedence), `impute.seasonal`, `impute.kalman`, `reconcile.balance`;
+  PI/OPC write-back to separate tags; human feedback → threshold suggestions.
 - Public labelled benchmark corpus of DQ faults (synthetic + open datasets: PVDAQ,
   Kelmarsh/Penmanshiel, OPSD, Elia) published under CC-BY.
 

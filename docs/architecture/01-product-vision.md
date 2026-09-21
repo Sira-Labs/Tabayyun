@@ -52,9 +52,12 @@ was silently wrong.
 
 - **R0 (research):** check catalogue, architecture, frontend and security design. *This repo state.*
 - **R1 (core):** 30 checks, Parquet/CSV + PI Web API + OPC UA connectors, scoring, dashboard,
-  Google login, workspace RBAC, alerts to email/webhook.
-- **R2 (energy):** PV, wind, metering and grid check packs; energy-balance checks; estimation/repair.
+  Google login, workspace RBAC, alerts to email/webhook, manual and rule-based corrections
+  with lineage and a corrected layer.
+- **R2 (energy):** PV, wind, metering and grid check packs; energy-balance checks; repair
+  flows with regulatory estimation methods, physics-aware imputation, write-back targets.
 - **R3 (platform):** custom Python checks, share links, admin panel, audit log, SSO/SCIM.
 
-Out of scope for now: writing corrected data back to source systems, a BPMN/workflow engine
-(use Flowable or Temporal externally), and general-purpose BI.
+Out of scope for now: overwriting data in the source system (corrections are published to
+separate tags or copies), a BPMN/workflow engine (use Flowable or Temporal externally), and
+general-purpose BI.

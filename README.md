@@ -5,7 +5,8 @@
 Tabayyun is a self-hostable platform that continuously verifies the trustworthiness of
 industrial time series: it profiles every series, runs a curated library of statistical and
 domain checks, scores the result per quality dimension, explains why a series is
-untrustworthy, and routes findings to the people who can fix them. First target vertical:
+untrustworthy, routes findings to the people who can fix them, and lets them correct windows
+with full lineage and deliver the corrected series downstream. First target vertical:
 **energy** (PV, wind, grid, metering, storage).
 
 Status: **R0 — research and design complete; implementation starts in R1.**
