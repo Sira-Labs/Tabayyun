@@ -32,13 +32,15 @@ def run_checks(
     ts_col: str = "ts",
     value_col: str = "value",
     quality_col: str | None = None,
+    ingest_col: str | None = None,
 ) -> dict[str, Any]:
     """Run checks on one series and return the report as a dict.
 
     ``meta`` needs at least ``{"id": ...}``; optional keys: ``unit``, ``kind``,
     ``expected_interval_ns``, ``physical_min``, ``physical_max``, ``resolution``,
     ``non_negative``. ``configs`` is a list of ``{"id": ..., "params": {...}}``; ``None`` runs
-    every built-in check with defaults.
+    every built-in check with defaults. ``ingest_col`` names an arrival-time column and
+    enables the latency check.
     """
     meta_json = meta if isinstance(meta, str) else json.dumps(meta)
     configs_json = None if configs is None else json.dumps(configs)
@@ -52,6 +54,7 @@ def run_checks(
             ts_col,
             value_col,
             quality_col,
+            ingest_col,
         )
     )
 

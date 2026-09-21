@@ -79,6 +79,7 @@ def run_checks(
     ts_col: str = "ts",
     value_col: str = "value",
     quality_col: str | None = None,
+    ingest_col: str | None = None,
 ) -> CheckReport:
     """Run the core checks on one series held in an Arrow table."""
     raw = tc.run_checks(
@@ -89,17 +90,22 @@ def run_checks(
         ts_col=ts_col,
         value_col=value_col,
         quality_col=quality_col,
+        ingest_col=ingest_col,
     )
     return CheckReport.model_validate(raw)
 
 
-def read_csv(data: bytes, ts_col: str, value_col: str, quality_col: str | None) -> pa.Table:
+def read_csv(
+    data: bytes, ts_col: str, value_col: str, quality_col: str | None, ingest_col: str | None = None
+) -> pa.Table:
     """Parse an uploaded CSV into an Arrow table with a UTC timestamp column.
 
     Timestamps may be ISO 8601 strings (with or without offset) or epoch integers; values are
     parsed as float64 with empty cells as null; the quality column is read as text.
     """
-    columns = [ts_col, value_col] + ([quality_col] if quality_col else [])
+    columns = (
+        [ts_col, value_col] + ([quality_col] if quality_col else []) + ([ingest_col] if ingest_col else [])
+    )
     column_types: dict[str, pa.DataType] = {value_col: pa.float64()}
     if quality_col:
         column_types[quality_col] = pa.string()
