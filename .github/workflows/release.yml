@@ -92,7 +92,7 @@ jobs:
           strip_components: 1
       - name: pull and restart
         if: steps.gate.outputs.on == 'true'
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         env:
           TABAYYUN_TAG: ${{ needs.images.outputs.tag }}
         with:
