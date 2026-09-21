@@ -36,6 +36,8 @@ pub struct Profile {
     pub noise_mad: Option<f64>,
     /// Share of samples inside perfectly linear runs of ≥ 6 samples (interpolation signature).
     pub linear_fraction: f64,
+    /// Value quantiles at 0, 5, 10, ..., 100 % (21 points) for distribution comparisons.
+    pub quantiles: Vec<f64>,
     pub quality_good: f64,
     pub quality_uncertain: f64,
     pub quality_bad: f64,
@@ -73,6 +75,7 @@ impl Profile {
             dev.sort_by(|a, b| a.partial_cmp(b).unwrap());
             p.mad = Some(quantile_f64(&dev, 0.5));
             p.distinct_values = count_distinct_sorted(&finite);
+            p.quantiles = (0..=20).map(|k| quantile_f64(&finite, k as f64 / 20.0)).collect();
         }
         p.resolution = resolution(&f.values);
         p.constant_fraction = constant_fraction(&f.values, 10);
@@ -92,11 +95,7 @@ impl Profile {
         if !rates.is_empty() {
             rates.sort_by(|a, b| a.partial_cmp(b).unwrap());
             p.rate_p999 = Some(quantile_f64(&rates, 0.999));
-            diffs.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            let med = quantile_f64(&diffs, 0.5);
-            let mut dev: Vec<f64> = diffs.iter().map(|d| (d - med).abs()).collect();
-            dev.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            p.noise_mad = Some(1.4826 * quantile_f64(&dev, 0.5) / std::f64::consts::SQRT_2);
+            p.noise_mad = robust_sigma_of_diffs(&mut diffs);
         }
         let total = n as f64;
         for q in &f.quality {
@@ -109,6 +108,31 @@ impl Profile {
         }
         p
     }
+}
+
+/// Robust noise sigma of a series: 1.4826 × MAD of signed first differences / √2, skipping
+/// pairs separated by more than `gap_cut_ns` or involving non-finite values.
+pub fn noise_sigma(ts: &[i64], values: &[f64], gap_cut_ns: i64) -> Option<f64> {
+    let mut diffs = Vec::with_capacity(values.len());
+    for i in 1..values.len().min(ts.len()) {
+        let dt = ts[i] - ts[i - 1];
+        if dt <= 0 || dt > gap_cut_ns || !values[i].is_finite() || !values[i - 1].is_finite() {
+            continue;
+        }
+        diffs.push(values[i] - values[i - 1]);
+    }
+    robust_sigma_of_diffs(&mut diffs)
+}
+
+fn robust_sigma_of_diffs(diffs: &mut [f64]) -> Option<f64> {
+    if diffs.is_empty() {
+        return None;
+    }
+    diffs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let med = quantile_f64(diffs, 0.5);
+    let mut dev: Vec<f64> = diffs.iter().map(|d| (d - med).abs()).collect();
+    dev.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    Some(1.4826 * quantile_f64(&dev, 0.5) / std::f64::consts::SQRT_2)
 }
 
 fn quantile_i64(sorted: &[i64], q: f64) -> i64 {

@@ -40,6 +40,9 @@ struct RunArgs {
     value_col: String,
     #[arg(long)]
     quality_col: Option<String>,
+    /// Column with the time each sample arrived (enables tby.latency).
+    #[arg(long)]
+    ingest_col: Option<String>,
     #[arg(long, default_value = "series")]
     series_id: String,
     /// Engineering unit (enables unit-based limits, e.g. "%", "m3/h").
@@ -125,7 +128,7 @@ fn run_cmd(a: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
         None => Registry::default_configs(),
     };
     let out = Registry::run(&configs, &frame, &ctx)?;
-    let score = Scorer::default().score(&frame.meta.id, &out.findings);
+    let score = Scorer::default().score_window(&frame.meta.id, &out.findings, ctx.window);
     let report = serde_json::json!({
         "series_id": frame.meta.id,
         "n_samples": frame.len(),
@@ -151,20 +154,26 @@ fn load(a: &RunArgs, meta: SeriesMeta) -> Result<SeriesFrame, Box<dyn std::error
             let mut ts = Vec::new();
             let mut values = Vec::new();
             let mut quality = Vec::new();
+            let mut ingest: Vec<i64> = Vec::new();
             for batch in reader {
                 let b = batch?;
-                let f = SeriesFrame::from_record_batch(
+                let f = SeriesFrame::from_record_batch_ext(
                     meta.clone(),
                     &b,
                     &a.ts_col,
                     &a.value_col,
                     a.quality_col.as_deref(),
+                    a.ingest_col.as_deref(),
                 )?;
                 ts.extend(f.ts);
                 values.extend(f.values);
                 quality.extend(f.quality);
+                if let Some(i) = f.ingest_ts {
+                    ingest.extend(i);
+                }
             }
-            Ok(SeriesFrame::new(meta, ts, values, quality)?)
+            let frame = SeriesFrame::new(meta, ts, values, quality)?;
+            Ok(if a.ingest_col.is_some() { frame.with_ingest_ts(ingest)? } else { frame })
         }
         _ => load_csv(a, meta),
     }
@@ -179,16 +188,22 @@ fn load_csv(a: &RunArgs, meta: SeriesMeta) -> Result<SeriesFrame, Box<dyn std::e
     let ti = idx(&a.ts_col)?;
     let vi = idx(&a.value_col)?;
     let qi = a.quality_col.as_deref().map(idx).transpose()?;
+    let ii = a.ingest_col.as_deref().map(idx).transpose()?;
     let mut ts = Vec::new();
     let mut values = Vec::new();
     let mut quality = Vec::new();
+    let mut ingest = Vec::new();
     for rec in rdr.records() {
         let rec = rec?;
         ts.push(parse_ts(rec.get(ti).unwrap_or(""))?);
         values.push(rec.get(vi).map(|s| s.trim().parse::<f64>().unwrap_or(f64::NAN)).unwrap_or(f64::NAN));
         quality.push(qi.and_then(|i| rec.get(i)).and_then(Quality::parse).unwrap_or(Quality::Good));
+        if let Some(i) = ii {
+            ingest.push(parse_ts(rec.get(i).unwrap_or(""))?);
+        }
     }
-    Ok(SeriesFrame::new(meta, ts, values, quality)?)
+    let frame = SeriesFrame::new(meta, ts, values, quality)?;
+    Ok(if ii.is_some() { frame.with_ingest_ts(ingest)? } else { frame })
 }
 
 fn parse_ts(s: &str) -> Result<i64, Box<dyn std::error::Error>> {

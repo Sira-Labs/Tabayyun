@@ -39,6 +39,12 @@ impl Registry {
             checks::rate_of_change::ID,
             checks::resolution_loss::ID,
             checks::interpolation_artifacts::ID,
+            checks::latency::ID,
+            checks::scale_shift::ID,
+            checks::noise_level::ID,
+            checks::level_drift::ID,
+            checks::distribution_drift::ID,
+            checks::changepoint::ID,
         ]
     }
 
@@ -76,6 +82,14 @@ impl Registry {
             checks::interpolation_artifacts::ID => {
                 parse::<checks::interpolation_artifacts::InterpolationArtifacts>(id, params)
             }
+            checks::latency::ID => parse::<checks::latency::Latency>(id, params),
+            checks::scale_shift::ID => parse::<checks::scale_shift::ScaleShift>(id, params),
+            checks::noise_level::ID => parse::<checks::noise_level::NoiseLevel>(id, params),
+            checks::level_drift::ID => parse::<checks::level_drift::LevelDrift>(id, params),
+            checks::distribution_drift::ID => {
+                parse::<checks::distribution_drift::DistributionDrift>(id, params)
+            }
+            checks::changepoint::ID => parse::<checks::changepoint::Changepoint>(id, params),
             other => Err(Error::UnknownCheck(other.to_string())),
         }
     }
