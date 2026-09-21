@@ -57,7 +57,7 @@ print(report["score"]["overall"], len(report["findings"]))
 | Security baseline (ASVS L2) | [docs/frontend/02-security-baseline.md](docs/frontend/02-security-baseline.md) |
 | Roadmap and repo layout | [docs/roadmap/roadmap.md](docs/roadmap/roadmap.md) |
 | Deployment (images, compose, CD) | [deploy/README.md](deploy/README.md) |
-| Decisions (ADRs 0001–0010) | [docs/adr/](docs/adr/) |
+| Decisions (ADRs 0001–0011) | [docs/adr/](docs/adr/) |
 
 Research reports (with verified sources):
 
