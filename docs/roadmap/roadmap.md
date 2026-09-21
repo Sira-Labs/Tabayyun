@@ -21,6 +21,12 @@ Progress log:
   (PELT on daily medians); scoring v2 merges overlapping findings per dimension; release
   pipeline builds `tabayyun-api` and `tabayyun-web` images to GHCR with SBOM and provenance,
   production compose bundle with Caddy (auto-TLS, security headers), optional SSH deploy job.
+- **2026-09-21** sprint 4 (in progress): release images fixed and deployed to CapRover
+  (Hetzner) from GHCR; research 05 (oil and gas); CLI accepts historian-style timestamps and
+  negative limits; `flatline` reports a frame frozen for its whole window even when the
+  profile is constant; `linear_runs` no longer overlap (linear share was reported above
+  100 % on compressed 1 Hz data); test datasets (UCI household, OPSD, Petrobras 3W) with
+  measured expectations.
 
 Goal: a self-hosted install that ingests from Parquet/CSV, PI Web API and OPC UA, runs the
 30 checks on a schedule, scores series, shows findings in a dashboard, lets a user correct a
@@ -54,8 +60,15 @@ baseline items checked; one pilot installation running.
   publish) with approval policies; regulatory estimation methods with substitution codes
   (UBP/AEMO/Elexon precedence), `impute.seasonal`, `impute.kalman`, `reconcile.balance`;
   PI/OPC write-back to separate tags; human feedback → threshold suggestions.
+- Oil and gas pack (`docs/research/05-oil-gas-domain-quality.md`): shut-in / valve-state
+  masking series, PI ExcDev/CompDev/CompMax import with compression-aware `flatline`,
+  `interpolation_artifacts` and `resolution_loss`, `redundant_disagreement` with SIS
+  discrepancy override, `balance_residual` with VDI 2048-style propagated uncertainty,
+  allocation imbalance and well-test-vs-MPFM checks, meter-factor drift from proving history,
+  OPC `Good_LocalOverride` / `Good_Clamped` sub-findings, alarm-rate KPIs (EEMUA 191 /
+  ISA-18.2).
 - Public labelled benchmark corpus of DQ faults (synthetic + open datasets: PVDAQ,
-  Kelmarsh/Penmanshiel, OPSD, Elia) published under CC-BY.
+  Kelmarsh/Penmanshiel, OPSD, Elia, Petrobras 3W) published under CC-BY.
 
 ## R3 — Platform (8–12 weeks)
 

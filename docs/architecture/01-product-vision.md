@@ -11,7 +11,9 @@ can fix them.
 Initial target vertical: **energy** (solar PV, wind, grid/SCADA, smart metering, storage),
 because the domain has published validation standards, large open datasets, and a
 recurring pain: forecasts, settlements and asset-performance analytics built on data that
-was silently wrong.
+was silently wrong. Second vertical: **oil and gas** (wells and subsea, process plants,
+pipelines, fiscal and allocation metering), the home of the process historians the core is
+built for; its specifics are in `docs/research/05-oil-gas-domain-quality.md`.
 
 ## Why now
 
@@ -46,6 +48,7 @@ was silently wrong.
 | Data scientist / forecaster | Which series can I trust for training and inference? | Filters series by score, exports clean windows, subscribes to drift alerts. |
 | O&M / performance engineer (PV, wind) | Are sensors (pyranometers, anemometers, meters) lying? Is the power curve shifting? | Reviews domain findings, schedules calibration. |
 | Metering / settlement analyst | Are interval reads complete, plausible and consistent with register reads? | Runs VEE-style checks, estimates gaps, signs off. |
+| Production / metering engineer (oil and gas) | Which well tags are frozen or shut in? Do MPFM, well tests and fiscal export reconcile? Is the historian compressing away what I need? | Reviews frozen-tag and balance findings, adjusts compression settings, schedules provings and well tests. |
 | Platform admin | Who can see what? Are connectors healthy? What did the system do? | Manages users, roles, connectors, audit log. |
 
 ## Scope of the first releases
@@ -56,6 +59,9 @@ was silently wrong.
   with lineage and a corrected layer.
 - **R2 (energy):** PV, wind, metering and grid check packs; energy-balance checks; repair
   flows with regulatory estimation methods, physics-aware imputation, write-back targets.
+- **R2 (oil and gas):** shut-in and valve-state masking, compression-aware checks fed by PI
+  tag attributes, redundant-transmitter and balance checks with propagated uncertainty,
+  allocation and well-test reconciliation, quality-code semantics for OPC overrides.
 - **R3 (platform):** custom Python checks, share links, admin panel, audit log, SSO/SCIM.
 
 Out of scope for now: overwriting data in the source system (corrections are published to

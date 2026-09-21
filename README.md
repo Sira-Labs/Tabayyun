@@ -56,7 +56,7 @@ print(report["score"]["overall"], len(report["findings"]))
 | Frontend design | [docs/frontend/01-frontend-design.md](docs/frontend/01-frontend-design.md) |
 | Security baseline (ASVS L2) | [docs/frontend/02-security-baseline.md](docs/frontend/02-security-baseline.md) |
 | Roadmap and repo layout | [docs/roadmap/roadmap.md](docs/roadmap/roadmap.md) |
-| Deployment (images, compose, CD) | [deploy/README.md](deploy/README.md) |
+| Deployment (images, compose, CD) | [deploy/README.md](deploy/README.md), [CapRover](deploy/caprover.md) |
 | Decisions (ADRs 0001–0012) | [docs/adr/](docs/adr/) |
 
 Research reports (with verified sources):
@@ -65,6 +65,7 @@ Research reports (with verified sources):
 2. [Energy-domain data quality: metering, PV, wind, grid, storage, markets](docs/research/02-energy-domain-quality.md)
 3. [Frontend, auth, RBAC, sharing and security stack](docs/research/03-frontend-auth-security.md)
 4. [Backend, Rust compute core, storage, connectors, plugins](docs/research/04-backend-core-stack.md)
+5. [Oil and gas data quality: wells, historian compression, fiscal and allocation metering, pipelines](docs/research/05-oil-gas-domain-quality.md)
 
 ## Stack (decided)
 

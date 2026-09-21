@@ -13,6 +13,11 @@ requires `TABAYYUN_TAG`; the CD job sets it to the `sha-<short>` tag of the imag
 built, so a deployment never depends on a moving tag. The TimescaleDB image is pinned by
 digest; bump it deliberately, together with a database upgrade note.
 
+## Run on CapRover
+
+See [caprover.md](caprover.md): three apps from the published images, TLS by CapRover,
+and a `deploy-caprover` job in the release workflow.
+
 ## Run on any Docker host
 
 ```bash

@@ -48,9 +48,9 @@ struct RunArgs {
     /// Engineering unit (enables unit-based limits, e.g. "%", "m3/h").
     #[arg(long)]
     unit: Option<String>,
-    #[arg(long)]
+    #[arg(long, allow_hyphen_values = true)]
     physical_min: Option<f64>,
-    #[arg(long)]
+    #[arg(long, allow_hyphen_values = true)]
     physical_max: Option<f64>,
     /// Expected sampling interval, e.g. "1m", "15m". Default: derived from data.
     #[arg(long)]
@@ -220,11 +220,12 @@ fn parse_ts(s: &str) -> Result<i64, Box<dyn std::error::Error>> {
             _ => n,
         });
     }
-    if let Ok(t) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
-        return Ok(t.and_utc().timestamp_nanos_opt().ok_or("timestamp out of range")?);
-    }
-    if let Ok(t) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
-        return Ok(t.and_utc().timestamp_nanos_opt().ok_or("timestamp out of range")?);
+    // Naive timestamps (historian exports: PI, OPC, Petrobras 3W) are taken as UTC. `%.f`
+    // also matches an absent fraction, so one pattern per separator covers both.
+    for fmt in ["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S%.f"] {
+        if let Ok(t) = chrono::NaiveDateTime::parse_from_str(s, fmt) {
+            return Ok(t.and_utc().timestamp_nanos_opt().ok_or("timestamp out of range")?);
+        }
     }
     Err(format!("cannot parse timestamp `{s}`").into())
 }
@@ -280,4 +281,20 @@ fn synth_cmd(a: SynthArgs) -> Result<(), Box<dyn std::error::Error>> {
     w.flush()?;
     eprintln!("wrote {} samples to {}", f.len(), a.out.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_ts;
+
+    #[test]
+    fn parses_historian_export_timestamps() {
+        let base = parse_ts("2017-02-01T01:02:07Z").unwrap();
+        assert_eq!(parse_ts("2017-02-01 01:02:07").unwrap(), base);
+        assert_eq!(parse_ts("2017-02-01 01:02:07.000000000").unwrap(), base);
+        assert_eq!(parse_ts("2017-02-01T01:02:07.5").unwrap(), base + 500_000_000);
+        assert_eq!(parse_ts("2017-02-01T02:02:07+01:00").unwrap(), base);
+        assert_eq!(parse_ts("1485910927").unwrap(), base);
+        assert!(parse_ts("01/02/2017 01:02").is_err());
+    }
 }
