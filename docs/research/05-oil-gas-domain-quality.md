@@ -37,7 +37,7 @@ all-null columns; frozen variables as one repeated value.
 
 | Check | Rule | Default / source |
 |---|---|---|
-| Frozen tag | A measurement that holds one value for an entire window is a stuck sensor or a dead historian link, even if the baseline profile (possibly computed on the same period) says "constant" | `tby.flatline` frozen rule: ≥ 99 % of usable samples equal the first, any window; found on 3W real instances (see §9) |
+| Frozen tag | A measurement that holds one value for an entire window is a stuck sensor or a dead historian link, even if the baseline profile (possibly computed on the same period) says "constant" | `tby.flatline` frozen rule: ≥ 99 % of usable samples equal the first, once the frame has at least `min_run` (default 10) usable samples; found on 3W real instances (see §9) |
 | Shut-in awareness | Flat, zero or floor values while the well is shut in are not faults. Use DHSV/master/wing valve states (0 = closed) and choke opening 0 % to mask flatline, non-negative and range findings | 3W valve-state variables; a `well_state` companion series |
 | Pressure/temperature consistency | Downhole P-PDG and T-PDG move together; upstream choke pressure ≥ downstream; a step in one without the other is instrumentation | `tby.correlation_break` (sprint 4) on (P-PDG, T-PDG), (P-MON-CKP, P-JUS-CKP) |
 | Choke vs flow | Choke opening > 0 with zero gas-lift flow (QGL) for hours, or flow with choke 0 %, is a metering or tag-mapping fault | cross-series rule; needs QGL and ABER-CKGL |

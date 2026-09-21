@@ -206,6 +206,8 @@ fn load_csv(a: &RunArgs, meta: SeriesMeta) -> Result<SeriesFrame, Box<dyn std::e
     Ok(if ii.is_some() { frame.with_ingest_ts(ingest)? } else { frame })
 }
 
+/// Parse one timestamp cell into ns since the Unix epoch: RFC 3339, epoch integers (unit
+/// inferred from magnitude) or naive `YYYY-MM-DD[ T]HH:MM:SS[.fraction]` taken as UTC.
 fn parse_ts(s: &str) -> Result<i64, Box<dyn std::error::Error>> {
     let s = s.trim();
     if let Ok(t) = s.parse::<DateTime<Utc>>() {
@@ -287,6 +289,7 @@ fn synth_cmd(a: SynthArgs) -> Result<(), Box<dyn std::error::Error>> {
 mod tests {
     use super::parse_ts;
 
+    /// Historian exports mix separators, fractions, offsets and epoch integers.
     #[test]
     fn parses_historian_export_timestamps() {
         let base = parse_ts("2017-02-01T01:02:07Z").unwrap();

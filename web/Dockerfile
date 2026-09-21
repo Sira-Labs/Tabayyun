@@ -2,7 +2,7 @@
 FROM node:22-bookworm-slim AS build
 RUN corepack enable
 WORKDIR /app
-COPY web/package.json web/pnpm-lock.yaml ./
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY web ./
 RUN pnpm build
