@@ -1,0 +1,29 @@
+# Development infrastructure only: Postgres with TimescaleDB and Keycloak.
+# The API and web run on the host (make api-dev / make web-dev). Production bundles add
+# api, worker and caddy services; see docs/architecture/03-system-architecture.md.
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg17
+    environment:
+      POSTGRES_USER: tabayyun
+      POSTGRES_PASSWORD: tabayyun   # dev only; prod uses secrets
+      POSTGRES_DB: tabayyun
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tabayyun"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3
+    command: ["start-dev", "--http-port=8080"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin   # dev only
+      KC_DB: dev-file
+    ports: ["8080:8080"]
+
+volumes:
+  pgdata:
