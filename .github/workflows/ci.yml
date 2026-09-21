@@ -25,10 +25,24 @@ jobs:
       - run: cargo test
       - run: cargo run -q --bin tabayyun -- synth --out /tmp/f.csv --faults gap,flatline,nans
       - run: cargo run -q --bin tabayyun -- run --input /tmp/f.csv --quality-col quality --unit "%" | python3 -c "import json,sys; r=json.load(sys.stdin); assert r['findings'], 'expected findings'; print(r['score'])"
-      - name: audit
-        run: |
-          cargo install cargo-audit --locked
-          cargo audit
+      - uses: taiki-e/install-action@cargo-audit
+      - run: cargo audit
+
+  bindings:
+    name: python bindings
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: core/tabayyun-py }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: core }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python -m venv .venv && . .venv/bin/activate && pip install maturin pytest "pyarrow>=17" "polars>=1.2"
+      - run: . .venv/bin/activate && maturin develop --release
+      - run: . .venv/bin/activate && pytest -q
 
   api:
     name: python api
@@ -37,6 +51,9 @@ jobs:
       run: { working-directory: api }
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: core }
       - uses: astral-sh/setup-uv@v5
         with: { enable-cache: true }
       - run: uv python install 3.12
