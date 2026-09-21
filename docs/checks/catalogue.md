@@ -160,7 +160,8 @@ Profiles are versioned and stored; findings link to the profile they used.
   `atol` auto; `frozen_fraction` 0.99; `ignore_floor` true; `floor_fraction` 0.05;
   `min_floor_runs` 3; `floor_run_factor` 3.0; OpenOA uses 3 intervals for 10-min SCADA.
 - **Evidence:** run start/end, run length, value, resolution, floor value, whether the run
-  rests on the floor, compression mode. Metric `floor_runs` counts the idling runs skipped.
+  rests on the floor (compression mode once the R2 connector metadata exists). Metric
+  `floor_runs` counts the idling runs skipped.
 - **Sources:** pvanalytics `stale_values_diff(window=6)`; OpenOA `unresponsive_flag(3)`; AVEVA `Range()==0`; PMU flat 60.00 Hz; OPSD DE solar (1,149 nightly zero runs, none a fault); Petrobras 3W (frozen downhole gauge).
 
 ### 9. `tby.physical_range` — Outside physically possible limits
