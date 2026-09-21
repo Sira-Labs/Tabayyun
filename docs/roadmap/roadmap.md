@@ -8,7 +8,9 @@ Effort assumes AI-assisted development. "Solo" = one senior engineer full time.
   catalogue, system architecture, authz/sharing design, frontend design, security baseline,
   ADRs 0001–0009.
 
-## R1 — Running core (target: 12 weeks solo, 6–7 weeks with 2 people)
+Weekly sprint breakdown with stories and dates: `docs/roadmap/sprints.md`.
+
+## R1 — Running core (sprints 1–13, weekly; see `sprints.md`)
 
 Progress log:
 - **2026-09-21** sprint 1: Rust workspace, frame/profile/score/synth, checks 1, 2, 4, 5, 7,
@@ -46,7 +48,7 @@ Exit criteria: ≥95 % of injected faults in the synthetic corpus detected with 
 positives per check; 100k series profiled in under one hour on 8 cores; all security
 baseline items checked; one pilot installation running.
 
-## R2 — Energy depth (8–10 weeks)
+## R2 — Energy and oil-and-gas depth (sprints 14–18)
 
 - Metering pack: VEE rule set (UBP/AEMO/Elexon presets), estimation methods with substitution
   types, DST interval-count rules, estimated-share reporting.
@@ -70,7 +72,7 @@ baseline items checked; one pilot installation running.
 - Public labelled benchmark corpus of DQ faults (synthetic + open datasets: PVDAQ,
   Kelmarsh/Penmanshiel, OPSD, Elia, Petrobras 3W) published under CC-BY.
 
-## R3 — Platform (8–12 weeks)
+## R3 — Platform (sprints 19–22)
 
 - Enterprise SSO per org (OIDC/SAML), SCIM (after IdP preview testing), API tokens.
 - Fleet baselines (template-level thresholds), operating-mode segmentation.
