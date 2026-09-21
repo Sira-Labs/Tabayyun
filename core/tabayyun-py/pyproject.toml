@@ -7,6 +7,7 @@ name = "tabayyun-core"
 version = "0.1.0"
 description = "Tabayyun time-series data-quality core (Rust) with Arrow-native Python bindings"
 requires-python = ">=3.11"
+license = "Apache-2.0"
 classifiers = ["Programming Language :: Rust", "Programming Language :: Python :: 3"]
 dependencies = []
 

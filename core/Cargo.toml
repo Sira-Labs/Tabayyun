@@ -6,7 +6,7 @@ members = ["tabayyun-core", "tabayyun-cli", "tabayyun-py"]
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.88"
-license = "UNLICENSED"
+license = "Apache-2.0"
 repository = "https://github.com/thedatadudech/Tabayyun"
 
 [workspace.dependencies]

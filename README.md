@@ -13,6 +13,22 @@ Status: **R1 sprint 3 in progress.** The Rust core runs 20 of the 30 catalogue c
 as a Python wheel, the API + web run the checks on an uploaded CSV, and the release
 pipeline publishes deployable images to GHCR (see `deploy/README.md`).
 
+## Why the name
+
+*Tabayyun* (تبيّن) is the Arabic verbal noun of *tabayyana*, from the root
+*b-y-n* (ب‑ي‑ن), which carries the sense of clarity and distinction: *bayyin* is "clear,
+evident", *bayān* is "clear exposition". The form-V verb is reflexive, so *tabayyana* means
+to seek that clarity for oneself: to look into a matter until it is evident, to ascertain,
+to verify.
+
+The word is best known from the Qur'an (al-Ḥujurāt 49:6), which instructs that when a report
+arrives from an unreliable source, one should *fa-tabayyanū*, verify it, "lest you harm a
+people out of ignorance and then regret what you did". That is exactly the posture this
+project takes towards data: a sensor value, a historian export or a meter reading is a report
+from a source of unknown reliability, and acting on it (billing, dispatch, model training,
+a regulatory filing) without verifying it first causes harm that is expensive to undo.
+Tabayyun does the verifying, and explains what it found, before the data is acted on.
+
 ## Quick start
 
 ```bash
@@ -57,7 +73,7 @@ print(report["score"]["overall"], len(report["findings"]))
 | Security baseline (ASVS L2) | [docs/frontend/02-security-baseline.md](docs/frontend/02-security-baseline.md) |
 | Roadmap and repo layout | [docs/roadmap/roadmap.md](docs/roadmap/roadmap.md) |
 | Deployment (images, compose, CD) | [deploy/README.md](deploy/README.md), [CapRover](deploy/caprover.md) |
-| Decisions (ADRs 0001–0011) | [docs/adr/](docs/adr/) |
+| Decisions (ADRs 0001–0012) | [docs/adr/](docs/adr/) |
 
 Research reports (with verified sources):
 
@@ -81,6 +97,12 @@ Research reports (with verified sources):
 Explain, don't just flag · opinionated defaults with transparent thresholds · series first ·
 local by default · secure by design · extensible with sandboxed Python checks.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, [SECURITY.md](SECURITY.md) for
+reporting vulnerabilities privately, and the [milestones](https://github.com/thedatadudech/Tabayyun/milestones)
+for what is planned next.
+
 ## Licence
 
-To be decided before R1 code lands.
+[Apache License 2.0](LICENSE) (ADR-0012). Contributions are accepted under the same licence.
