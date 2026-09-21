@@ -9,8 +9,8 @@ untrustworthy, routes findings to the people who can fix them, and lets them cor
 with full lineage and deliver the corrected series downstream. First target vertical:
 **energy** (PV, wind, grid, metering, storage).
 
-Status: **R1 sprint 1 in progress.** The Rust core runs the first eight structural checks
-end to end on CSV/Parquet files; API and web are skeletons.
+Status: **R1 sprint 2 in progress.** The Rust core runs 14 checks end to end on CSV/Parquet
+files, ships as a Python wheel, and the API + web run the checks on an uploaded CSV.
 
 ## Quick start
 
@@ -25,9 +25,20 @@ make api-dev              # http://localhost:8000/api/docs
 make web-dev              # http://localhost:5173
 ```
 
-Checks implemented so far: `tby.completeness`, `tby.staleness`, `tby.timestamp_integrity`,
-`tby.sampling_regularity`, `tby.value_type`, `tby.flatline`, `tby.physical_range`,
-`tby.non_negative` (catalogue #1, 2, 4, 5, 7, 8, 9, 11).
+Checks implemented so far (catalogue numbers in brackets): `tby.completeness` (1),
+`tby.staleness` (2), `tby.timestamp_integrity` (4), `tby.sampling_regularity` (5),
+`tby.quality_flags` (6), `tby.value_type` (7), `tby.flatline` (8), `tby.physical_range` (9),
+`tby.operational_range` (10), `tby.non_negative` (11), `tby.spikes` (13),
+`tby.rate_of_change` (14), `tby.resolution_loss` (16), `tby.interpolation_artifacts` (17).
+
+From Python:
+
+```python
+import tabayyun_core as tc          # pip install from core/tabayyun-py (maturin)
+batch = tc.synth(n=2880, faults=["gap", "flatline", "spikes"])   # or any pyarrow/polars frame
+report = tc.run_checks(batch, {"id": "demo", "unit": "m3/h"}, quality_col="quality")
+print(report["score"]["overall"], len(report["findings"]))
+```
 
 ## Documentation
 

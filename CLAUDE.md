@@ -5,7 +5,7 @@ Self-hostable time-series data-quality platform. Read `docs/` before changing de
 `docs/adr/` (decisions; add a new ADR rather than silently deviating).
 
 ## Layout
-- `core/` Rust workspace: `tabayyun-core` (frame, profile, checks, score, synth), `tabayyun-cli` (`tabayyun` binary).
+- `core/` Rust workspace: `tabayyun-core` (frame, profile, checks, score, downsample, synth), `tabayyun-cli` (`tabayyun` binary), `tabayyun-py` (PyO3 wheel `tabayyun_core`, Arrow PyCapsule in/out).
 - `api/` Python 3.11+ FastAPI (uv). `src/tabayyun/`, tests in `tests/`.
 - `web/` Vite + React 19 + TanStack + Tailwind v4 SPA (pnpm).
 - `deploy/` compose files. `docs/` design and research.
@@ -13,12 +13,14 @@ Self-hostable time-series data-quality platform. Read `docs/` before changing de
 ## Commands
 - `make lint` / `make test` run everything. `make demo` runs the checks on a synthetic faulty series.
 - Rust: `cd core && cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check`
-- Python: `cd api && uv sync --extra dev && uv run pytest -q && uv run ruff check . && uv run mypy`
+- Python: `cd api && uv sync --extra dev && uv run pytest -q && uv run ruff check . && uv run mypy` (uv builds the core wheel from `../core/tabayyun-py`; Rust toolchain required)
+- Bindings: `cd core/tabayyun-py && VIRTUAL_ENV=../../api/.venv ../../api/.venv/bin/maturin develop --release && ../../api/.venv/bin/pytest -q`
 - Web: `cd web && pnpm install --frozen-lockfile && pnpm lint && pnpm build`
 
 ## Conventions
 - Checks are pure (no I/O); every check has synthetic-fault unit tests; every finding has evidence JSON and a plain-language summary.
 - Timestamps are `i64` ns since epoch UTC. NaN = null. Quality is normalised to good/uncertain/bad/estimated.
+- Arrow is pinned to the major version pyo3-arrow supports (currently 59); bump both together.
 - Never overwrite raw data; corrections are versioned layers (ADR-0010). Reads name a layer explicitly.
 - No secrets in code or config; env vars only; prod refuses placeholders.
 - Semantic commit messages (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `test:`).

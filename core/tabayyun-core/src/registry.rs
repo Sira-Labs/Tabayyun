@@ -33,6 +33,12 @@ impl Registry {
             checks::flatline::ID,
             checks::physical_range::ID,
             checks::non_negative::ID,
+            checks::quality_flags::ID,
+            checks::operational_range::ID,
+            checks::spikes::ID,
+            checks::rate_of_change::ID,
+            checks::resolution_loss::ID,
+            checks::interpolation_artifacts::ID,
         ]
     }
 
@@ -62,6 +68,14 @@ impl Registry {
             checks::flatline::ID => parse::<checks::flatline::Flatline>(id, params),
             checks::physical_range::ID => parse::<checks::physical_range::PhysicalRange>(id, params),
             checks::non_negative::ID => parse::<checks::non_negative::NonNegative>(id, params),
+            checks::quality_flags::ID => parse::<checks::quality_flags::QualityFlags>(id, params),
+            checks::operational_range::ID => parse::<checks::operational_range::OperationalRange>(id, params),
+            checks::spikes::ID => parse::<checks::spikes::Spikes>(id, params),
+            checks::rate_of_change::ID => parse::<checks::rate_of_change::RateOfChange>(id, params),
+            checks::resolution_loss::ID => parse::<checks::resolution_loss::ResolutionLoss>(id, params),
+            checks::interpolation_artifacts::ID => {
+                parse::<checks::interpolation_artifacts::InterpolationArtifacts>(id, params)
+            }
             other => Err(Error::UnknownCheck(other.to_string())),
         }
     }
