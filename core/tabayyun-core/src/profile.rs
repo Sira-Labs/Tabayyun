@@ -257,6 +257,7 @@ mod tests {
     use crate::frame::SeriesMeta;
     use crate::time::NS_PER_MIN;
 
+    /// Runs that meet at a corner sample must not both claim it.
     #[test]
     fn adjoining_linear_runs_do_not_overlap() {
         // Slope 1 for 20 samples, then slope 2 for 20 samples, then slope 3: three runs that

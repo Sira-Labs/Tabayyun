@@ -35,3 +35,10 @@ updates:
     directories: [/api, /web, /deploy]
     schedule: { interval: weekly, day: monday }
     labels: ["area: deploy", "dependencies"]
+    # Node majors are taken by hand on the LTS cadence (25+ dropped Corepack); the
+    # TimescaleDB image is pinned by digest and bumped with a migration check.
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+      - dependency-name: timescale/timescaledb
+        update-types: ["version-update:semver-major"]

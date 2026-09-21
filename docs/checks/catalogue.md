@@ -152,14 +152,16 @@ Profiles are versioned and stored; findings link to the profile they used.
   state: at least `floor_fraction` of the usable samples sit on it and at least
   `min_floor_runs` runs rest on it (solar generation at night, a pump that is off). A floor
   run longer than `floor_run_factor` × the median floor run is still reported (a night that
-  lasts three days is an outage). Compression-aware: if the source uses
-  deadband/swinging-door compression, a flat run with no archived points is not evidence of
-  stuck; require archived samples inside the run or a run longer than `CompMax`.
+  lasts three days is an outage). Planned for R2 (needs connector metadata the check does not
+  receive yet): compression awareness, i.e. if the source uses deadband/swinging-door
+  compression, a flat run with no archived points is not evidence of stuck; require archived
+  samples inside the run or a run longer than `CompMax`, and report the compression mode.
 - **Params:** `min_run` 6 (pvanalytics) to 10; `min_duration` auto = max(1 h, 10 × interval);
   `atol` auto; `frozen_fraction` 0.99; `ignore_floor` true; `floor_fraction` 0.05;
   `min_floor_runs` 3; `floor_run_factor` 3.0; OpenOA uses 3 intervals for 10-min SCADA.
 - **Evidence:** run start/end, run length, value, resolution, floor value, whether the run
-  rests on the floor, compression mode. Metric `floor_runs` counts the idling runs skipped.
+  rests on the floor (compression mode once the R2 connector metadata exists). Metric
+  `floor_runs` counts the idling runs skipped.
 - **Sources:** pvanalytics `stale_values_diff(window=6)`; OpenOA `unresponsive_flag(3)`; AVEVA `Range()==0`; PMU flat 60.00 Hz; OPSD DE solar (1,149 nightly zero runs, none a fault); Petrobras 3W (frozen downhole gauge).
 
 ### 9. `tby.physical_range` — Outside physically possible limits

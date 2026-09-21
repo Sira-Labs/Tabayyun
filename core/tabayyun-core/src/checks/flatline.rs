@@ -337,6 +337,7 @@ mod tests {
         assert_eq!(fs[0].evidence["on_floor"], false);
     }
 
+    /// A setpoint is never stuck; a measurement frozen for the whole frame always is.
     #[test]
     fn setpoint_skipped_but_frozen_measurement_reported_even_with_constant_profile() {
         let mut f = base(1440);
@@ -354,6 +355,7 @@ mod tests {
         assert_eq!(ids(&Flatline::default().run(&f, &ctx(&f)).unwrap(), ID).len(), 1);
     }
 
+    /// A series that is constant most of the time but not frozen is legitimately constant.
     #[test]
     fn mostly_constant_series_with_constant_profile_skipped() {
         // An off-state signal that is constant 60 % of the time and noisy otherwise is
