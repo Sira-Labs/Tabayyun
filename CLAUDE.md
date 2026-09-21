@@ -24,3 +24,4 @@ Self-hostable time-series data-quality platform. Read `docs/` before changing de
 - Never overwrite raw data; corrections are versioned layers (ADR-0010). Reads name a layer explicitly.
 - No secrets in code or config; env vars only; prod refuses placeholders.
 - Semantic commit messages (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `test:`).
+- Licence is Apache-2.0 (ADR-0012). Workflow, PR checklist and branch rules: `CONTRIBUTING.md`.

@@ -1,0 +1,42 @@
+name: Check proposal
+description: Propose a new data-quality check or a change to an existing check's defaults
+labels: ["type: check", "needs: design"]
+body:
+  - type: input
+    id: id
+    attributes:
+      label: Check id
+      description: Namespaced as in the catalogue, e.g. `tby.seasonality_break` or `energy.pv.clipping`.
+    validations:
+      required: true
+  - type: dropdown
+    id: dimension
+    attributes:
+      label: Primary quality dimension
+      options: [completeness, timeliness, integrity, validity, plausibility, accuracy, consistency]
+    validations:
+      required: true
+  - type: textarea
+    id: fault
+    attributes:
+      label: Fault it detects
+      description: The real-world failure mode, how often it occurs and what damage it causes downstream. Cite sources where possible (see docs/research/).
+    validations:
+      required: true
+  - type: textarea
+    id: method
+    attributes:
+      label: Method and default thresholds
+      description: The statistic, which baseline-profile fields it needs, and why the default threshold is what it is.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and summary
+      description: What the finding's evidence JSON contains and an example plain-language summary.
+  - type: textarea
+    id: synth
+    attributes:
+      label: Synthetic fault for tests
+      description: How `synth` would inject this fault so the check has a unit test.

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/thedatadudech/Tabayyun/security/advisories/new
+    about: Report a vulnerability privately. Do not open a public issue.
+  - name: Design documents
+    url: https://github.com/thedatadudech/Tabayyun/tree/main/docs
+    about: Read the architecture, check catalogue and ADRs before proposing a change.

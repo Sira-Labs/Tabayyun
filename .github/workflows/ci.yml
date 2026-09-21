@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded runs on the same branch or pull request.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   core:
     name: rust core
@@ -15,7 +20,7 @@ jobs:
     defaults:
       run: { working-directory: core }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with: { components: "rustfmt, clippy" }
       - uses: Swatinem/rust-cache@v2
@@ -34,11 +39,11 @@ jobs:
     defaults:
       run: { working-directory: core/tabayyun-py }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: core }
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: python -m venv .venv && . .venv/bin/activate && pip install maturin pytest "pyarrow>=17" "polars>=1.2"
       - run: . .venv/bin/activate && maturin develop --release
@@ -50,7 +55,7 @@ jobs:
     defaults:
       run: { working-directory: api }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: core }
@@ -70,7 +75,7 @@ jobs:
     defaults:
       run: { working-directory: web }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with: { package_json_file: web/package.json }
       - uses: actions/setup-node@v4
