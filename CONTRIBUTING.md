@@ -20,7 +20,7 @@ lives in `docs/` and is the source of truth: read `docs/architecture/03-system-a
 
 | Part | Toolchain | Commands |
 |---|---|---|
-| `core/` | Rust 1.85+ | `cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check` |
+| `core/` | Rust 1.88+ | `cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check` |
 | `core/tabayyun-py/` | maturin | `VIRTUAL_ENV=../../api/.venv ../../api/.venv/bin/maturin develop --release && ../../api/.venv/bin/pytest -q` |
 | `api/` | Python 3.11+, uv | `uv sync --extra dev && uv run pytest -q && uv run ruff check . && uv run ruff format --check . && uv run mypy` |
 | `web/` | Node 22, pnpm 10 | `pnpm install --frozen-lockfile && pnpm lint && pnpm build` |
