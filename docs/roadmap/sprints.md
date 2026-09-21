@@ -15,6 +15,9 @@ six checks with tests, or one vertical slice through API + web + persistence, or
 connector with its screens. Research notes are cheap and go last in a sprint if budget
 remains. Priorities: **M** must (sprint fails without it), **S** should, **C** could.
 
+Every story gets a spec in `docs/specs/` (copy `000-template.md`) before implementation;
+sprint 6 stories map to specs 001–005. `TASKS.md` tracks the specs and session decisions.
+
 Definition of done for every story: tests (Rust unit or pytest or vitest), lint clean, docs
 touched (`catalogue.md`, ADR when a design decision is made, roadmap progress log), and,
 for user-facing stories, a screenshot or curl transcript in the PR.
@@ -50,7 +53,7 @@ and scores in Postgres; a worker executes it.
 | S6-3 | Findings persistence with open-finding deduplication on overlapping windows; `GET /api/findings` with filters (series, check, severity, status) and pagination | M | duplicate upload does not double findings |
 | S6-4 | Series and source records created from uploads (`source.type = upload`), series metadata (unit, limits, kind) editable via `PATCH /api/series/{id}` | S | metadata survives and feeds the next run |
 | S6-5 | Web: runs list, run report page (score tiles, findings table, evidence expand) reading persisted data | S | page works after a browser refresh |
-| S6-6 | Docs: ADR-0012 run and finding lifecycle (statuses open/acked/resolved/muted, dedup rule) | S | ADR merged |
+| S6-6 | Docs: ADR-0013 run and finding lifecycle (statuses open/acked/resolved/muted, dedup rule) | S | ADR merged |
 
 ## Sprint 7 — 4 to 10 Oct — Parquet cache and cross-series checks
 

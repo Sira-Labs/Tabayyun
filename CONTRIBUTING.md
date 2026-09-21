@@ -8,6 +8,10 @@ lives in `docs/` and is the source of truth: read `docs/architecture/03-system-a
 
 - **Design first.** A change that deviates from a documented decision needs a new ADR
   (copy `docs/adr/0000-adr-template.md`), not a silent workaround.
+- **Spec first.** Features follow written specs in `docs/specs/` (copy
+  `docs/specs/000-template.md`): goal, interface, numbered behaviour, acceptance criteria and
+  test cases, one spec per feature, written before the code. `TASKS.md` is the backlog and
+  holds one line per non-obvious decision taken while implementing a spec.
 - **Checks are pure.** No I/O inside a check. Every check ships with synthetic-fault unit
   tests, evidence JSON and a plain-language summary (`docs/checks/00-check-specification.md`).
 - **Never overwrite raw data.** Corrections are versioned layers (ADR-0010); reads name a layer.
@@ -32,6 +36,7 @@ series; `make dev-infra` starts Postgres+TimescaleDB and Keycloak via docker com
 
 1. Open or pick an issue. Label it with an `area:` and, if it is a check, `type: check`.
    Anything that changes a decision gets `needs: design` and an ADR draft.
+   A feature needs a spec in `docs/specs/` (see Ground rules); the PR links it.
 2. Branch from `main`: `feat/<short-topic>`, `fix/<short-topic>`, `docs/<short-topic>`.
 3. Commit in small, logical steps with semantic messages:
    `feat(core): ...`, `fix(api): ...`, `docs: ...`, `refactor(web): ...`, `chore(ci): ...`,

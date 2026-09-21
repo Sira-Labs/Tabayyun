@@ -4,6 +4,21 @@ Self-hostable time-series data-quality platform. Read `docs/` before changing de
 `docs/checks/catalogue.md` (the 30 checks), `docs/architecture/03-system-architecture.md`,
 `docs/adr/` (decisions; add a new ADR rather than silently deviating).
 
+## Session protocol (spec-driven, as in Thawr)
+
+1. One spec per session. The prompt names it (`Implement docs/specs/NNN-name.md. Plan first.`).
+   Read this file, `docs/architecture/03-system-architecture.md` and that one spec plus the
+   specs it references; do not read all specs.
+2. Present the plan, wait for approval, then implement. Deviating from a spec, an ADR or a
+   fixed architecture decision needs a question first, or a new ADR.
+3. `make lint` and `make test` (or the relevant subset) before every commit; semantic commits,
+   one logical change each; a spec may take several commits.
+4. When the spec's acceptance criteria are met, tick them in the spec, mark it done in
+   `TASKS.md` and add one line per non-obvious decision under its entry.
+5. Do not start the next spec in the same session. Do not refactor code the spec does not touch.
+6. A story in `docs/roadmap/sprints.md` gets its spec (copy `docs/specs/000-template.md`)
+   before any code; a spec that turns out wrong is edited in the same PR, with the reason.
+
 ## Layout
 - `core/` Rust workspace: `tabayyun-core` (frame, profile, checks, score, downsample, synth), `tabayyun-cli` (`tabayyun` binary), `tabayyun-py` (PyO3 wheel `tabayyun_core`, Arrow PyCapsule in/out).
 - `api/` Python 3.11+ FastAPI (uv). `src/tabayyun/`, tests in `tests/`.
@@ -25,3 +40,4 @@ Self-hostable time-series data-quality platform. Read `docs/` before changing de
 - No secrets in code or config; env vars only; prod refuses placeholders.
 - Semantic commit messages (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `test:`).
 - Licence is Apache-2.0 (ADR-0012). Workflow, PR checklist and branch rules: `CONTRIBUTING.md`.
+- Backlog and session notes: `TASKS.md`. Specs: `docs/specs/`. Sprint plan: `docs/roadmap/sprints.md`.
