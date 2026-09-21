@@ -4,7 +4,8 @@ The R1 catalogue. Selection criteria: frequency in real energy/historian data ×
 damage × implementability in Rust without ML infrastructure. 24 generic checks that run on
 any series, 6 energy-pack checks that need domain metadata. Every check follows
 `docs/checks/00-check-specification.md`. Evidence for defaults is in
-`docs/research/01-sota-timeseries-quality.md` and `docs/research/02-energy-domain-quality.md`.
+`docs/research/01-sota-timeseries-quality.md`, `docs/research/02-energy-domain-quality.md`
+and, for process-historian and oil-and-gas specifics, `docs/research/05-oil-gas-domain-quality.md`.
 
 Legend: **Dim** = primary quality dimension. **Needs** = required series metadata or related
 series. **Sev** = default severity. **Auto** = default is learned from the baseline profile.
@@ -141,11 +142,15 @@ Profiles are versioned and stored; findings link to the profile they used.
 - **Dim:** plausibility. **Sev:** high.
 - **Algorithm:** run length of |Δ| ≤ `atol` (default resolution/2) ≥ `min_run` samples
   **and** ≥ `min_duration`. Skip if series kind is setpoint/status or the profile's
-  `constant_fraction` > 0.5 (legitimately constant), unless overridden. Compression-aware:
-  if the source uses deadband/swinging-door compression, a flat run with no archived points
-  is not evidence of stuck; require archived samples inside the run.
+  `constant_fraction` > 0.5 (legitimately constant), unless overridden. **Frozen rule:** a
+  frame in which ≥ `frozen_fraction` (99 %) of usable samples equal the first one is reported
+  as frozen for the whole window *before* the constant-profile skip, because the profile may
+  have been computed on the frozen period itself (9.8 % of real variables in Petrobras' 3W
+  corpus are frozen for an entire instance). Compression-aware: if the source uses
+  deadband/swinging-door compression, a flat run with no archived points is not evidence of
+  stuck; require archived samples inside the run or a run longer than `CompMax`.
 - **Params:** `min_run` 6 (pvanalytics) to 10; `min_duration` auto = max(1 h, 10 × interval);
-  `atol` auto; OpenOA uses 3 intervals for 10-min SCADA.
+  `atol` auto; `frozen_fraction` 0.99; OpenOA uses 3 intervals for 10-min SCADA.
 - **Evidence:** run start/end, run length, value, resolution, compression mode.
 - **Sources:** pvanalytics `stale_values_diff(window=6)`; OpenOA `unresponsive_flag(3)`; AVEVA `Range()==0`; PMU flat 60.00 Hz.
 

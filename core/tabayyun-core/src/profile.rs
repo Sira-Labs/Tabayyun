@@ -204,12 +204,15 @@ pub fn linear_runs(values: &[f64], min_run: usize, atol: f64) -> Vec<(usize, usi
                 && (b - a).abs() > atol
         };
         if !ok {
-            if i - start >= min_run && i >= 2 {
-                let first_ok = values[start].is_finite()
-                    && values[start + 1].is_finite()
-                    && (values[start + 1] - values[start]).abs() > atol;
+            // A new candidate starts on the last sample of the previous one; clip it so runs
+            // never overlap and the summed length never exceeds the series length.
+            let s0 = runs.last().map_or(start, |&(_, prev_end)| start.max(prev_end));
+            if i - s0 >= min_run && i >= 2 {
+                let first_ok = values[s0].is_finite()
+                    && values[s0 + 1].is_finite()
+                    && (values[s0 + 1] - values[s0]).abs() > atol;
                 if first_ok {
-                    runs.push((start, i));
+                    runs.push((s0, i));
                 }
             }
             start = i - 1;
@@ -253,6 +256,28 @@ mod tests {
     use super::*;
     use crate::frame::SeriesMeta;
     use crate::time::NS_PER_MIN;
+
+    #[test]
+    fn adjoining_linear_runs_do_not_overlap() {
+        // Slope 1 for 20 samples, then slope 2 for 20 samples, then slope 3: three runs that
+        // meet at shared corner samples. Their summed length must not exceed the series length.
+        let mut v = Vec::new();
+        let mut x = 0.0;
+        for slope in [1.0, 2.0, 3.0] {
+            for _ in 0..20 {
+                v.push(x);
+                x += slope;
+            }
+        }
+        let runs = linear_runs(&v, 6, 1e-9);
+        assert_eq!(runs.len(), 3, "{runs:?}");
+        for w in runs.windows(2) {
+            assert!(w[0].1 <= w[1].0, "overlap: {runs:?}");
+        }
+        let total: usize = runs.iter().map(|(s, e)| e - s).sum();
+        assert!(total <= v.len());
+        assert!(linear_fraction(&v, 6, 1e-9) <= 1.0);
+    }
 
     #[test]
     fn profile_basic() {
