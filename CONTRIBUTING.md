@@ -64,11 +64,19 @@ contribute code or data you are not entitled to license this way, and never real
 Protection for `main` is defined as a ruleset in `.github/rulesets/protect-main.json`:
 pull request required, the four CI jobs required, review threads resolved, no force-push,
 no deletion, no bypass. Committing the file does not enforce anything: a repository admin
-has to import it once (and re-import after editing it) under **Settings → Rules → Rulesets →
-New ruleset → Import a ruleset**, or with the GitHub CLI:
+has to import it once under **Settings → Rules → Rulesets → New ruleset → Import a
+ruleset**, or with the GitHub CLI:
 
 ```bash
 gh api -X POST repos/thedatadudech/Tabayyun/rulesets --input .github/rulesets/protect-main.json
+```
+
+After editing the JSON, do not re-run the import (`POST` creates a second ruleset). Update the
+existing one instead: edit it in the same settings page, or send the file to its ID:
+
+```bash
+id=$(gh api repos/thedatadudech/Tabayyun/rulesets --jq '.[] | select(.name=="protect-main") | .id')
+gh api -X PUT "repos/thedatadudech/Tabayyun/rulesets/$id" --input .github/rulesets/protect-main.json
 ```
 
 Until the ruleset is active, the CI and review-thread gates above are convention, not
