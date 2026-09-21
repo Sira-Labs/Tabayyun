@@ -8,7 +8,7 @@ Self-hostable time-series data-quality platform. Read `docs/` before changing de
 - `core/` Rust workspace: `tabayyun-core` (frame, profile, checks, score, downsample, synth), `tabayyun-cli` (`tabayyun` binary), `tabayyun-py` (PyO3 wheel `tabayyun_core`, Arrow PyCapsule in/out).
 - `api/` Python 3.11+ FastAPI (uv). `src/tabayyun/`, tests in `tests/`.
 - `web/` Vite + React 19 + TanStack + Tailwind v4 SPA (pnpm).
-- `deploy/` compose files. `docs/` design and research.
+- `deploy/` compose bundles, Caddyfile, deployment README; `api/Dockerfile`, `web/Dockerfile`; `.github/workflows/release.yml` publishes images to GHCR. `docs/` design and research.
 
 ## Commands
 - `make lint` / `make test` run everything. `make demo` runs the checks on a synthetic faulty series.

@@ -17,7 +17,7 @@ Status column: ✅ implemented in `core/tabayyun-core/src/checks/`, ⬜ planned.
 |---|---|---|---|---|---|---|
 | 1 | `tby.completeness` | Gaps and missing samples | completeness | expected_interval (auto) | high | ✅ |
 | 2 | `tby.staleness` | Series not updating | timeliness | expected_interval (auto) | high | ✅ |
-| 3 | `tby.latency` | Late arrival and future timestamps | timeliness | ingest_ts | medium | ⬜ |
+| 3 | `tby.latency` | Late arrival and future timestamps | timeliness | ingest_ts | medium | ✅ |
 | 4 | `tby.timestamp_integrity` | Duplicates and out-of-order timestamps | integrity | — | high | ✅ |
 | 5 | `tby.sampling_regularity` | Interval change, jitter, wrong count per day | integrity | expected_interval (auto), timezone | medium | ✅ |
 | 6 | `tby.quality_flags` | Bad/uncertain/estimated flag share and frozen-good | validity | quality column | high | ✅ |
@@ -26,15 +26,15 @@ Status column: ✅ implemented in `core/tabayyun-core/src/checks/`, ⬜ planned.
 | 9 | `tby.physical_range` | Outside physically possible limits | validity | physical_min/max or unit | critical | ✅ |
 | 10 | `tby.operational_range` | Outside learned operating band | plausibility | baseline (auto) | medium | ✅ |
 | 11 | `tby.non_negative` | Negative values for non-negative quantities | validity | unit / kind | high | ✅ |
-| 12 | `tby.scale_shift` | Unit or scale error (×10, ×1000, °C↔°F) | validity | baseline (auto) | critical | ⬜ |
+| 12 | `tby.scale_shift` | Unit or scale error (×10, ×1000, °C↔°F) | validity | baseline (auto) | critical | ✅ |
 | 13 | `tby.spikes` | Point outliers (Hampel) | plausibility | baseline (auto) | medium | ✅ |
 | 14 | `tby.rate_of_change` | Slew-rate violation | plausibility | max_rate or baseline (auto) | medium | ✅ |
-| 15 | `tby.noise_level` | Variance jump or suspicious smoothness | plausibility | baseline (auto) | medium | ⬜ |
+| 15 | `tby.noise_level` | Variance jump or suspicious smoothness | plausibility | baseline (auto) | medium | ✅ |
 | 16 | `tby.resolution_loss` | Quantization / precision drop | validity | baseline (auto) | medium | ✅ |
 | 17 | `tby.interpolation_artifacts` | Linear runs from compression/interpolation | validity | baseline (auto) | medium | ✅ |
-| 18 | `tby.level_drift` | Slow bias / trend in the level | accuracy | baseline (auto) | medium | ⬜ |
-| 19 | `tby.distribution_drift` | Distribution changed vs reference | plausibility | baseline (auto) | medium | ⬜ |
-| 20 | `tby.changepoint` | Abrupt regime change | plausibility | — | medium | ⬜ |
+| 18 | `tby.level_drift` | Slow bias / trend in the level | accuracy | baseline (auto) | medium | ✅ |
+| 19 | `tby.distribution_drift` | Distribution changed vs reference | plausibility | baseline (auto) | medium | ✅ |
+| 20 | `tby.changepoint` | Abrupt regime change | plausibility | — | medium | ✅ |
 | 21 | `tby.seasonality_break` | Periodic pattern lost or changed | plausibility | baseline (auto) | low | ⬜ |
 | 22 | `tby.correlation_break` | Related series stopped agreeing | consistency | related series | high | ⬜ |
 | 23 | `tby.redundant_disagreement` | Redundant sensors disagree | accuracy | redundant series, tolerance | high | ⬜ |

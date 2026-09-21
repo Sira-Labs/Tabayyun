@@ -64,10 +64,13 @@ Every check declares exactly one primary dimension. Scores roll up per dimension
 | **Plausibility (behavioural)** | Does the series behave like it used to? | stuck/flatline, spikes, variance drift, distribution drift, seasonality break, changepoints |
 | **Uniqueness / integrity** | Are timestamps and identities sound? | duplicates, out-of-order, DST artefacts, clock skew |
 
-## Scoring (v1)
+## Scoring (v2)
 
 - Each Finding has `score_impact ∈ [0,1]` = severity weight × fraction of window affected.
-- Series dimension score = `100 × (1 − clip(Σ impact of open findings in dimension, 0, 1))`.
+- Within a dimension, findings are merged on the time axis: impact = ∫ max severity weight
+  over the evaluation window ÷ window duration, so two checks flagging the same minute count
+  once at the higher severity. Point findings (single samples) add their own impact.
+- Series dimension score = `100 × (1 − clip(impact, 0, 1))`.
 - Series overall = weighted mean of dimension scores (default weights editable per workspace).
 - Dataset / workspace score = mean of series overall, plus "worst 5%" shown next to it,
   because averages hide the tags people actually care about.

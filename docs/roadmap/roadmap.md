@@ -17,6 +17,10 @@ Progress log:
   linear fraction), checks 6, 10, 13, 14, 16, 17, M4 downsampling, PyO3 wheel `tabayyun_core`
   (Arrow PyCapsule in/out, pyarrow and polars tested), `POST /api/checks/run` on an uploaded
   CSV, web page that runs checks and lists findings with evidence, CI job for the bindings.
+- **2026-09-21** sprint 3: checks 3 (latency, via an ingest-time column), 12, 15, 18, 19, 20
+  (PELT on daily medians); scoring v2 merges overlapping findings per dimension; release
+  pipeline builds `tabayyun-api` and `tabayyun-web` images to GHCR with SBOM and provenance,
+  production compose bundle with Caddy (auto-TLS, security headers), optional SSH deploy job.
 
 Goal: a self-hosted install that ingests from Parquet/CSV, PI Web API and OPC UA, runs the
 30 checks on a schedule, scores series, shows findings in a dashboard, lets a user correct a
