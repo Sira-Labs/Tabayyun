@@ -57,7 +57,7 @@ print(report["score"]["overall"], len(report["findings"]))
 | Security baseline (ASVS L2) | [docs/frontend/02-security-baseline.md](docs/frontend/02-security-baseline.md) |
 | Roadmap and repo layout | [docs/roadmap/roadmap.md](docs/roadmap/roadmap.md) |
 | Deployment (images, compose, CD) | [deploy/README.md](deploy/README.md) |
-| Decisions (ADRs 0001–0011) | [docs/adr/](docs/adr/) |
+| Decisions (ADRs 0001–0012) | [docs/adr/](docs/adr/) |
 
 Research reports (with verified sources):
 
@@ -80,6 +80,12 @@ Research reports (with verified sources):
 Explain, don't just flag · opinionated defaults with transparent thresholds · series first ·
 local by default · secure by design · extensible with sandboxed Python checks.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, [SECURITY.md](SECURITY.md) for
+reporting vulnerabilities privately, and the [milestones](https://github.com/thedatadudech/Tabayyun/milestones)
+for what is planned next.
+
 ## Licence
 
-To be decided before R1 code lands.
+[Apache License 2.0](LICENSE) (ADR-0012). Contributions are accepted under the same licence.

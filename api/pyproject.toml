@@ -3,6 +3,7 @@ name = "tabayyun-api"
 version = "0.1.0"
 description = "Tabayyun API: auth, RBAC, connectors, scheduling and results on top of tabayyun_core"
 requires-python = ">=3.11"
+license = "Apache-2.0"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
