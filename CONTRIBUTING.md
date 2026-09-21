@@ -63,14 +63,16 @@ contribute code or data you are not entitled to license this way, and never real
 
 Protection for `main` is defined as a ruleset in `.github/rulesets/protect-main.json`:
 pull request required, the four CI jobs required, review threads resolved, no force-push,
-no deletion, no bypass. Import it under **Settings → Rules → Rulesets → New ruleset →
-Import a ruleset**, or with the GitHub CLI:
+no deletion, no bypass. Committing the file does not enforce anything: a repository admin
+has to import it once (and re-import after editing it) under **Settings → Rules → Rulesets →
+New ruleset → Import a ruleset**, or with the GitHub CLI:
 
 ```bash
 gh api -X POST repos/thedatadudech/Tabayyun/rulesets --input .github/rulesets/protect-main.json
 ```
 
-Recommended repository settings (Settings → General): automatically delete head branches,
+Until the ruleset is active, the CI and review-thread gates above are convention, not
+enforcement. Recommended repository settings (Settings → General): automatically delete head branches,
 allow auto-merge, always suggest updating pull request branches, rebase merging off.
 Settings → Code security: private vulnerability reporting, Dependabot alerts and security
 updates, secret scanning with push protection.
