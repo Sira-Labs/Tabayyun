@@ -4,9 +4,14 @@
 //! metadata the frame does not carry return [`Error::MissingMetadata`] so the caller can
 //! report a skip instead of a false pass.
 
+pub mod changepoint;
 pub mod completeness;
+pub mod distribution_drift;
 pub mod flatline;
 pub mod interpolation_artifacts;
+pub mod latency;
+pub mod level_drift;
+pub mod noise_level;
 pub mod non_negative;
 pub mod operational_range;
 pub mod physical_range;
@@ -14,15 +19,18 @@ pub mod quality_flags;
 pub mod rate_of_change;
 pub mod resolution_loss;
 pub mod sampling_regularity;
+pub mod scale_shift;
 pub mod spikes;
 pub mod staleness;
 pub mod timestamp_integrity;
 pub mod value_type;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::finding::{Dimension, Finding, Metric, Severity, Window};
 use crate::frame::SeriesFrame;
 use crate::profile::Profile;
+use crate::time::parse_duration;
+use std::borrow::Cow;
 
 /// Evaluation context shared by all checks in a run.
 #[derive(Debug, Clone)]
@@ -114,6 +122,61 @@ pub(crate) fn expected_interval(frame: &SeriesFrame, ctx: &CheckContext) -> Opti
         .expected_interval_ns
         .or_else(|| ctx.profile.as_ref().and_then(|p| p.expected_interval_ns))
         .or_else(|| frame.expected_interval_ns())
+}
+
+/// Split a sorted frame into consecutive time segments of `segment_ns` (aligned to the first
+/// timestamp). Yields `(start_idx, end_idx, window)` for non-empty segments.
+pub(crate) fn segments(frame: &SeriesFrame, segment_ns: i64) -> Vec<(usize, usize, Window)> {
+    let n = frame.len();
+    let mut out = Vec::new();
+    if n == 0 || segment_ns <= 0 {
+        return out;
+    }
+    let start = frame.ts[0];
+    let mut s = 0usize;
+    while s < n {
+        let seg_end_ts = start + ((frame.ts[s] - start) / segment_ns + 1) * segment_ns;
+        let mut e = s;
+        while e < n && frame.ts[e] < seg_end_ts {
+            e += 1;
+        }
+        let e = e.max(s + 1);
+        out.push((s, e, Window::new(frame.ts[s], frame.ts[e - 1] + 1)));
+        s = e;
+    }
+    out
+}
+
+/// Baseline profile for adaptive thresholds: the run's profile when present, otherwise a
+/// profile of the frame itself. The label says which one was used, for evidence.
+pub(crate) fn baseline<'a>(ctx: &'a CheckContext, frame: &SeriesFrame) -> (Cow<'a, Profile>, &'static str) {
+    match &ctx.profile {
+        Some(p) => (Cow::Borrowed(p), "baseline"),
+        None => (Cow::Owned(Profile::compute(frame)), "self"),
+    }
+}
+
+/// Finite values with usable quality in index range `[s, e)`.
+pub(crate) fn usable_values(frame: &SeriesFrame, s: usize, e: usize) -> Vec<f64> {
+    (s..e)
+        .filter(|&i| frame.values[i].is_finite() && frame.quality[i].is_usable())
+        .map(|i| frame.values[i])
+        .collect()
+}
+
+/// Timestamps and values of usable samples in `[s, e)`, for difference-based statistics.
+pub(crate) fn usable_pairs(frame: &SeriesFrame, s: usize, e: usize) -> (Vec<i64>, Vec<f64>) {
+    let idx: Vec<usize> =
+        (s..e).filter(|&i| frame.values[i].is_finite() && frame.quality[i].is_usable()).collect();
+    (idx.iter().map(|&i| frame.ts[i]).collect(), idx.iter().map(|&i| frame.values[i]).collect())
+}
+
+/// Parse a duration parameter, turning a malformed string into `Error::InvalidParams`.
+pub(crate) fn duration_param(check: &str, name: &str, value: &str) -> Result<i64> {
+    parse_duration(value).ok_or_else(|| Error::InvalidParams {
+        check: check.to_string(),
+        reason: format!("{name}: cannot parse duration `{value}` (use e.g. 90s, 15m, 2h, 1d)"),
+    })
 }
 
 pub(crate) fn metric(check_id: &str, frame: &SeriesFrame, name: &str, ts: i64, value: f64) -> Metric {

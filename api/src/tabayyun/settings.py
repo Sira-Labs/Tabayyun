@@ -24,21 +24,29 @@ class Settings(BaseSettings):
     session_secret: SecretStr | None = Field(default=None, description="Key for session-store signing.")
 
     def require_secrets_in_prod(self) -> None:
-        """Refuse to start in prod with placeholder or missing secrets."""
+        """Refuse to start in prod with placeholder or missing secrets.
+
+        OIDC settings become mandatory once the auth router ships; until then they are
+        validated only when set (a placeholder value is still rejected).
+        """
         if self.env != "prod":
             return
-        missing = [
-            name
-            for name, value in (
-                ("TABAYYUN_OIDC_ISSUER", self.oidc_issuer),
-                ("TABAYYUN_OIDC_CLIENT_ID", self.oidc_client_id),
-                ("TABAYYUN_OIDC_CLIENT_SECRET", self.oidc_client_secret),
-                ("TABAYYUN_SESSION_SECRET", self.session_secret),
-            )
-            if not value
-        ]
-        if missing or "tabayyun:tabayyun@" in self.database_url:
-            raise RuntimeError(f"refusing to start in prod: missing/placeholder settings {missing}")
+        problems: list[str] = []
+        if not self.session_secret or _is_placeholder(self.session_secret.get_secret_value()):
+            problems.append("TABAYYUN_SESSION_SECRET")
+        if "tabayyun:tabayyun@" in self.database_url or _is_placeholder(self.database_url):
+            problems.append("TABAYYUN_DATABASE_URL")
+        if self.oidc_client_secret and _is_placeholder(self.oidc_client_secret.get_secret_value()):
+            problems.append("TABAYYUN_OIDC_CLIENT_SECRET")
+        if problems:
+            raise RuntimeError(f"refusing to start in prod: missing or placeholder settings {problems}")
+
+
+def _is_placeholder(value: str) -> bool:
+    lowered = value.lower()
+    return (
+        "change-me" in lowered or "changeme" in lowered or "placeholder" in lowered or len(value.strip()) < 16
+    )
 
 
 @lru_cache(maxsize=1)

@@ -1,10 +1,10 @@
 //! `tby.resolution_loss` — quantization / precision drop per segment (catalogue #16).
 
-use super::{metric, Check, CheckContext, CheckOutput};
+use super::{baseline, metric, Check, CheckContext, CheckOutput};
 use crate::error::Result;
 use crate::finding::{Dimension, Finding, Severity, Window};
 use crate::frame::SeriesFrame;
-use crate::profile::{resolution, Profile};
+use crate::profile::resolution;
 use crate::time::NS_PER_DAY;
 use serde::{Deserialize, Serialize};
 
@@ -54,10 +54,7 @@ impl Check for ResolutionLoss {
         if n < self.min_samples {
             return Ok(out);
         }
-        let (profile, source) = match &ctx.profile {
-            Some(p) => (p.clone(), "baseline"),
-            None => (Profile::compute(&f), "self"),
-        };
+        let (profile, source) = baseline(ctx, &f);
         let base_density =
             if profile.n_finite > 0 { profile.distinct_values as f64 / profile.n_finite as f64 } else { 0.0 };
         let base_step = profile.resolution.unwrap_or(0.0);
@@ -121,6 +118,7 @@ fn on_grid(values: &[f64], step: f64) -> bool {
 mod tests {
     use super::*;
     use crate::checks::testutil::*;
+    use crate::Profile;
 
     #[test]
     fn rounded_day_is_flagged() {

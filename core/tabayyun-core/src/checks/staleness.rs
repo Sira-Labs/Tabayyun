@@ -1,10 +1,10 @@
 //! `tby.staleness` — series not updating (catalogue #2).
 
-use super::{expected_interval, metric, Check, CheckContext, CheckOutput};
+use super::{duration_param, expected_interval, metric, Check, CheckContext, CheckOutput};
 use crate::error::Result;
 use crate::finding::{Dimension, Finding, Severity, Window};
 use crate::frame::SeriesFrame;
-use crate::time::{format_duration, parse_duration, NS_PER_MIN};
+use crate::time::format_duration;
 use serde::{Deserialize, Serialize};
 
 pub const ID: &str = "tby.staleness";
@@ -31,12 +31,12 @@ impl Default for Staleness {
 }
 
 impl Staleness {
-    fn threshold(&self, interval: Option<i64>) -> Option<i64> {
-        let min_age = parse_duration(&self.min_age).unwrap_or(5 * NS_PER_MIN);
+    fn threshold(&self, interval: Option<i64>) -> Result<Option<i64>> {
+        let min_age = duration_param(ID, "min_age", &self.min_age)?;
         if self.max_age == "auto" {
-            interval.map(|i| (3 * i).max(min_age))
+            Ok(interval.map(|i| (3 * i).max(min_age)))
         } else {
-            parse_duration(&self.max_age)
+            duration_param(ID, "max_age", &self.max_age).map(Some)
         }
     }
 }
@@ -55,7 +55,7 @@ impl Check for Staleness {
     fn run(&self, frame: &SeriesFrame, ctx: &CheckContext) -> Result<CheckOutput> {
         let mut out = CheckOutput::default();
         let interval = expected_interval(frame, ctx);
-        let Some(max_age) = self.threshold(interval) else { return Ok(out) };
+        let Some(max_age) = self.threshold(interval)? else { return Ok(out) };
         let newest = if self.ignore_quality_bad { frame.last_good_ts() } else { frame.last_ts() };
         let age = match newest {
             Some(t) => ctx.now_ns - t,
@@ -118,7 +118,7 @@ mod tests {
         let out = Staleness::default().run(&f, &c).unwrap();
         let s = ids(&out, ID);
         assert_eq!(s.len(), 1);
-        assert_eq!(s[0].evidence["max_age_ns"], serde_json::json!(5 * NS_PER_MIN));
+        assert_eq!(s[0].evidence["max_age_ns"], serde_json::json!(5 * crate::time::NS_PER_MIN));
     }
 
     #[test]

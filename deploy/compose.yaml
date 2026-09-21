@@ -1,0 +1,54 @@
+# Production bundle: images published by .github/workflows/release.yml.
+#   cp .env.example .env   # fill secrets, choose TABAYYUN_TAG
+#   docker compose -f deploy/compose.yaml up -d
+# TABAYYUN_TAG is required: the CD job exports the sha-<short> tag of the images it just
+# built, so a deployment always runs exactly those images; manual installs set a version.
+services:
+  web:
+    image: ghcr.io/thedatadudech/tabayyun-web:${TABAYYUN_TAG:?set TABAYYUN_TAG (a version or sha-<short>)}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      TABAYYUN_DOMAIN: ${TABAYYUN_DOMAIN:-}
+    volumes:
+      - caddy_data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+
+  api:
+    image: ghcr.io/thedatadudech/tabayyun-api:${TABAYYUN_TAG:?set TABAYYUN_TAG (a version or sha-<short>)}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TABAYYUN_ENV: prod
+      TABAYYUN_DATABASE_URL: postgresql+psycopg://tabayyun:${POSTGRES_PASSWORD}@postgres:5432/tabayyun
+    volumes:
+      - cache:/data/cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    # Pinned: `docker compose pull` runs on every deployment, and a moving tag would swap
+    # the database binaries under a persistent data directory. Bump deliberately.
+    image: timescale/timescaledb:2.30.1-pg17@sha256:c79fa5891443d1cdf6de5258d4c2bdb8cde29052c45df2062b13d351e0202005
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tabayyun
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: tabayyun
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tabayyun"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:
+  cache:
+  caddy_data:

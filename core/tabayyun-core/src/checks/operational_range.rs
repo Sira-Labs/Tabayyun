@@ -1,10 +1,9 @@
 //! `tby.operational_range` — values outside the learned operating band (catalogue #10).
 
-use super::{expected_interval, metric, run_window, runs_where, Check, CheckContext, CheckOutput};
+use super::{baseline, expected_interval, metric, run_window, runs_where, Check, CheckContext, CheckOutput};
 use crate::error::Result;
 use crate::finding::{Dimension, Finding, Severity};
 use crate::frame::SeriesFrame;
-use crate::profile::Profile;
 use serde::{Deserialize, Serialize};
 
 pub const ID: &str = "tby.operational_range";
@@ -44,10 +43,7 @@ impl Check for OperationalRange {
         if n < 20 {
             return Ok(out);
         }
-        let (profile, baseline) = match &ctx.profile {
-            Some(p) => (p.clone(), "baseline"),
-            None => (Profile::compute(&f), "self"),
-        };
+        let (profile, source) = baseline(ctx, &f);
         let (Some(p001), Some(p999), Some(mad)) = (profile.p001, profile.p999, profile.mad) else {
             return Ok(out);
         };
@@ -74,7 +70,7 @@ impl Check for OperationalRange {
                 (e - s) as f64 / n as f64,
                 format!("{} values outside the usual operating band [{lo:.4}, {hi:.4}] (observed {vmin:.4} to {vmax:.4})", e - s),
                 serde_json::json!({"count": e - s, "band_min": lo, "band_max": hi, "min_observed": vmin, "max_observed": vmax,
-                    "share": share, "baseline": baseline, "k": self.k}),
+                    "share": share, "baseline": source, "k": self.k}),
             ));
         }
         Ok(out)
@@ -86,6 +82,7 @@ mod tests {
     use super::*;
     use crate::checks::testutil::*;
     use crate::synth::inject;
+    use crate::Profile;
 
     #[test]
     fn excursion_against_baseline() {

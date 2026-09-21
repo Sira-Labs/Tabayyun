@@ -1,11 +1,11 @@
 //! `tby.flatline` — stuck / frozen values (catalogue #8).
 
-use super::{expected_interval, metric, run_window, Check, CheckContext, CheckOutput};
+use super::{duration_param, expected_interval, metric, run_window, Check, CheckContext, CheckOutput};
 use crate::error::Result;
 use crate::finding::{Dimension, Finding, Severity};
 use crate::frame::{SeriesFrame, SeriesKind};
 use crate::profile::resolution;
-use crate::time::{format_duration, parse_duration, NS_PER_HOUR};
+use crate::time::{format_duration, NS_PER_HOUR};
 use serde::{Deserialize, Serialize};
 
 pub const ID: &str = "tby.flatline";
@@ -72,7 +72,7 @@ impl Check for Flatline {
         let min_duration = if self.min_duration == "auto" {
             (10 * interval).max(NS_PER_HOUR)
         } else {
-            parse_duration(&self.min_duration).unwrap_or(NS_PER_HOUR)
+            duration_param(ID, "min_duration", &self.min_duration)?
         };
         let atol = self
             .atol

@@ -1,0 +1,111 @@
+name: release
+
+# Builds the production images on every push to main and on version tags, publishes them to
+# the GitHub Container Registry, and (optionally) deploys to a Docker host over SSH.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/tabayyun
+
+jobs:
+  images:
+    name: build and publish images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    strategy:
+      matrix:
+        include:
+          - name: api
+            dockerfile: api/Dockerfile
+          - name: web
+            dockerfile: web/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - id: tag
+        run: echo "tag=sha-$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          provenance: true
+          sbom: true
+
+  deploy:
+    name: deploy to docker host
+    needs: images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    # Environment-scoped variables are only visible once the environment is bound, i.e. inside
+    # steps; a job-level `if` cannot see them. Every step therefore carries the gate.
+    environment: production
+    steps:
+      - name: configured?
+        id: gate
+        run: |
+          if [ -n "${{ vars.DEPLOY_HOST }}" ]; then echo "on=true" >> "$GITHUB_OUTPUT"; else echo "on=false" >> "$GITHUB_OUTPUT"; echo "DEPLOY_HOST not set on environment 'production'; skipping deploy"; fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.on == 'true'
+      - name: copy compose bundle
+        if: steps.gate.outputs.on == 'true'
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.DEPLOY_HOST }}
+          username: ${{ vars.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: "deploy/compose.yaml"
+          target: "~/tabayyun"
+          strip_components: 1
+      - name: pull and restart
+        if: steps.gate.outputs.on == 'true'
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          TABAYYUN_TAG: ${{ needs.images.outputs.tag }}
+        with:
+          host: ${{ vars.DEPLOY_HOST }}
+          username: ${{ vars.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: TABAYYUN_TAG
+          script: |
+            set -euo pipefail
+            cd ~/tabayyun
+            export TABAYYUN_TAG
+            echo "deploying image tag $TABAYYUN_TAG"
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            docker compose -f compose.yaml pull
+            docker compose -f compose.yaml up -d --remove-orphans
+            docker image prune -f

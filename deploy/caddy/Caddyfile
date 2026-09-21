@@ -1,0 +1,27 @@
+# Production edge for the compose bundle. TLS is terminated here when TABAYYUN_DOMAIN is set
+# (Caddy obtains certificates automatically); otherwise it serves plain HTTP on :80 behind
+# your own load balancer.
+{$TABAYYUN_DOMAIN::80} {
+	encode zstd gzip
+
+	header {
+		# Strict, hash-free CSP: the SPA has no inline scripts; chart libraries are bundled.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		-Server
+	}
+
+	@api path /api/* /healthz
+	handle @api {
+		reverse_proxy {$TABAYYUN_API_UPSTREAM:api:8000}
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

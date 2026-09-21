@@ -32,15 +32,16 @@ fn frame_from_py(
     ts_col: &str,
     value_col: &str,
     quality_col: Option<&str>,
+    ingest_col: Option<&str>,
 ) -> PyResult<SeriesFrame> {
     let meta: SeriesMeta = serde_json::from_str(meta_json).map_err(err)?;
     let batch = batch_from_py(data)?;
-    SeriesFrame::from_record_batch(meta, &batch, ts_col, value_col, quality_col).map_err(err)
+    SeriesFrame::from_record_batch_ext(meta, &batch, ts_col, value_col, quality_col, ingest_col).map_err(err)
 }
 
 /// Run checks on an Arrow batch/stream. Returns a JSON report (findings, metrics, score, profile).
 #[pyfunction]
-#[pyo3(signature = (data, meta_json, configs_json=None, now_ns=None, compute_profile=true, ts_col="ts", value_col="value", quality_col=None))]
+#[pyo3(signature = (data, meta_json, configs_json=None, now_ns=None, compute_profile=true, ts_col="ts", value_col="value", quality_col=None, ingest_col=None))]
 #[allow(clippy::too_many_arguments)]
 fn run_checks(
     py: Python<'_>,
@@ -52,8 +53,9 @@ fn run_checks(
     ts_col: &str,
     value_col: &str,
     quality_col: Option<&str>,
+    ingest_col: Option<&str>,
 ) -> PyResult<String> {
-    let frame = frame_from_py(data, meta_json, ts_col, value_col, quality_col)?;
+    let frame = frame_from_py(data, meta_json, ts_col, value_col, quality_col, ingest_col)?;
     let configs: Vec<CheckConfig> = match configs_json {
         Some(s) => serde_json::from_str(s).map_err(err)?,
         None => Registry::default_configs(),
@@ -69,7 +71,7 @@ fn run_checks(
             ctx = ctx.with_profile(p.clone());
         }
         let out = Registry::run(&configs, &frame, &ctx).map_err(err)?;
-        let score = Scorer::default().score(&frame.meta.id, &out.findings);
+        let score = Scorer::default().score_window(&frame.meta.id, &out.findings, ctx.window);
         let report = serde_json::json!({
             "series_id": frame.meta.id,
             "n_samples": frame.len(),
@@ -96,7 +98,7 @@ fn profile(
     value_col: &str,
     quality_col: Option<&str>,
 ) -> PyResult<String> {
-    let frame = frame_from_py(data, meta_json, ts_col, value_col, quality_col)?;
+    let frame = frame_from_py(data, meta_json, ts_col, value_col, quality_col, None)?;
     py.detach(move || serde_json::to_string(&Profile::compute(&frame)).map_err(err))
 }
 
@@ -110,7 +112,7 @@ fn downsample_m4<'py>(
     ts_col: &str,
     value_col: &str,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let frame = frame_from_py(data, r#"{"id":"_"}"#, ts_col, value_col, None)?;
+    let frame = frame_from_py(data, r#"{"id":"_"}"#, ts_col, value_col, None, None)?;
     let (sorted, _) = frame.normalized();
     let (ts, values) = py.detach(move || m4(&sorted, buckets));
     let out = SeriesFrame::with_default_quality(SeriesMeta::new("_"), ts, values).map_err(err)?;

@@ -9,8 +9,9 @@ untrustworthy, routes findings to the people who can fix them, and lets them cor
 with full lineage and deliver the corrected series downstream. First target vertical:
 **energy** (PV, wind, grid, metering, storage).
 
-Status: **R1 sprint 2 in progress.** The Rust core runs 14 checks end to end on CSV/Parquet
-files, ships as a Python wheel, and the API + web run the checks on an uploaded CSV.
+Status: **R1 sprint 3 in progress.** The Rust core runs 20 of the 30 catalogue checks, ships
+as a Python wheel, the API + web run the checks on an uploaded CSV, and the release
+pipeline publishes deployable images to GHCR (see `deploy/README.md`).
 
 ## Quick start
 
@@ -29,7 +30,9 @@ Checks implemented so far (catalogue numbers in brackets): `tby.completeness` (1
 `tby.staleness` (2), `tby.timestamp_integrity` (4), `tby.sampling_regularity` (5),
 `tby.quality_flags` (6), `tby.value_type` (7), `tby.flatline` (8), `tby.physical_range` (9),
 `tby.operational_range` (10), `tby.non_negative` (11), `tby.spikes` (13),
-`tby.rate_of_change` (14), `tby.resolution_loss` (16), `tby.interpolation_artifacts` (17).
+`tby.rate_of_change` (14), `tby.resolution_loss` (16), `tby.interpolation_artifacts` (17),
+`tby.latency` (3), `tby.scale_shift` (12), `tby.noise_level` (15), `tby.level_drift` (18),
+`tby.distribution_drift` (19), `tby.changepoint` (20).
 
 From Python:
 
@@ -53,6 +56,7 @@ print(report["score"]["overall"], len(report["findings"]))
 | Frontend design | [docs/frontend/01-frontend-design.md](docs/frontend/01-frontend-design.md) |
 | Security baseline (ASVS L2) | [docs/frontend/02-security-baseline.md](docs/frontend/02-security-baseline.md) |
 | Roadmap and repo layout | [docs/roadmap/roadmap.md](docs/roadmap/roadmap.md) |
+| Deployment (images, compose, CD) | [deploy/README.md](deploy/README.md) |
 | Decisions (ADRs 0001–0010) | [docs/adr/](docs/adr/) |
 
 Research reports (with verified sources):

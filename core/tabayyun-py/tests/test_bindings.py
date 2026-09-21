@@ -45,6 +45,16 @@ def test_profile_and_downsample():
     assert 0 < small.num_rows <= 1000
 
 
+def test_latency_with_ingest_column():
+    batch = tc.synth(n=300)
+    ts = batch.column("ts")
+    late = pa.array([t.value + 10 * 60 * 10**9 for t in ts], type=pa.timestamp("ns", tz="UTC"))
+    table = pa.table({"ts": ts, "value": batch.column("value"), "arrived": late})
+    report = tc.run_checks(table, {"id": "l"}, configs=[{"id": "tby.latency"}], ingest_col="arrived")
+    assert [f["check_id"] for f in report["findings"]] == ["tby.latency"]
+    assert report["score"]["method_version"] == "v2"
+
+
 def test_bad_input_raises():
     with pytest.raises(ValueError):
         tc.run_checks(pa.table({"a": [1, 2]}), {"id": "x"})

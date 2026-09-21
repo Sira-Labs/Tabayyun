@@ -101,6 +101,9 @@ pub struct SeriesFrame {
     pub ts: Vec<i64>,
     pub values: Vec<f64>,
     pub quality: Vec<Quality>,
+    /// When each sample reached the historian / Tabayyun (ns since epoch), if known.
+    /// Enables the latency check.
+    pub ingest_ts: Option<Vec<i64>>,
 }
 
 /// What [`SeriesFrame::normalized`] changed.
@@ -121,7 +124,20 @@ impl SeriesFrame {
                 quality.len()
             )));
         }
-        Ok(Self { meta, ts, values, quality })
+        Ok(Self { meta, ts, values, quality, ingest_ts: None })
+    }
+
+    /// Attach ingest timestamps (same length as `ts`).
+    pub fn with_ingest_ts(mut self, ingest_ts: Vec<i64>) -> Result<Self> {
+        if ingest_ts.len() != self.ts.len() {
+            return Err(Error::InvalidFrame(format!(
+                "ingest_ts length {} != ts length {}",
+                ingest_ts.len(),
+                self.ts.len()
+            )));
+        }
+        self.ingest_ts = Some(ingest_ts);
+        Ok(self)
     }
 
     pub fn with_default_quality(meta: SeriesMeta, ts: Vec<i64>, values: Vec<f64>) -> Result<Self> {
@@ -170,6 +186,7 @@ impl SeriesFrame {
         let mut ts = Vec::with_capacity(self.len());
         let mut values = Vec::with_capacity(self.len());
         let mut quality = Vec::with_capacity(self.len());
+        let mut ingest: Vec<i64> = Vec::with_capacity(if self.ingest_ts.is_some() { self.len() } else { 0 });
         let mut report = Normalization { was_sorted, ..Default::default() };
         for &i in &idx {
             if let Some(&last_ts) = ts.last() {
@@ -187,8 +204,12 @@ impl SeriesFrame {
             ts.push(self.ts[i]);
             values.push(self.values[i]);
             quality.push(self.quality[i]);
+            if let Some(ing) = &self.ingest_ts {
+                ingest.push(ing[i]);
+            }
         }
-        (SeriesFrame { meta: self.meta.clone(), ts, values, quality }, report)
+        let ingest_ts = self.ingest_ts.as_ref().map(|_| ingest);
+        (SeriesFrame { meta: self.meta.clone(), ts, values, quality, ingest_ts }, report)
     }
 
     /// Expected interval: metadata first, else the snapped mode of inter-arrival times.
@@ -210,13 +231,29 @@ impl SeriesFrame {
         value_col: &str,
         quality_col: Option<&str>,
     ) -> Result<Self> {
+        Self::from_record_batch_ext(meta, batch, ts_col, value_col, quality_col, None)
+    }
+
+    /// As [`SeriesFrame::from_record_batch`], plus an optional ingest-timestamp column.
+    pub fn from_record_batch_ext(
+        meta: SeriesMeta,
+        batch: &RecordBatch,
+        ts_col: &str,
+        value_col: &str,
+        quality_col: Option<&str>,
+        ingest_col: Option<&str>,
+    ) -> Result<Self> {
         let ts = timestamps_from_column(column(batch, ts_col)?)?;
         let values = values_from_column(column(batch, value_col)?)?;
         let quality = match quality_col {
             Some(c) => quality_from_column(column(batch, c)?)?,
             None => vec![Quality::Good; ts.len()],
         };
-        Self::new(meta, ts, values, quality)
+        let frame = Self::new(meta, ts, values, quality)?;
+        match ingest_col {
+            Some(c) => frame.with_ingest_ts(timestamps_from_column(column(batch, c)?)?),
+            None => Ok(frame),
+        }
     }
 
     /// Standard three-column batch: `ts: Timestamp(ns, UTC)`, `value: Float64`, `quality: UInt8`.

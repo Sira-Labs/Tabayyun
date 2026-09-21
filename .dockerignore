@@ -1,0 +1,13 @@
+**/target
+**/node_modules
+**/dist
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+.git
+docs
+**/.env
+**/.env.*
+!**/.env.example

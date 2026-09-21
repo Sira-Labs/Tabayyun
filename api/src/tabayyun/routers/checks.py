@@ -30,6 +30,7 @@ async def run_checks(
     ts_col: Annotated[str, Form(max_length=128)] = "ts",
     value_col: Annotated[str, Form(max_length=128)] = "value",
     quality_col: Annotated[str | None, Form(max_length=128)] = None,
+    ingest_col: Annotated[str | None, Form(max_length=128)] = None,
     physical_min: Annotated[float | None, Form()] = None,
     physical_max: Annotated[float | None, Form()] = None,
     now_ns: Annotated[int | None, Form()] = None,
@@ -40,7 +41,7 @@ async def run_checks(
     if not data:
         raise HTTPException(status_code=400, detail="empty upload")
     try:
-        table = core.read_csv(data, ts_col, value_col, quality_col or None)
+        table = core.read_csv(data, ts_col, value_col, quality_col or None, ingest_col or None)
     except Exception as exc:  # pyarrow raises several ArrowInvalid/KeyError variants
         raise HTTPException(status_code=422, detail=f"cannot parse CSV: {exc}") from exc
     meta = core.SeriesMetaIn(
@@ -54,6 +55,7 @@ async def run_checks(
             ts_col=ts_col,
             value_col=value_col,
             quality_col=quality_col or None,
+            ingest_col=ingest_col or None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
