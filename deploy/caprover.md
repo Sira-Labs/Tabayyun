@@ -73,6 +73,36 @@ The job is skipped until `CAPROVER_SERVER` exists. Images are public on GHCR, so
 needs no registry credentials; if the repository ever becomes private, add the registry
 under CapRover → Cluster → Docker Registries first.
 
+## 5. Alternative: let CapRover build from GitHub (Method 3)
+
+Instead of pulling images from GHCR, each app can clone the repository and build its own
+image on the server. Both Dockerfiles use the repository root as build context, so the
+`captain-definition` files under `deploy/caprover/` point at them:
+
+| App | Deployment tab → captain-definition Relative Path |
+|---|---|
+| `tabayyun-api` | `./deploy/caprover/api/captain-definition` |
+| `tabayyun-web` | `./deploy/caprover/web/captain-definition` |
+
+In each app's Deployment tab fill in *Repository* (`github.com/thedatadudech/Tabayyun`),
+*Branch* (`main`) and, because the repository is public, no username/password. Save, copy
+the generated webhook URL, and add it on GitHub under Settings → Webhooks (content type
+JSON, "just the push event"). Every push to `main` then rebuilds and redeploys both apps.
+The database app keeps using *Deploy via ImageName*.
+
+Trade-offs against the GHCR path in section 4:
+
+- Requires CapRover ≥ 1.15.0: the Dockerfiles use BuildKit cache mounts and CapRover only
+  builds with BuildKit from that release on. Check the version under Settings.
+- The Rust wheel compiles on your Hetzner server (several minutes, roughly 2–4 GB RAM at
+  peak) on every push, next to the running apps. The GHCR path does that on GitHub runners.
+- It deploys whatever `main` currently is, not the immutable `sha-<short>` tag the release
+  workflow published, so rolling back means pushing a revert.
+- No repository secrets or app tokens are needed; the `deploy-caprover` job stays skipped
+  as long as `CAPROVER_SERVER` is unset.
+
+Do not enable both paths for the same app, or each push deploys it twice.
+
 ## Notes
 
 - Keep the Hetzner firewall closed except 80/443 (CapRover) and your SSH port.
