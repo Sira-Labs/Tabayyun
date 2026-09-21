@@ -4,7 +4,8 @@ The R1 catalogue. Selection criteria: frequency in real energy/historian data ×
 damage × implementability in Rust without ML infrastructure. 24 generic checks that run on
 any series, 6 energy-pack checks that need domain metadata. Every check follows
 `docs/checks/00-check-specification.md`. Evidence for defaults is in
-`docs/research/01-sota-timeseries-quality.md` and `docs/research/02-energy-domain-quality.md`.
+`docs/research/01-sota-timeseries-quality.md`, `docs/research/02-energy-domain-quality.md`
+and, for process-historian and oil-and-gas specifics, `docs/research/05-oil-gas-domain-quality.md`.
 
 Legend: **Dim** = primary quality dimension. **Needs** = required series metadata or related
 series. **Sev** = default severity. **Auto** = default is learned from the baseline profile.
@@ -141,21 +142,25 @@ Profiles are versioned and stored; findings link to the profile they used.
 - **Dim:** plausibility. **Sev:** high.
 - **Algorithm:** run length of |Δ| ≤ `atol` (default resolution/2) ≥ `min_run` samples
   **and** ≥ `min_duration`. Skip if series kind is setpoint/status or the profile's
-  `constant_fraction` > 0.5 (legitimately constant), unless overridden. Floor-aware: a run
-  resting on the series' floor (explicit or unit-inferred `physical_min`, zero for a
-  non-negative quantity, else the observed minimum) is idling, not a stuck sensor, when the
-  floor is a recurring state: at least `floor_fraction` of the usable samples sit on it and
-  at least `min_floor_runs` runs rest on it (solar generation at night, a pump that is off).
-  A floor run longer than `floor_run_factor` × the median floor run is still reported (a
-  night that lasts three days is an outage). Compression-aware: if the source uses
+  `constant_fraction` > 0.5 (legitimately constant), unless overridden. **Frozen rule:** a
+  frame in which ≥ `frozen_fraction` (99 %) of usable samples equal the first one is reported
+  as frozen for the whole window *before* the constant-profile and floor logic, because the
+  profile may have been computed on the frozen period itself (9.8 % of real variables in
+  Petrobras' 3W corpus are frozen for an entire instance). Floor-aware: a run resting on the
+  series' floor (explicit or unit-inferred `physical_min`, zero for a non-negative quantity,
+  else the observed minimum) is idling, not a stuck sensor, when the floor is a recurring
+  state: at least `floor_fraction` of the usable samples sit on it and at least
+  `min_floor_runs` runs rest on it (solar generation at night, a pump that is off). A floor
+  run longer than `floor_run_factor` × the median floor run is still reported (a night that
+  lasts three days is an outage). Compression-aware: if the source uses
   deadband/swinging-door compression, a flat run with no archived points is not evidence of
-  stuck; require archived samples inside the run.
+  stuck; require archived samples inside the run or a run longer than `CompMax`.
 - **Params:** `min_run` 6 (pvanalytics) to 10; `min_duration` auto = max(1 h, 10 × interval);
-  `atol` auto; `ignore_floor` true; `floor_fraction` 0.05; `min_floor_runs` 3;
-  `floor_run_factor` 3.0; OpenOA uses 3 intervals for 10-min SCADA.
+  `atol` auto; `frozen_fraction` 0.99; `ignore_floor` true; `floor_fraction` 0.05;
+  `min_floor_runs` 3; `floor_run_factor` 3.0; OpenOA uses 3 intervals for 10-min SCADA.
 - **Evidence:** run start/end, run length, value, resolution, floor value, whether the run
   rests on the floor, compression mode. Metric `floor_runs` counts the idling runs skipped.
-- **Sources:** pvanalytics `stale_values_diff(window=6)`; OpenOA `unresponsive_flag(3)`; AVEVA `Range()==0`; PMU flat 60.00 Hz; OPSD DE solar (1,149 nightly zero runs, none a fault).
+- **Sources:** pvanalytics `stale_values_diff(window=6)`; OpenOA `unresponsive_flag(3)`; AVEVA `Range()==0`; PMU flat 60.00 Hz; OPSD DE solar (1,149 nightly zero runs, none a fault); Petrobras 3W (frozen downhole gauge).
 
 ### 9. `tby.physical_range` — Outside physically possible limits
 - **Dim:** validity. **Sev:** critical.

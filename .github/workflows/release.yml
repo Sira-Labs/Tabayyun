@@ -109,3 +109,33 @@ jobs:
             docker compose -f compose.yaml pull
             docker compose -f compose.yaml up -d --remove-orphans
             docker image prune -f
+
+  deploy-caprover:
+    name: deploy to CapRover
+    needs: images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # Runs only when the repository variable CAPROVER_SERVER is set (Settings → Secrets and
+    # variables → Actions → Variables) and the two app tokens exist as secrets.
+    steps:
+      - name: configured?
+        id: gate
+        run: |
+          if [ -n "${{ vars.CAPROVER_SERVER }}" ]; then echo "on=true" >> "$GITHUB_OUTPUT"; else echo "on=false" >> "$GITHUB_OUTPUT"; echo "CAPROVER_SERVER not set; skipping CapRover deploy"; fi
+      - name: deploy api
+        if: steps.gate.outputs.on == 'true'
+        uses: caprover/deploy-from-github@v2
+        with:
+          server: ${{ vars.CAPROVER_SERVER }}
+          app: ${{ vars.CAPROVER_APP_API || 'tabayyun-api' }}
+          token: ${{ secrets.CAPROVER_APP_TOKEN_API }}
+          image: ${{ env.IMAGE_PREFIX }}-api:${{ needs.images.outputs.tag }}
+      - name: deploy web
+        if: steps.gate.outputs.on == 'true'
+        uses: caprover/deploy-from-github@v2
+        with:
+          server: ${{ vars.CAPROVER_SERVER }}
+          app: ${{ vars.CAPROVER_APP_WEB || 'tabayyun-web' }}
+          token: ${{ secrets.CAPROVER_APP_TOKEN_WEB }}
+          image: ${{ env.IMAGE_PREFIX }}-web:${{ needs.images.outputs.tag }}
