@@ -8,6 +8,8 @@ Effort assumes AI-assisted development. "Solo" = one senior engineer full time.
   catalogue, system architecture, authz/sharing design, frontend design, security baseline,
   ADRs 0001–0009.
 
+Weekly sprint breakdown with stories and dates: `docs/roadmap/sprints.md`.
+
 ## R1 — Running core (target: 12 weeks solo, 6–7 weeks with 2 people)
 
 Progress log:
