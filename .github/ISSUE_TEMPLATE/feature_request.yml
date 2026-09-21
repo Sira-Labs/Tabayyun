@@ -1,0 +1,32 @@
+name: Feature request
+description: Propose a capability that is not a new check
+labels: ["enhancement", "needs: triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Who is affected (persona from docs/architecture/01-product-vision.md) and what they cannot do today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Suggested milestone
+      options: [R1 sprint 4, R1 sprint 5, R1 sprint 6, v0.1, R2, R3, unsure]
+  - type: checkboxes
+    id: design
+    attributes:
+      label: Design impact
+      options:
+        - label: This changes an existing ADR or needs a new one

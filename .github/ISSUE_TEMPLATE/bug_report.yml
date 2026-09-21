@@ -1,0 +1,42 @@
+name: Bug report
+description: Something behaves incorrectly (wrong finding, crash, bad score, UI error)
+labels: ["bug", "needs: triage"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [core (Rust), bindings (Python wheel), api, web, deploy, docs]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include the check id (e.g. `tby.spikes`) and the finding or error text.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: >
+        A minimal series is ideal. `tabayyun synth --faults ...` plus the `tabayyun run` command,
+        or a small CSV attached. Never attach real customer data.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Git SHA, image tag (`sha-…`) or wheel version.
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Python/Rust/Node versions, deployment method (compose, dev, CLI).
