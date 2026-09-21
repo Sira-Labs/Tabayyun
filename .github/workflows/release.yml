@@ -60,13 +60,19 @@ jobs:
   deploy:
     name: deploy to docker host
     needs: images
-    # Runs only when the environment "production" exists and carries DEPLOY_HOST.
-    if: ${{ vars.DEPLOY_HOST != '' }}
     runs-on: ubuntu-latest
+    # Environment-scoped variables are only visible once the environment is bound, i.e. inside
+    # steps; a job-level `if` cannot see them. Every step therefore carries the gate.
     environment: production
     steps:
+      - name: configured?
+        id: gate
+        run: |
+          if [ -n "${{ vars.DEPLOY_HOST }}" ]; then echo "on=true" >> "$GITHUB_OUTPUT"; else echo "on=false" >> "$GITHUB_OUTPUT"; echo "DEPLOY_HOST not set on environment 'production'; skipping deploy"; fi
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.on == 'true'
       - name: copy compose bundle
+        if: steps.gate.outputs.on == 'true'
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ vars.DEPLOY_HOST }}
@@ -76,6 +82,7 @@ jobs:
           target: "~/tabayyun"
           strip_components: 1
       - name: pull and restart
+        if: steps.gate.outputs.on == 'true'
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ vars.DEPLOY_HOST }}

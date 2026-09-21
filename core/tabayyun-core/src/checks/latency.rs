@@ -1,11 +1,11 @@
 //! `tby.latency` — late arrival and future-stamped samples (catalogue #3).
 //! Needs ingest timestamps on the frame (`SeriesFrame::ingest_ts`).
 
-use super::{expected_interval, metric, Check, CheckContext, CheckOutput};
+use super::{duration_param, expected_interval, metric, Check, CheckContext, CheckOutput};
 use crate::error::{Error, Result};
 use crate::finding::{Dimension, Finding, Severity, Window};
 use crate::frame::SeriesFrame;
-use crate::time::{format_duration, parse_duration, NS_PER_SEC};
+use crate::time::format_duration;
 use serde::{Deserialize, Serialize};
 
 pub const ID: &str = "tby.latency";
@@ -47,15 +47,15 @@ impl Check for Latency {
             return Ok(out);
         }
         let interval = expected_interval(frame, ctx);
+        let future_tol = duration_param(ID, "future_tolerance", &self.future_tolerance)?;
         let sla = if self.sla == "auto" {
             match interval {
                 Some(i) => 2 * i,
                 None => return Ok(out),
             }
         } else {
-            parse_duration(&self.sla).unwrap_or(15 * 60 * NS_PER_SEC)
+            duration_param(ID, "sla", &self.sla)?
         };
-        let future_tol = parse_duration(&self.future_tolerance).unwrap_or(60 * NS_PER_SEC);
         let mut lat: Vec<i64> = frame.ts.iter().zip(ingest).map(|(t, i)| i - t).collect();
         let future = lat.iter().filter(|l| **l < -future_tol).count();
         let max_lead = lat.iter().copied().min().unwrap_or(0).min(0).abs();
@@ -108,6 +108,13 @@ mod tests {
     fn skipped_without_ingest() {
         let f = base(100);
         assert!(matches!(Latency::default().run(&f, &ctx(&f)), Err(Error::MissingMetadata { .. })));
+    }
+
+    #[test]
+    fn malformed_duration_is_an_error() {
+        let f = base(10).with_ingest_ts(vec![0; 10]).unwrap();
+        let bad = Latency { sla: "1h30m".into(), ..Default::default() };
+        assert!(matches!(bad.run(&f, &ctx(&f)), Err(Error::InvalidParams { .. })));
     }
 
     #[test]

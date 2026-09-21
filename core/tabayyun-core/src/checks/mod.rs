@@ -25,10 +25,12 @@ pub mod staleness;
 pub mod timestamp_integrity;
 pub mod value_type;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::finding::{Dimension, Finding, Metric, Severity, Window};
 use crate::frame::SeriesFrame;
 use crate::profile::Profile;
+use crate::time::parse_duration;
+use std::borrow::Cow;
 
 /// Evaluation context shared by all checks in a run.
 #[derive(Debug, Clone)]
@@ -143,6 +145,38 @@ pub(crate) fn segments(frame: &SeriesFrame, segment_ns: i64) -> Vec<(usize, usiz
         s = e;
     }
     out
+}
+
+/// Baseline profile for adaptive thresholds: the run's profile when present, otherwise a
+/// profile of the frame itself. The label says which one was used, for evidence.
+pub(crate) fn baseline<'a>(ctx: &'a CheckContext, frame: &SeriesFrame) -> (Cow<'a, Profile>, &'static str) {
+    match &ctx.profile {
+        Some(p) => (Cow::Borrowed(p), "baseline"),
+        None => (Cow::Owned(Profile::compute(frame)), "self"),
+    }
+}
+
+/// Finite values with usable quality in index range `[s, e)`.
+pub(crate) fn usable_values(frame: &SeriesFrame, s: usize, e: usize) -> Vec<f64> {
+    (s..e)
+        .filter(|&i| frame.values[i].is_finite() && frame.quality[i].is_usable())
+        .map(|i| frame.values[i])
+        .collect()
+}
+
+/// Timestamps and values of usable samples in `[s, e)`, for difference-based statistics.
+pub(crate) fn usable_pairs(frame: &SeriesFrame, s: usize, e: usize) -> (Vec<i64>, Vec<f64>) {
+    let idx: Vec<usize> =
+        (s..e).filter(|&i| frame.values[i].is_finite() && frame.quality[i].is_usable()).collect();
+    (idx.iter().map(|&i| frame.ts[i]).collect(), idx.iter().map(|&i| frame.values[i]).collect())
+}
+
+/// Parse a duration parameter, turning a malformed string into `Error::InvalidParams`.
+pub(crate) fn duration_param(check: &str, name: &str, value: &str) -> Result<i64> {
+    parse_duration(value).ok_or_else(|| Error::InvalidParams {
+        check: check.to_string(),
+        reason: format!("{name}: cannot parse duration `{value}` (use e.g. 90s, 15m, 2h, 1d)"),
+    })
 }
 
 pub(crate) fn metric(check_id: &str, frame: &SeriesFrame, name: &str, ts: i64, value: f64) -> Metric {

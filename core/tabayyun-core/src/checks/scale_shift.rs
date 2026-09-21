@@ -1,10 +1,10 @@
 //! `tby.scale_shift` — unit or scale error such as ×1000 or °C↔°F (catalogue #12).
 
-use super::{metric, segments, Check, CheckContext, CheckOutput};
+use super::{baseline, metric, segments, usable_values, Check, CheckContext, CheckOutput};
 use crate::error::Result;
 use crate::finding::{Dimension, Finding, Severity};
 use crate::frame::SeriesFrame;
-use crate::profile::{quantile_f64, Profile};
+use crate::profile::median_mad;
 use crate::time::NS_PER_DAY;
 use serde::{Deserialize, Serialize};
 
@@ -42,24 +42,17 @@ impl Check for ScaleShift {
     fn run(&self, frame: &SeriesFrame, ctx: &CheckContext) -> Result<CheckOutput> {
         let mut out = CheckOutput::default();
         let (f, _) = frame.normalized();
-        let (profile, source) = match &ctx.profile {
-            Some(p) => (p.clone(), "baseline"),
-            None => (Profile::compute(&f), "self"),
-        };
+        let (profile, source) = baseline(ctx, &f);
         let (Some(base_med), Some(base_mad)) = (profile.median, profile.mad) else { return Ok(out) };
         if base_med.abs() < 1e-12 {
             return Ok(out);
         }
         for (s, e, w) in segments(&f, self.segment_ns) {
-            let mut seg: Vec<f64> = f.values[s..e].iter().copied().filter(|v| v.is_finite()).collect();
+            let seg = usable_values(&f, s, e);
             if seg.len() < self.min_samples {
                 continue;
             }
-            seg.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            let med = quantile_f64(&seg, 0.5);
-            let mut dev: Vec<f64> = seg.iter().map(|v| (v - med).abs()).collect();
-            dev.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            let mad = quantile_f64(&dev, 0.5);
+            let Some((med, mad)) = median_mad(&seg) else { continue };
             let ratio = med / base_med;
             out.metrics.push(metric(ID, &f, "median_ratio", w.end, ratio));
             let mut candidate: Option<(String, f64)> = None;
@@ -71,7 +64,7 @@ impl Check for ScaleShift {
                     break;
                 }
             }
-            if candidate.is_none() && base_mad > 0.0 {
+            if candidate.is_none() {
                 // °C → °F: median maps by 1.8x + 32, spread by 1.8.
                 let f_med = 1.8 * base_med + 32.0;
                 if ((med - f_med) / f_med.abs().max(1.0)).abs() <= self.ratio_tol
@@ -109,6 +102,7 @@ mod tests {
     use super::*;
     use crate::checks::testutil::*;
     use crate::synth::inject;
+    use crate::Profile;
 
     #[test]
     fn thousand_fold_day_flagged() {
@@ -138,5 +132,15 @@ mod tests {
     fn clean_passes() {
         let f = base(3 * 1440);
         assert!(ids(&ScaleShift::default().run(&f, &ctx(&f)).unwrap(), ID).is_empty());
+    }
+
+    #[test]
+    fn bad_quality_fault_codes_ignored() {
+        let profile = Profile::compute(&base(3 * 1440));
+        let mut f = base(3 * 1440);
+        inject::set(&mut f, 2880, 1440, -9999.0);
+        inject::quality(&mut f, 2880, 1440, crate::Quality::Bad);
+        let c = ctx(&f).with_profile(profile);
+        assert!(ids(&ScaleShift::default().run(&f, &c).unwrap(), ID).is_empty());
     }
 }

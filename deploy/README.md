@@ -16,7 +16,9 @@ Tags: `latest` (main), `main`, `sha-<short>`, and `<version>` for tags.
 mkdir -p ~/tabayyun && cd ~/tabayyun
 curl -fsSL https://raw.githubusercontent.com/thedatadudech/Tabayyun/main/deploy/compose.yaml -o compose.yaml
 curl -fsSL https://raw.githubusercontent.com/thedatadudech/Tabayyun/main/deploy/.env.example -o .env
-# edit .env: POSTGRES_PASSWORD, TABAYYUN_SESSION_SECRET, TABAYYUN_DOMAIN (for automatic TLS)
+# edit .env: POSTGRES_PASSWORD and TABAYYUN_SESSION_SECRET (both mandatory, generate with
+# `openssl rand -base64 36`), TABAYYUN_DOMAIN for automatic TLS; OIDC values stay empty
+# until the auth router ships
 docker compose up -d
 ```
 
@@ -27,8 +29,8 @@ load balancer.
 ## Continuous deployment from GitHub Actions
 
 The `deploy` job in the release workflow ships the compose file to a host over SSH and runs
-`docker compose pull && up -d`. It is skipped until you configure a GitHub **environment**
-named `production` with:
+`docker compose pull && up -d`. Its steps are skipped until you configure a GitHub
+**environment** named `production` with:
 
 | Kind | Name | Value |
 |---|---|---|

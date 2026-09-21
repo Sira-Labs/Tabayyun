@@ -1,4 +1,5 @@
 import io
+from datetime import timedelta
 
 import pytest
 import tabayyun_core as tc
@@ -8,15 +9,18 @@ from tabayyun.main import create_app
 from tabayyun.settings import Settings
 
 
-def faulty_csv(faults: list[str]) -> bytes:
+def faulty_csv(faults: list[str], *, late_minutes: int | None = None) -> bytes:
     batch = tc.synth(n=2880, faults=faults)
     ts = batch.column("ts").to_pylist()
     values = batch.column("value").to_pylist()
     quality = batch.column("quality").to_pylist()
     buf = io.StringIO()
-    buf.write("ts,value,quality\n")
+    buf.write("ts,value,quality" + (",arrived" if late_minutes is not None else "") + "\n")
     for t, v, q in zip(ts, values, quality, strict=True):
-        buf.write(f"{t.isoformat()},{'' if v is None else f'{v:.4f}'},{q}\n")
+        row = f"{t.isoformat()},{'' if v is None else f'{v:.4f}'},{q}"
+        if late_minutes is not None:
+            row += f",{(t + timedelta(minutes=late_minutes)).isoformat()}"
+        buf.write(row + "\n")
     return buf.getvalue().encode()
 
 
@@ -46,6 +50,19 @@ async def test_run_checks_on_csv(app):
     assert {"tby.completeness", "tby.flatline", "tby.value_type", "tby.non_negative"} <= found
     assert report["n_samples"] == 2880 - 144
     assert 0 < report["score"]["overall"] < 100
+
+
+async def test_latency_via_ingest_column(app):
+    csv = faulty_csv([], late_minutes=10)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            "/api/checks/run",
+            files={"file": ("f.csv", csv, "text/csv")},
+            data={"series_id": "late", "ingest_col": "arrived"},
+        )
+    assert r.status_code == 200, r.text
+    assert "tby.latency" in {f["check_id"] for f in r.json()["findings"]}
+    assert r.json()["score"]["method_version"] == "v2"
 
 
 async def test_bad_csv_is_422(app):

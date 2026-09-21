@@ -1,10 +1,9 @@
 //! `tby.rate_of_change` — slew-rate violations (catalogue #14).
 
-use super::{expected_interval, metric, run_window, runs_where, Check, CheckContext, CheckOutput};
+use super::{baseline, expected_interval, metric, run_window, runs_where, Check, CheckContext, CheckOutput};
 use crate::error::Result;
 use crate::finding::{Dimension, Finding, Severity};
 use crate::frame::SeriesFrame;
-use crate::profile::Profile;
 use serde::{Deserialize, Serialize};
 
 pub const ID: &str = "tby.rate_of_change";
@@ -48,10 +47,7 @@ impl Check for RateOfChange {
         let (limit, source) = match self.max_rate {
             Some(r) => (r, "explicit"),
             None => {
-                let (p, src) = match &ctx.profile {
-                    Some(p) => (p.clone(), "baseline"),
-                    None => (Profile::compute(&f), "self"),
-                };
+                let (p, src) = baseline(ctx, &f);
                 match p.rate_p999 {
                     Some(r) if r > 0.0 => (self.factor * r, src),
                     _ => return Ok(out),
@@ -92,6 +88,7 @@ mod tests {
     use super::*;
     use crate::checks::testutil::*;
     use crate::synth::inject;
+    use crate::Profile;
 
     #[test]
     fn step_against_baseline_flagged() {

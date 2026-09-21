@@ -140,6 +140,19 @@ fn quantile_i64(sorted: &[i64], q: f64) -> i64 {
     sorted[idx.min(sorted.len() - 1)]
 }
 
+/// Median and unscaled MAD of a value set (sorts a copy). `None` for an empty set.
+pub fn median_mad(values: &[f64]) -> Option<(f64, f64)> {
+    let mut v: Vec<f64> = values.iter().copied().filter(|x| x.is_finite()).collect();
+    if v.is_empty() {
+        return None;
+    }
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let med = quantile_f64(&v, 0.5);
+    let mut dev: Vec<f64> = v.iter().map(|x| (x - med).abs()).collect();
+    dev.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    Some((med, quantile_f64(&dev, 0.5)))
+}
+
 pub(crate) fn quantile_f64(sorted: &[f64], q: f64) -> f64 {
     let idx = ((sorted.len() - 1) as f64 * q).round() as usize;
     sorted[idx.min(sorted.len() - 1)]

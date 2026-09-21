@@ -25,6 +25,24 @@ async def test_version(app):
 
 
 def test_prod_refuses_placeholders():
-    s = Settings(env="prod")
     with pytest.raises(RuntimeError):
-        create_app(s)
+        create_app(Settings(env="prod"))
+    with pytest.raises(RuntimeError, match="SESSION_SECRET"):
+        create_app(
+            Settings(
+                env="prod",
+                session_secret="change-me-openssl-rand-base64-48",
+                database_url="postgresql+psycopg://tabayyun:s3cr3t-long-enough-value@db/tabayyun",
+            )
+        )
+
+
+def test_prod_starts_without_oidc_when_secrets_are_real():
+    app = create_app(
+        Settings(
+            env="prod",
+            session_secret="9f1c2a7d4e8b6c0f3a5d7e9b1c2d4f6a8b0c2d4e",
+            database_url="postgresql+psycopg://tabayyun:s3cr3t-long-enough-value@db/tabayyun",
+        )
+    )
+    assert app.title == "Tabayyun API"

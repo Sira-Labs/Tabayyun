@@ -1,10 +1,12 @@
 //! Scoring v2 (see `docs/architecture/02-domain-model.md`).
 //!
-//! Within a dimension, findings are merged on the time axis: the impact is the integral over
-//! the evaluation window of the *maximum* severity weight among findings covering each
-//! instant, divided by the window duration. Two checks flagging the same minute therefore
-//! count once (at the higher severity) instead of twice. Findings whose window is a single
-//! sample (spikes) contribute their own `score_impact` additively, capped.
+//! Within a dimension, findings are merged on the time axis. Each finding is spread evenly
+//! over its window with density `score_impact × window_duration / finding_duration`
+//! (capped at its severity weight), so a finding that covers the whole window but affects
+//! one sample in ten thousand stays negligible, while a gap keeps its full severity weight.
+//! The impact is the integral of the *maximum* density among findings covering each
+//! instant, divided by the window duration: two checks flagging the same minute count once
+//! (at the higher density) instead of twice.
 //! Series dimension score = 100 × (1 − clip(impact)); overall = weighted mean of dimensions.
 
 use crate::finding::{Dimension, Finding};

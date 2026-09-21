@@ -1,11 +1,11 @@
 //! `tby.distribution_drift` — PSI and normalised Wasserstein distance per segment against the
 //! baseline quantile grid (catalogue #19).
 
-use super::{metric, segments, Check, CheckContext, CheckOutput};
+use super::{baseline, metric, segments, usable_values, Check, CheckContext, CheckOutput};
 use crate::error::Result;
 use crate::finding::{Dimension, Finding, Severity};
 use crate::frame::SeriesFrame;
-use crate::profile::{quantile_f64, Profile};
+use crate::profile::quantile_f64;
 use crate::time::NS_PER_DAY;
 use serde::{Deserialize, Serialize};
 
@@ -66,10 +66,7 @@ impl Check for DistributionDrift {
     fn run(&self, frame: &SeriesFrame, ctx: &CheckContext) -> Result<CheckOutput> {
         let mut out = CheckOutput::default();
         let (f, _) = frame.normalized();
-        let (profile, source) = match &ctx.profile {
-            Some(p) => (p.clone(), "baseline"),
-            None => (Profile::compute(&f), "self"),
-        };
+        let (profile, source) = baseline(ctx, &f);
         if profile.quantiles.len() != 21 {
             return Ok(out);
         }
@@ -77,7 +74,7 @@ impl Check for DistributionDrift {
         let iqr = (q[15] - q[5]).max(profile.resolution.unwrap_or(0.0)).max(1e-12);
         let edges: Vec<f64> = (1..10).map(|k| q[2 * k]).collect(); // deciles 10..90 %
         for (s, e, w) in segments(&f, self.segment_ns) {
-            let mut seg: Vec<f64> = f.values[s..e].iter().copied().filter(|v| v.is_finite()).collect();
+            let mut seg = usable_values(&f, s, e);
             if seg.len() < self.min_samples {
                 continue;
             }
@@ -109,6 +106,7 @@ impl Check for DistributionDrift {
 mod tests {
     use super::*;
     use crate::checks::testutil::*;
+    use crate::Profile;
 
     #[test]
     fn shifted_day_flagged() {

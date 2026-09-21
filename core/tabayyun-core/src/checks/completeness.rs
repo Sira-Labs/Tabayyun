@@ -1,10 +1,10 @@
 //! `tby.completeness` — gaps and missing samples (catalogue #1).
 
-use super::{expected_interval, metric, Check, CheckContext, CheckOutput};
+use super::{duration_param, expected_interval, metric, Check, CheckContext, CheckOutput};
 use crate::error::Result;
 use crate::finding::{Dimension, Finding, Severity, Window};
 use crate::frame::SeriesFrame;
-use crate::time::{format_duration, parse_duration, NS_PER_MIN};
+use crate::time::format_duration;
 use serde::{Deserialize, Serialize};
 
 pub const ID: &str = "tby.completeness";
@@ -53,7 +53,7 @@ impl Check for Completeness {
         let mut out = CheckOutput::default();
         let (f, _) = frame.normalized();
         let Some(interval) = expected_interval(&f, ctx) else { return Ok(out) };
-        let min_gap = parse_duration(&self.min_gap).unwrap_or(5 * NS_PER_MIN);
+        let min_gap = duration_param(ID, "min_gap", &self.min_gap)?;
         let gap_threshold = ((self.gap_factor * interval as f64) as i64).max(min_gap);
 
         // Present samples: timestamps of samples that count as present.

@@ -1,10 +1,10 @@
 //! `tby.level_drift` — slow bias / trend via Theil–Sen on segment medians (catalogue #18).
 
-use super::{metric, segments, Check, CheckContext, CheckOutput};
+use super::{baseline, metric, segments, usable_values, Check, CheckContext, CheckOutput};
 use crate::error::Result;
 use crate::finding::{Dimension, Finding, Severity, Window};
 use crate::frame::SeriesFrame;
-use crate::profile::{quantile_f64, Profile};
+use crate::profile::{median_mad, quantile_f64};
 use crate::time::{format_duration, NS_PER_DAY};
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +22,9 @@ pub struct LevelDrift {
     /// is judged against noise rather than against seasonal swing.
     pub k: f64,
     pub min_segments: usize,
+    /// Upper bound on segments; the segment is widened beyond this so the O(n²) Theil–Sen
+    /// estimator stays cheap on long series.
+    pub max_segments: usize,
     pub severity: Severity,
 }
 
@@ -32,6 +35,7 @@ impl Default for LevelDrift {
             horizon_ns: 30 * NS_PER_DAY,
             k: 3.0,
             min_segments: 7,
+            max_segments: 400,
             severity: Severity::Medium,
         }
     }
@@ -72,23 +76,25 @@ impl Check for LevelDrift {
     fn run(&self, frame: &SeriesFrame, ctx: &CheckContext) -> Result<CheckOutput> {
         let mut out = CheckOutput::default();
         let (f, _) = frame.normalized();
-        let (profile, source) = match &ctx.profile {
-            Some(p) => (p.clone(), "baseline"),
-            None => (Profile::compute(&f), "self"),
-        };
+        let (profile, source) = baseline(ctx, &f);
         let Some(mad) = profile.mad else { return Ok(out) };
         let spread =
             profile.noise_mad.unwrap_or(0.0).max(0.1 * 1.4826 * mad).max(profile.resolution.unwrap_or(0.0));
+        let span = (f.ts[f.len() - 1] - f.ts[0]).max(1);
+        let mut segment_ns = self.segment_ns.max(1);
+        if span / segment_ns + 1 > self.max_segments as i64 {
+            segment_ns = (span as f64 / self.max_segments as f64).ceil() as i64;
+        }
         let mut xs = Vec::new();
         let mut ys = Vec::new();
-        for (s, e, w) in segments(&f, self.segment_ns) {
-            let mut seg: Vec<f64> = f.values[s..e].iter().copied().filter(|v| v.is_finite()).collect();
+        for (s, e, w) in segments(&f, segment_ns) {
+            let seg = usable_values(&f, s, e);
             if seg.len() < 10 {
                 continue;
             }
-            seg.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let Some((med, _)) = median_mad(&seg) else { continue };
             xs.push((w.start - f.ts[0]) as f64 / NS_PER_DAY as f64);
-            ys.push(quantile_f64(&seg, 0.5));
+            ys.push(med);
         }
         if xs.len() < self.min_segments {
             return Ok(out);
@@ -104,7 +110,7 @@ impl Check for LevelDrift {
                 format!("Level drifts by {slope_per_day:.4} per day ({drift:+.4} over {}, {:.1}× the noise reference)",
                     format_duration(self.horizon_ns), drift.abs() / spread),
                 serde_json::json!({"slope_per_day": slope_per_day, "drift_over_horizon": drift, "horizon_ns": self.horizon_ns,
-                    "reference": spread, "segments": xs.len(), "baseline": source}),
+                    "reference": spread, "segments": xs.len(), "segment_ns": segment_ns, "baseline": source}),
             ));
         }
         Ok(out)
@@ -115,6 +121,7 @@ impl Check for LevelDrift {
 mod tests {
     use super::*;
     use crate::checks::testutil::*;
+    use crate::Profile;
 
     #[test]
     fn ramp_over_two_weeks_flagged() {
@@ -126,6 +133,15 @@ mod tests {
         let c = ctx(&f).with_profile(profile);
         let out = LevelDrift::default().run(&f, &c).unwrap();
         assert_eq!(ids(&out, ID).len(), 1, "{:?}", out.findings);
+    }
+
+    #[test]
+    fn segment_count_is_capped() {
+        let f = base(30 * 1440);
+        let c = LevelDrift { segment_ns: 60 * 1_000_000_000, max_segments: 50, ..Default::default() };
+        let out = c.run(&f, &ctx(&f)).unwrap();
+        // No drift in the base signal, and the run must finish quickly with ≤ 50 segments.
+        assert!(ids(&out, ID).is_empty());
     }
 
     #[test]

@@ -1,10 +1,10 @@
 //! `tby.noise_level` — variance jump or suspicious smoothness per segment (catalogue #15).
 
-use super::{metric, segments, Check, CheckContext, CheckOutput};
+use super::{baseline, metric, segments, usable_pairs, Check, CheckContext, CheckOutput};
 use crate::error::Result;
 use crate::finding::{Dimension, Finding, Severity};
 use crate::frame::SeriesFrame;
-use crate::profile::{noise_sigma, Profile};
+use crate::profile::noise_sigma;
 use crate::time::NS_PER_DAY;
 use serde::{Deserialize, Serialize};
 
@@ -42,17 +42,15 @@ impl Check for NoiseLevel {
     fn run(&self, frame: &SeriesFrame, ctx: &CheckContext) -> Result<CheckOutput> {
         let mut out = CheckOutput::default();
         let (f, _) = frame.normalized();
-        let (profile, source) = match &ctx.profile {
-            Some(p) => (p.clone(), "baseline"),
-            None => (Profile::compute(&f), "self"),
-        };
+        let (profile, source) = baseline(ctx, &f);
         let Some(base) = profile.noise_mad.filter(|s| *s > 0.0) else { return Ok(out) };
         let gap_cut = profile.expected_interval_ns.map(|i| 3 * i).unwrap_or(i64::MAX);
         for (s, e, w) in segments(&f, self.segment_ns) {
-            if e - s < self.min_samples {
+            let (ts, vals) = usable_pairs(&f, s, e);
+            if vals.len() < self.min_samples {
                 continue;
             }
-            let Some(sigma) = noise_sigma(&f.ts[s..e], &f.values[s..e], gap_cut) else { continue };
+            let Some(sigma) = noise_sigma(&ts, &vals, gap_cut) else { continue };
             let ratio = sigma / base;
             out.metrics.push(metric(ID, &f, "noise_ratio", w.end, ratio));
             if ratio > self.high || ratio < self.low {
@@ -81,8 +79,19 @@ mod tests {
     use crate::synth::Rng;
 
     #[test]
+    fn mostly_null_day_is_not_judged() {
+        let profile = crate::Profile::compute(&base(3 * 1440));
+        let mut f = base(3 * 1440);
+        for v in f.values.iter_mut().skip(2880).take(1438) {
+            *v = f64::NAN;
+        }
+        let c = ctx(&f).with_profile(profile);
+        assert!(ids(&NoiseLevel::default().run(&f, &c).unwrap(), ID).is_empty());
+    }
+
+    #[test]
     fn noisy_day_and_smooth_day() {
-        let profile = Profile::compute(&base(4 * 1440));
+        let profile = crate::Profile::compute(&base(4 * 1440));
         let mut f = base(4 * 1440);
         let mut rng = Rng::new(11);
         for v in f.values.iter_mut().skip(2880).take(1440) {
