@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1.7
-FROM node:25-bookworm-slim AS build
+# Stay on the LTS line: Node 25+ no longer ships Corepack, which provides the pinned pnpm.
+FROM node:22-bookworm-slim AS build
 RUN corepack enable
 WORKDIR /app
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
