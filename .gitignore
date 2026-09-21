@@ -1,0 +1,46 @@
+# Rust
+/target/
+**/target/
+Cargo.lock.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.uv-cache/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+dist/
+build/
+*.whl
+
+# Node / frontend
+node_modules/
+.next/
+.svelte-kit/
+.output/
+.vite/
+*.tsbuildinfo
+coverage/
+
+# Env & secrets (never commit)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Data
+data/raw/
+data/cache/
+*.parquet
+!tests/fixtures/**/*.parquet
