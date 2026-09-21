@@ -6,6 +6,10 @@ stories roll into the next sprint unchanged, nothing is squeezed in. One branch 
 (`sprint/NN-topic`), one PR, CodeRabbit review, merge by the owner, release from `main`
 deploys to CapRover.*
 
+The weekly plan supersedes the earlier duration estimates in `roadmap.md` (12, 8–10 and
+8–12 weeks): R1 keeps its length, R2 and R3 are compressed to five and four sprints because
+the checks, connectors and screens they need are built on the R1 foundation.
+
 Sizing rule of thumb from sprints 1–4: one sprint fits roughly *one* of the following:
 six checks with tests, or one vertical slice through API + web + persistence, or one
 connector with its screens. Research notes are cheap and go last in a sprint if budget
@@ -23,7 +27,7 @@ for user-facing stories, a screenshot or curl transcript in the PR.
 | **R2 domain depth** | 14–18 (until 26 Dec 2026) | metering, PV, wind, grid, oil and gas packs; RepairFlows with regulatory estimation; write-back; public benchmark corpus |
 | **R3 platform, release 1.0** | 19–22 (until 23 Jan 2027) | enterprise SSO and SCIM, API tokens, embeds, fleet baselines, multi-node workers, more connectors, SOC 2 pack, licensing |
 
-## Sprint 5 — 21 to 26 Sep 2026 (this week, ~10 % budget left)
+## Sprint 5 — 20 to 26 Sep 2026 (this week, ~10 % budget left)
 
 Goal: land what is open, plan, no new feature work.
 
@@ -149,9 +153,9 @@ Goal: a pilot site can install and trust it.
 |---|---|---|---|
 | S14-1 | VEE rule presets (UBP, AEMO, Elexon/MHHS) as suite templates with published thresholds | M | preset selectable per dataset |
 | S14-2 | Estimation methods with substitution types: linear ≤2 h, like-day, average like-day, previous-year like-day, zero; precedence order per preset | M | corrections carry the substitution code |
-| S14-3 | DST interval-count rule (92/96/100), estimated-share reporting per meter per month | S | |
+| S14-3 | DST interval-count rule (92/96/100), estimated-share reporting per meter per month | S | spring-forward and fall-back days pass; monthly estimated share per meter in the API |
 | S14-4 | RepairFlows: scheduled block pipelines (filter → impute → align → publish) with approval policies, run after suite | M | a flow repairs gaps nightly |
-| S14-5 | `impute.seasonal`, `impute.kalman` in the Rust repair module | S | |
+| S14-5 | `impute.seasonal`, `impute.kalman` in the Rust repair module | S | unit tests recover an injected gap within 5 % RMSE on a daily-cycle series |
 
 ## Sprint 15 — 29 Nov to 5 Dec — PV and wind packs
 
@@ -159,7 +163,7 @@ Goal: a pilot site can install and trust it.
 |---|---|---|---|
 | S15-1 | PV: clear-sky and daily insolation limits, capacity data shifts, soiling and pyranometer drift vs reference, PR sensitivity to gaps | M | PVDAQ-based tests |
 | S15-2 | Wind: IEC 61400-12-1 filtering presets, icing signature, implausible min/max/std, event-log correlation | M | Kelmarsh/Penmanshiel tests |
-| S15-3 | Physics-aware imputation for PV (clear-sky scaled) and wind (power-curve) | S | |
+| S15-3 | Physics-aware imputation for PV (clear-sky scaled) and wind (power-curve) | S | imputed day within 10 % of the withheld PVDAQ actual |
 
 ## Sprint 16 — 6 to 12 Dec — oil and gas pack 1 (research 05)
 
@@ -168,26 +172,26 @@ Goal: a pilot site can install and trust it.
 | S16-1 | Companion state series: shut-in and valve-state masking for flatline, non-negative and range findings | M | 3W DHSV-closure instance no longer reports the closed-in period as stuck |
 | S16-2 | PI `ExcDev`/`CompDev`/`CompMax` from the connector into series metadata; compression-aware `flatline`, `interpolation_artifacts`, `resolution_loss` | M | compressed 3W tags produce one informational finding per window |
 | S16-3 | `interpolation_artifacts` aggregated into episodes per ADR-0011 | M | ≤ 5 findings per 3W series |
-| S16-4 | Quality-code sub-findings for OPC `Good_LocalOverride`, `Good_Clamped`, `Uncertain_*` | S | |
-| S16-5 | Choke-vs-flow consistency rule; P/T consistency pairs as `correlation_break` presets | C | |
+| S16-4 | Quality-code sub-findings for OPC `Good_LocalOverride`, `Good_Clamped`, `Uncertain_*` | S | asyncua fixture with overridden node yields a `quality_flags` sub-finding |
+| S16-5 | Choke-vs-flow consistency rule; P/T consistency pairs as `correlation_break` presets | C | 3W instance with choke open and zero gas-lift flow is flagged |
 
 ## Sprint 17 — 13 to 19 Dec — oil and gas pack 2
 
 | ID | Story | Prio | Done when |
 |---|---|---|---|
-| S17-1 | `redundant_disagreement` SIS discrepancy override and growing-deviation signature | M | |
+| S17-1 | `redundant_disagreement` SIS discrepancy override and growing-deviation signature | M | synthetic drifting channel flagged before it crosses the trip limit |
 | S17-2 | `balance_residual` with VDI 2048-style propagated uncertainty and suspect ranking; `reconcile.balance` repair op | M | pipeline inlet/outlet fixture |
-| S17-3 | Allocation imbalance and well-test-vs-MPFM checks with contractual tolerance parameters | S | |
-| S17-4 | Meter-factor drift from proving history; alarm-rate, chattering and stale KPIs on event series (EEMUA 191 / ISA-18.2) | S | |
-| S17-5 | Timestamp skew across RTUs before balance checks | C | |
+| S17-3 | Allocation imbalance and well-test-vs-MPFM checks with contractual tolerance parameters | S | synthetic field with a 3 % imbalance flagged at a 2 % tolerance, passes at 5 % |
+| S17-4 | Meter-factor drift from proving history; alarm-rate, chattering and stale KPIs on event series (EEMUA 191 / ISA-18.2) | S | proving series with 0.06 % repeatability flagged; alarm flood (>10 in 10 min) detected on a synthetic event log |
+| S17-5 | Timestamp skew across RTUs before balance checks | C | a 30 s skew between inlet and outlet is reported and no phantom imbalance results |
 
 ## Sprint 18 — 20 to 26 Dec — grid pack, write-back, benchmark corpus (holiday week, half capacity)
 
 | ID | Story | Prio | Done when |
 |---|---|---|---|
-| S18-1 | Grid: PMU STAT-word decoding, NASPI completeness attributes, market-interval counts | S | |
-| S18-2 | PI and OPC write-back publish targets to separate tags | S | never writes the source tag (test) |
-| S18-3 | Threshold suggestions from false-positive feedback | S | |
+| S18-1 | Grid: PMU STAT-word decoding, NASPI completeness attributes, market-interval counts | S | C37.118 fixture decoded; a day with 95 instead of 96 intervals flagged |
+| S18-2 | PI and OPC write-back publish targets to separate tags | S | corrected values land in the mapped tag; a test proves the source tag is never written |
+| S18-3 | Threshold suggestions from false-positive feedback | S | three false-positive marks on one check produce a suggestion the editor can accept |
 | S18-4 | Public labelled benchmark corpus (synthetic + PVDAQ, Kelmarsh/Penmanshiel, OPSD, Elia, 3W) under CC-BY with expected findings | C | repository published |
 
 ## Sprint 19 — 27 Dec to 2 Jan 2027 — enterprise identity
@@ -195,32 +199,32 @@ Goal: a pilot site can install and trust it.
 | ID | Story | Prio | Done when |
 |---|---|---|---|
 | S19-1 | Per-organisation OIDC/SAML connections through Keycloak, group-to-role mapping | M | Entra test tenant login |
-| S19-2 | API tokens (scoped, hashed, expiring) and service accounts | M | |
-| S19-3 | Embeds with signed JWT and locked scope | S | |
-| S19-4 | SCIM provisioning after Entra/Okta preview testing | C | |
+| S19-2 | API tokens (scoped, hashed, expiring) and service accounts | M | token with viewer scope cannot mutate; expired token rejected; only the hash is stored |
+| S19-3 | Embeds with signed JWT and locked scope | S | embedded series chart renders on an external page and rejects a tampered JWT |
+| S19-4 | SCIM provisioning after Entra/Okta preview testing | C | user created and deprovisioned from an Entra test tenant |
 
 ## Sprint 20 — 3 to 9 Jan — fleet baselines and scale
 
 | ID | Story | Prio | Done when |
 |---|---|---|---|
-| S20-1 | Fleet baselines: template-level thresholds by asset type, override inheritance | M | |
-| S20-2 | Operating-mode segmentation (running, idle, maintenance) feeding all adaptive checks | M | |
-| S20-3 | Multi-node workers, queue partitioning, Arrow Flight service option | S | |
+| S20-1 | Fleet baselines: template-level thresholds by asset type, override inheritance | M | a template change propagates to all series of the type unless overridden; "why this threshold" shows the source |
+| S20-2 | Operating-mode segmentation (running, idle, maintenance) feeding all adaptive checks | M | profiles and findings are computed per mode; idle periods raise no operational-range findings |
+| S20-3 | Multi-node workers, queue partitioning, Arrow Flight service option | S | two worker nodes share a queue without duplicate runs; Flight endpoint streams a series |
 
 ## Sprint 21 — 10 to 16 Jan — connectors and mobile
 
 | ID | Story | Prio | Done when |
 |---|---|---|---|
-| S21-1 | ClickHouse, Cognite Data Fusion and AWS SiteWise connectors | M | |
-| S21-2 | Capacitor mobile wrapper with push notifications for alerts | S | |
-| S21-3 | Explorer: DataFusion SQL over the cache, read-only with timeouts | C | |
+| S21-1 | ClickHouse, Cognite Data Fusion and AWS SiteWise connectors | M | each connector passes the framework contract tests against a recorded fixture |
+| S21-2 | Capacitor mobile wrapper with push notifications for alerts | S | Android and iOS builds receive a push for a critical finding |
+| S21-3 | Explorer: DataFusion SQL over the cache, read-only with timeouts | C | a write statement is rejected; a 10 s query is cancelled |
 
 ## Sprint 22 — 17 to 23 Jan — compliance and release 1.0
 
 | ID | Story | Prio | Done when |
 |---|---|---|---|
-| S22-1 | SOC 2 readiness pack: policies, audit-log retention, access reviews | M | |
-| S22-2 | Offline licensing and entitlements | M | |
+| S22-1 | SOC 2 readiness pack: policies, audit-log retention, access reviews | M | policy documents in `docs/compliance/`; retention job and access-review export exist |
+| S22-2 | Offline licensing and entitlements | M | signed licence file gates features without network access; expiry warns 30 days ahead |
 | S22-3 | Release 1.0: docs site, upgrade guide, changelog | M | `v1.0.0` |
 
 ## Working agreement
