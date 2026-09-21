@@ -1,7 +1,8 @@
 """FastAPI application factory.
 
-Sprint 1 exposes only health and version. Routers for auth, workspaces, series, runs,
-findings and corrections are added per `docs/architecture/03-system-architecture.md`.
+Sprint 2 exposes health, version and stateless check execution. Routers for auth,
+workspaces, series, runs, findings and corrections are added per
+`docs/architecture/03-system-architecture.md`.
 """
 
 from collections.abc import AsyncIterator
@@ -11,6 +12,7 @@ import structlog
 from fastapi import FastAPI
 
 from tabayyun import __version__
+from tabayyun.routers import checks
 from tabayyun.settings import Settings, get_settings
 
 log = structlog.get_logger()
@@ -34,6 +36,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url=None,
         openapi_url="/api/openapi.json",
     )
+
+    app.include_router(checks.router)
 
     @app.get("/healthz", tags=["ops"])
     async def healthz() -> dict[str, str]:

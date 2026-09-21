@@ -9,6 +9,9 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "structlog>=24.1",
+    "python-multipart>=0.0.9",
+    "pyarrow>=17",
+    "tabayyun-core",
 ]
 
 [project.optional-dependencies]
@@ -19,6 +22,9 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.10",
 ]
+
+[tool.uv.sources]
+tabayyun-core = { path = "../core/tabayyun-py" }
 
 [build-system]
 requires = ["hatchling"]
@@ -44,6 +50,10 @@ python_version = "3.11"
 strict = true
 packages = ["tabayyun"]
 mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["pyarrow", "pyarrow.*", "tabayyun_core", "tabayyun_core.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
