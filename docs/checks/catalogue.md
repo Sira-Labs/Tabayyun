@@ -141,13 +141,21 @@ Profiles are versioned and stored; findings link to the profile they used.
 - **Dim:** plausibility. **Sev:** high.
 - **Algorithm:** run length of |Δ| ≤ `atol` (default resolution/2) ≥ `min_run` samples
   **and** ≥ `min_duration`. Skip if series kind is setpoint/status or the profile's
-  `constant_fraction` > 0.5 (legitimately constant), unless overridden. Compression-aware:
-  if the source uses deadband/swinging-door compression, a flat run with no archived points
-  is not evidence of stuck; require archived samples inside the run.
+  `constant_fraction` > 0.5 (legitimately constant), unless overridden. Floor-aware: a run
+  resting on the series' floor (explicit or unit-inferred `physical_min`, zero for a
+  non-negative quantity, else the observed minimum) is idling, not a stuck sensor, when the
+  floor is a recurring state: at least `floor_fraction` of the usable samples sit on it and
+  at least `min_floor_runs` runs rest on it (solar generation at night, a pump that is off).
+  A floor run longer than `floor_run_factor` × the median floor run is still reported (a
+  night that lasts three days is an outage). Compression-aware: if the source uses
+  deadband/swinging-door compression, a flat run with no archived points is not evidence of
+  stuck; require archived samples inside the run.
 - **Params:** `min_run` 6 (pvanalytics) to 10; `min_duration` auto = max(1 h, 10 × interval);
-  `atol` auto; OpenOA uses 3 intervals for 10-min SCADA.
-- **Evidence:** run start/end, run length, value, resolution, compression mode.
-- **Sources:** pvanalytics `stale_values_diff(window=6)`; OpenOA `unresponsive_flag(3)`; AVEVA `Range()==0`; PMU flat 60.00 Hz.
+  `atol` auto; `ignore_floor` true; `floor_fraction` 0.05; `min_floor_runs` 3;
+  `floor_run_factor` 3.0; OpenOA uses 3 intervals for 10-min SCADA.
+- **Evidence:** run start/end, run length, value, resolution, floor value, whether the run
+  rests on the floor, compression mode. Metric `floor_runs` counts the idling runs skipped.
+- **Sources:** pvanalytics `stale_values_diff(window=6)`; OpenOA `unresponsive_flag(3)`; AVEVA `Range()==0`; PMU flat 60.00 Hz; OPSD DE solar (1,149 nightly zero runs, none a fault).
 
 ### 9. `tby.physical_range` — Outside physically possible limits
 - **Dim:** validity. **Sev:** critical.
@@ -182,14 +190,25 @@ Profiles are versioned and stored; findings link to the profile they used.
 - **Evidence:** ratio, candidate transformation, window.
 
 ### 13. `tby.spikes` — Point outliers
-- **Dim:** plausibility. **Sev:** medium.
+- **Dim:** plausibility. **Sev:** medium (low for the spiky-signal summary).
 - **Algorithm:** Hampel filter: |x − rolling_median| > `t` × 1.4826 × rolling_MAD, window
-  `w`. Optional seasonal variant: STL residual + generalized ESD when
-  `seasonal_strength` > 0.6. Energy-metering variant (UBP): per 24 h,
+  `w`, with the scale floored at the series resolution or baseline `noise_mad`. A hit is a
+  spike only when it is isolated: a run of at most `max_width` consecutive hits bounded by
+  ordinary samples. Longer runs are excursions (appliance switching, a solar ramp against a
+  night-time median) and are left to rate-of-change, operational-range and changepoint.
+  Spikes closer than `cluster_gap` form one finding per cluster with an exact count. When a
+  series has more clusters than `max_findings`, spikes are a property of the signal rather
+  than isolated faults: one low-severity summary finding reports the spike count, share and
+  the largest clusters (ADR-0011). Optional seasonal variant: STL residual + generalized ESD
+  when `seasonal_strength` > 0.6. Energy-metering variant (UBP): per 24 h,
   (highest − 3rd highest)/3rd highest > 1.8 and highest > 10 pulses.
-- **Params:** `t` 3.0 (pvanalytics hampel 3.0); `w` 11 samples; `ubp_ratio` 1.8.
-- **Evidence:** spike timestamps, values, local median/MAD.
-- **Sources:** Hampel (pracma/MATLAB); S-H-ESD; UBP §1.4.4; Oracle Interval Spike Check.
+- **Params:** `t` 4.0 (pvanalytics hampel 3.0); `w` 21 samples; `max_width` 3;
+  `cluster_gap` auto = max(1 h, 12 × interval); `max_findings` 20; `max_listed` 10;
+  `ubp_ratio` 1.8.
+- **Evidence:** per cluster: count, first/last/peak timestamps, peak value, local median and
+  z, listed timestamps and values (up to `max_listed`). Metrics `spike_count`,
+  `spike_clusters`, `excursion_runs`.
+- **Sources:** Hampel (pracma/MATLAB); S-H-ESD; UBP §1.4.4; Oracle Interval Spike Check; UCI household power (13,884 raw hits, 1.7 % of samples, on a normal signal).
 
 ### 14. `tby.rate_of_change` — Slew-rate violation
 - **Dim:** plausibility. **Sev:** medium.
@@ -200,9 +219,18 @@ Profiles are versioned and stored; findings link to the profile they used.
 
 ### 15. `tby.noise_level` — Variance jump or suspicious smoothness
 - **Dim:** plausibility. **Sev:** medium.
-- **Algorithm:** ratio = rolling MAD of first differences / baseline `noise_mad`. Noisier if
-  > `high`; too smooth (filtered, interpolated, compression changed) if < `low`.
-- **Params:** `high` 2.0; `low` 0.3; window 1 day.
+- **Algorithm:** per segment (default one day) ratio = robust sigma of first differences /
+  baseline `noise_mad`. Noisier if > `high`; too smooth (filtered, interpolated, compression
+  changed) if < `low`. With at least `min_segments_relative` segments a segment must also be
+  unusual among the window's segments (|log ratio − median| > `unusual_sigmas` robust sigmas):
+  household and process signals legitimately vary several-fold in activity from day to day.
+  When the median segment is itself beyond the thresholds, the whole window is noisier or
+  smoother than the baseline and that is one finding. Consecutive segments off in the same
+  direction form one episode finding (ADR-0011).
+- **Params:** `high` 2.0; `low` 0.3; `segment_ns` 1 d; `min_samples` 50;
+  `min_segments_relative` 8; `unusual_sigmas` 3.0.
+- **Evidence:** segments in the episode, most extreme segment sigma and ratio, per-segment
+  ratios, direction, `whole_window` flag.
 - **Sources:** Timeseer variance drift; compression research (arXiv 2510.26868).
 
 ### 16. `tby.resolution_loss` — Quantization / precision drop
@@ -233,20 +261,42 @@ Profiles are versioned and stored; findings link to the profile they used.
   21-point quantile grid: PSI over 10 bins bounded by the baseline deciles (skipped when the
   deciles are tied, e.g. constant or heavily quantised baselines), and a Wasserstein-1
   distance approximated on the quantile grid and normalised by the baseline inter-quartile
-  range. Findings on PSI ≥ alert or Wasserstein ≥ alert (medium); PSI ≥ warn alone is low.
-  Excludes windows with open changepoint findings that the user accepted as legitimate
-  (re-baseline).
+  range. Drift score = max(PSI / `psi_alert`, Wasserstein / `wasserstein_alert`); a segment
+  alerts at score ≥ 1 (medium) and warns at PSI ≥ `psi_warn` alone (low). With at least
+  `min_segments_relative` segments a segment is only reported on its own when its score is
+  also unusual among the window's segments (> `unusual_sigmas` robust sigmas above their
+  median): a series with strong daily or seasonal cycles differs from its pooled baseline on
+  most days, and listing every day is noise. When the median segment score is ≥ 1 the whole
+  window drifted and that is one finding ("re-baseline or accept"). Consecutive drifted
+  segments form one episode finding (ADR-0011). Excludes windows with open changepoint
+  findings that the user accepted as legitimate (re-baseline).
 - **Params:** `psi_warn` 0.1, `psi_alert` 0.25, `wasserstein_alert` 0.1, `segment_ns` 1 d,
-  `min_samples` 100.
+  `min_samples` 100, `min_segments_relative` 8, `unusual_sigmas` 3.0.
+- **Evidence:** segments in the episode, max and per-segment PSI and Wasserstein,
+  `whole_window` flag (with median PSI, Wasserstein and score), baseline source.
 - **Sources:** Evidently defaults; PSI literature; DQSOps drift-aware re-baselining.
 
 ### 20. `tby.changepoint` — Abrupt regime change
-- **Dim:** plausibility. **Sev:** medium.
-- **Algorithm:** offline PELT with `l2` cost and BIC penalty on daily-aggregated series
-  (augurs/ruptures-equivalent); online BOCPD for streaming. Emits changepoints as findings
-  requiring triage: "legitimate (re-baseline)" or "data problem".
-- **Params:** `penalty` BIC; `min_segment` 1 day.
-- **Sources:** ruptures PELT; Adams & MacKay BOCPD; pvanalytics `detect_data_shifts`.
+- **Dim:** plausibility. **Sev:** medium (low for the shifting-level summary).
+- **Algorithm:** offline PELT with `l2` cost and BIC-like penalty (`beta` × sigma² × ln m,
+  sigma = robust sigma of bucket-to-bucket differences) on daily-aggregated series (median
+  per bucket; augurs/ruptures-equivalent); online BOCPD for streaming. A change is reported
+  when (a) the level jump ≥ max(`min_jump_sigma` × sigma, `min_jump_spread` × series
+  spread); (b) the new level persists ≥ `min_segment_buckets` (one week, so weekday/weekend
+  alternation is not a sequence of regime changes); (c) it is abrupt: the medians of the
+  `min_segment_buckets` buckets just before and just after the change differ by the same
+  margin, which a seasonal ramp cut into a staircase does not satisfy; (d) effect size ≥
+  `min_effect_size`: the jump against the pooled robust sigma of the buckets around their
+  segment medians. When more than `max_findings` changes survive, shifting level is
+  characteristic of the series (weather-driven generation) and one low-severity summary
+  reports the count, mean interval and largest changes (ADR-0011). Emits changepoints as
+  findings requiring triage: "legitimate (re-baseline)" or "data problem".
+- **Params:** `bucket_ns` 1 d; `max_buckets` 2000; `min_segment_buckets` 7; `beta` 3.0;
+  `min_jump_sigma` 3.0; `min_jump_spread` 0.5; `min_effect_size` 2.0; `min_buckets` 8;
+  `max_findings` 20; `max_listed` 10.
+- **Evidence:** change timestamp, jump, local jump, effect size, level before/after,
+  duration, sigma, penalty. Metrics `changepoints` (raw PELT) and `level_changes` (reported).
+- **Sources:** ruptures PELT; Adams & MacKay BOCPD; pvanalytics `detect_data_shifts`; OPSD DE load (Christmas dips survive, weekend dips do not) and DE solar (weather regimes every 7–11 days → summary).
 
 ### 21. `tby.seasonality_break` — Periodic pattern lost
 - **Dim:** plausibility. **Sev:** low.
