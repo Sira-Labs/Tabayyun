@@ -3,6 +3,7 @@ file; nothing here has a real default for a secret (see docs/frontend/02-securit
 """
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,6 +17,17 @@ class Settings(BaseSettings):
     database_url: str = Field(
         default="postgresql+psycopg://tabayyun:tabayyun@localhost:5432/tabayyun",
         description="SQLAlchemy async URL. Override in every non-dev environment.",
+    )
+    db_pool_size: int = Field(default=5, ge=1, description="Connection pool size per process.")
+    db_pool_max_overflow: int = Field(default=10, ge=0, description="Extra connections beyond the pool size.")
+    timescale: Literal["auto", "on", "off"] = Field(
+        default="auto",
+        description="auto: use TimescaleDB when the extension is available; on: require it; "
+        "off: never create hypertables (Apache-2-only mode, ADR-0003).",
+    )
+    test_database_url: str | None = Field(
+        default=None,
+        description="When set, pytest runs the database tests against this URL; otherwise they skip.",
     )
     cache_dir: str = Field(default="./data/cache", description="Parquet cache root (raw + corrected layers).")
     oidc_issuer: str | None = Field(default=None, description="OIDC issuer URL of the identity provider.")
