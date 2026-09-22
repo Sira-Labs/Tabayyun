@@ -34,6 +34,7 @@ RUN useradd --system --uid 10001 --create-home tabayyun \
 USER tabayyun
 ENV TABAYYUN_ENV=prod TABAYYUN_CACHE_DIR=/data/cache
 EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).status==200 else 1)"
-# Runs `alembic upgrade head` (via the packaged migrations) before uvicorn.
+# api role: probes /healthz; worker role: healthy while the process runs (no HTTP).
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD ["tabayyun-api", "healthcheck"]
+# api role: migrate (packaged Alembic scripts), then uvicorn. worker role: python -m tabayyun.jobs.
 CMD ["tabayyun-api"]

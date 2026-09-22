@@ -121,8 +121,12 @@ jobs:
     steps:
       - name: configured?
         id: gate
+        env:
+          WORKER_TOKEN: ${{ secrets.CAPROVER_APP_TOKEN_WORKER }}
         run: |
           if [ -n "${{ vars.CAPROVER_SERVER }}" ]; then echo "on=true" >> "$GITHUB_OUTPUT"; else echo "on=false" >> "$GITHUB_OUTPUT"; echo "CAPROVER_SERVER not set; skipping CapRover deploy"; fi
+          # The worker app is optional until it exists: deployed only when its token is set.
+          if [ -n "$WORKER_TOKEN" ]; then echo "worker=true" >> "$GITHUB_OUTPUT"; else echo "worker=false" >> "$GITHUB_OUTPUT"; echo "CAPROVER_APP_TOKEN_WORKER not set; skipping worker deploy"; fi
       - name: deploy api
         if: steps.gate.outputs.on == 'true'
         uses: caprover/deploy-from-github@v2
@@ -139,3 +143,11 @@ jobs:
           app: ${{ vars.CAPROVER_APP_WEB || 'tabayyun-web' }}
           token: ${{ secrets.CAPROVER_APP_TOKEN_WEB }}
           image: ${{ env.IMAGE_PREFIX }}-web:${{ needs.images.outputs.tag }}
+      - name: deploy worker
+        if: steps.gate.outputs.on == 'true' && steps.gate.outputs.worker == 'true'
+        uses: caprover/deploy-from-github@v2
+        with:
+          server: ${{ vars.CAPROVER_SERVER }}
+          app: ${{ vars.CAPROVER_APP_WORKER || 'tabayyun-worker' }}
+          token: ${{ secrets.CAPROVER_APP_TOKEN_WORKER }}
+          image: ${{ env.IMAGE_PREFIX }}-api:${{ needs.images.outputs.tag }}

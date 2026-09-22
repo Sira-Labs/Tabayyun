@@ -33,6 +33,23 @@ services:
       postgres:
         condition: service_healthy
 
+  worker:
+    # Same image and environment as the api; TABAYYUN_ROLE=worker runs the job worker
+    # instead of the server. Scale with `docker compose up -d --scale worker=2`.
+    image: ghcr.io/thedatadudech/tabayyun-api:${TABAYYUN_TAG:?set TABAYYUN_TAG (a version or sha-<short>)}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TABAYYUN_ENV: prod
+      TABAYYUN_ROLE: worker
+      TABAYYUN_DATABASE_URL: postgresql+psycopg://tabayyun:${POSTGRES_PASSWORD}@postgres:5432/tabayyun
+      TABAYYUN_TIMESCALE: ${TABAYYUN_TIMESCALE:-auto}
+    volumes:
+      - cache:/data/cache
+    depends_on:
+      api:
+        condition: service_healthy
+
   postgres:
     # Pinned: `docker compose pull` runs on every deployment, and a moving tag would swap
     # the database binaries under a persistent data directory. Bump deliberately.
