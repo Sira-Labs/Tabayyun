@@ -22,9 +22,11 @@ services:
     image: ghcr.io/thedatadudech/tabayyun-api:${TABAYYUN_TAG:?set TABAYYUN_TAG (a version or sha-<short>)}
     restart: unless-stopped
     env_file: .env
+    # The image migrates the schema (python -m tabayyun.db.migrate upgrade head) on every start before serving.
     environment:
       TABAYYUN_ENV: prod
       TABAYYUN_DATABASE_URL: postgresql+psycopg://tabayyun:${POSTGRES_PASSWORD}@postgres:5432/tabayyun
+      TABAYYUN_TIMESCALE: ${TABAYYUN_TIMESCALE:-auto}
     volumes:
       - cache:/data/cache
     depends_on:

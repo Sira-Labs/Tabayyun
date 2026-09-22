@@ -21,6 +21,7 @@ WORKDIR /app
 COPY --from=core /wheels /wheels
 COPY api/pyproject.toml api/uv.lock ./
 COPY api/src ./src
+COPY --chmod=755 api/docker-entrypoint.sh /usr/local/bin/tabayyun-api
 # Install runtime deps from the lock (except the path dependency), then the built wheel, then
 # the API itself with --no-deps: its deps are already present, and resolving them would make
 # uv follow the ../core/tabayyun-py path source, which does not exist in this image.
@@ -34,4 +35,5 @@ USER tabayyun
 ENV TABAYYUN_ENV=prod TABAYYUN_CACHE_DIR=/data/cache
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).status==200 else 1)"
-CMD ["uvicorn", "tabayyun.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# Runs `alembic upgrade head` (via the packaged migrations) before uvicorn.
+CMD ["tabayyun-api"]

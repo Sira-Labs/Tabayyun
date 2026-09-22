@@ -65,4 +65,16 @@ zstd -d < tabayyun-images.tar.zst | docker load
 ## Local development
 
 `deploy/compose.dev.yaml` starts only Postgres+TimescaleDB and Keycloak; run the API and web
-on the host (`make api-dev`, `make web-dev`).
+on the host (`make db-upgrade` once, then `make api-dev`, `make web-dev`).
+
+## Schema migrations
+
+The api image runs `python -m tabayyun.db.migrate upgrade head` (the packaged Alembic
+migrations) on every start, before uvicorn, so a deployment
+upgrades the schema in place; the migration is idempotent and a failed one stops the new
+container while the previous release keeps serving. The API refuses to serve (exit code 3)
+when the database is at a different revision than the migrations it ships with, and
+`GET /api/version` reports `schema_revision`. `TABAYYUN_TIMESCALE` (`auto` by default)
+controls whether findings, metrics and scores become hypertables: `on` requires the
+extension, `off` never uses it (Apache-2-only mode, ADR-0003). Take a `pg_dump` before
+upgrading a production database.
