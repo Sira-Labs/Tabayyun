@@ -24,12 +24,16 @@ router = APIRouter(prefix="/api/runs", tags=["runs"])
 
 
 class RunCreated(BaseModel):
+    """Answer of `POST /api/runs`: the queued run."""
+
     id: str
     status: str
     created_at: datetime
 
 
 class RunOut(BaseModel):
+    """The `Run` response of spec 002."""
+
     id: str
     trigger: str
     status: str
@@ -45,6 +49,8 @@ class RunOut(BaseModel):
 
 
 class RunList(BaseModel):
+    """One page of runs and the cursor of the next page, if any."""
+
     items: list[RunOut]
     next_cursor: str | None
 
@@ -120,6 +126,7 @@ async def create_run(
 
 
 def _parse_id(run_id: str) -> uuid.UUID:
+    """A malformed run id is simply not found (404)."""
     try:
         return uuid.UUID(run_id)
     except ValueError as exc:

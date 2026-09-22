@@ -52,6 +52,7 @@ def infer_epoch_unit(magnitude: int) -> str:
 
 
 def _fmt_ns(ns: int) -> str:
+    """Date of an ns timestamp for error messages."""
     return datetime.fromtimestamp(ns / 1e9, tz=UTC).strftime("%Y-%m-%d")
 
 
@@ -103,12 +104,16 @@ class SeriesMetaIn(BaseModel):
 
 
 class CheckConfigIn(BaseModel):
+    """One check's configuration override passed to the core."""
+
     id: str = Field(min_length=1, max_length=128)
     params: dict[str, Any] = Field(default_factory=dict)
     enabled: bool = True
 
 
 class Finding(BaseModel):
+    """One finding as the core reports it; `window` bounds are ns since the epoch."""
+
     check_id: str
     series_id: str
     dimension: str
@@ -120,6 +125,8 @@ class Finding(BaseModel):
 
 
 class Score(BaseModel):
+    """The core's quality score of one series over the evaluated window."""
+
     series_id: str
     method_version: str
     overall: float
@@ -128,6 +135,8 @@ class Score(BaseModel):
 
 
 class CheckReport(BaseModel):
+    """The core's report for one series: findings, metrics, score, skipped checks."""
+
     series_id: str
     n_samples: int
     window: dict[str, int]
@@ -140,6 +149,7 @@ class CheckReport(BaseModel):
 
 
 def builtin_checks() -> list[str]:
+    """Ids of the checks the core ships."""
     return list(tc.builtin_checks())
 
 

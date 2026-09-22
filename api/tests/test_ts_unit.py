@@ -89,6 +89,7 @@ async def test_stateless_endpoint_accepts_ts_unit():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
 
         async def post(csv: bytes, form: dict[str, str]):
+            """Post a CSV to the stateless endpoint with extra form fields."""
             return await client.post("/api/checks/run", files={"file": ("f.csv", csv, "text/csv")}, data=form)
 
         reports = []

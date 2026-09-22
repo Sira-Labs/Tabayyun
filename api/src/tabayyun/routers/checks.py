@@ -18,6 +18,7 @@ router = APIRouter(prefix="/api/checks", tags=["checks"])
 
 @router.get("")
 async def list_checks() -> list[str]:
+    """Ids of the built-in checks."""
     return core.builtin_checks()
 
 

@@ -54,6 +54,7 @@ class MetadataError(ValueError):
     """Invalid series metadata; `field` names the offending field for a 422 response."""
 
     def __init__(self, field: str, message: str) -> None:
+        """Keep the field name and the message for the 422 response."""
         super().__init__(f"{field}: {message}")
         self.field = field
         self.message = message
@@ -80,6 +81,7 @@ def validate_limits(values: Mapping[str, Any], changed: Sequence[str] = ()) -> N
     """
 
     def blame(*fields: str) -> str:
+        """The first of `fields` the request changed, else the last one."""
         for field in fields:
             if field in changed:
                 return field
@@ -112,6 +114,7 @@ def validate_metadata_blob(metadata: Any) -> None:
 
 
 def _values(series: Series | None) -> dict[str, Any]:
+    """Editable fields of a stored series as a dict (empty when there is none)."""
     if series is None:
         return {}
     return {f: getattr(series, "metadata_" if f == "metadata" else f) for f in EDITABLE_FIELDS}
@@ -293,6 +296,7 @@ def decode_name_cursor(cursor: str) -> tuple[str, uuid.UUID]:
 
 
 def _like_pattern(q: str) -> str:
+    """ILIKE pattern matching `q` anywhere, with `%`, `_` and `\\` taken literally."""
     escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"%{escaped}%"
 
