@@ -11,10 +11,9 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from tabayyun import core
+from tabayyun.services.runs import MAX_UPLOAD_BYTES, UploadError, parse_upload
 
 router = APIRouter(prefix="/api/checks", tags=["checks"])
-
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 
 @router.get("")
@@ -36,14 +35,16 @@ async def run_checks(
     now_ns: Annotated[int | None, Form()] = None,
 ) -> core.CheckReport:
     data = await file.read(MAX_UPLOAD_BYTES + 1)
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="upload larger than 50 MiB")
-    if not data:
-        raise HTTPException(status_code=400, detail="empty upload")
     try:
-        table = core.read_csv(data, ts_col, value_col, quality_col or None, ingest_col or None)
-    except Exception as exc:  # pyarrow raises several ArrowInvalid/KeyError variants
-        raise HTTPException(status_code=422, detail=f"cannot parse CSV: {exc}") from exc
+        table = parse_upload(
+            data,
+            ts_col=ts_col,
+            value_col=value_col,
+            quality_col=quality_col or None,
+            ingest_col=ingest_col or None,
+        )
+    except UploadError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     meta = core.SeriesMetaIn(
         id=series_id, unit=unit or None, physical_min=physical_min, physical_max=physical_max
     )

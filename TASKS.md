@@ -33,7 +33,7 @@ story ids there (`S6-1`) map to specs here.
 
 ## Sprint 6 — persistence and jobs (27 Sep – 3 Oct 2026)
 
-- [~] **001 Persistence schema and migrations** — `docs/specs/001-persistence-schema.md`
+- [x] **001 Persistence schema and migrations** — `docs/specs/001-persistence-schema.md`
       SQLAlchemy 2 async models, Alembic, hypertables with the Apache-2-only switch, seed
       org/workspace, schema-revision guard at startup, CI Postgres service.
       - Migrations are packaged (`tabayyun/db/migrations`) and the image runs
@@ -49,11 +49,30 @@ story ids there (`S6-1`) map to specs here.
         findings carry ns since epoch and spec 003 converts at the persistence boundary.
       - The schema guard runs in the lifespan, not in `create_app()`: an unreachable
         database degrades `/healthz` instead of crashing, a revision mismatch exits 3.
-      - Stays `[~]` until the last acceptance criterion (migration on the deployed CapRover
-        app) is verified on the first deploy after merge; ticked in the spec 002 PR.
-- [ ] **002 Runs and the worker** — `docs/specs/002-runs-and-worker.md`
+      - Deployed-app criterion verified 2026-09-22 after PR #25 (`schema_revision` 0001).
+- [~] **002 Runs and the worker** — `docs/specs/002-runs-and-worker.md`
       `POST /api/runs` + Procrastinate worker, uploads in Postgres, inline-jobs mode for
       tests, stale-run reaper, worker container and CapRover app.
+      - Transactional enqueue calls Procrastinate's `procrastinate_defer_jobs_v1` on the
+        run's own connection; the `_v1` SQL functions are Procrastinate's stable interface,
+        so the API needs no open Procrastinate app.
+      - Migration 0002 executes Procrastinate's `schema.sql` through the raw driver cursor
+        (it contains `%` and dollar-quoted bodies); a Procrastinate upgrade becomes a new
+        revision that runs its own migration files. Downgrade drops every `procrastinate_*`
+        table, function and type dynamically.
+      - One image, `TABAYYUN_ROLE=api|worker`: CapRover apps run the image's CMD, so a
+        separate command is impractical. The worker guards the schema and exits 3 until
+        the api has migrated; the health check is an entrypoint subcommand.
+      - Inline mode commits explicitly before scheduling the background task: FastAPI runs
+        background tasks before the yield-dependency teardown, so the worker would not see
+        the run otherwise.
+      - `runs.stats.window` keeps the exact ns bounds; the `timestamptz` columns truncate to
+        microseconds and lose the core's exclusive `+1 ns` end.
+      - The worker creates the `Uploads` source and the series row (ON CONFLICT DO NOTHING)
+        and persists the score row now; findings and metrics (003) and metadata precedence
+        (004) follow. `retry=False` is Procrastinate's `max_attempts=1`.
+      - Stays `[~]` until the `tabayyun-worker` CapRover app exists and processes a run;
+        ticked in the spec 003 PR.
 - [ ] **003 Findings persistence, dedup and API** — `docs/specs/003-findings-persistence.md`
       Persist scores/metrics/findings, overlap dedup with occurrences, status transitions,
       list/filter/paginate, ADR-0013 lifecycle.

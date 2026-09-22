@@ -26,3 +26,12 @@ def test_preloaded_libraries_accepts_paths_quotes_and_suffixes():
     assert m._preloaded_libraries("'/usr/lib/postgresql/17/lib/timescaledb.so'") == {"timescaledb"}
     assert m._preloaded_libraries("") == set()
     assert m._preloaded_libraries(None) == set()
+
+
+def test_procrastinate_schema_snapshot_matches_installed_package():
+    """Migration 0002 applies a repository snapshot; a Procrastinate upgrade needs a new revision."""
+    from importlib import resources
+
+    snapshot = (MIGRATIONS_DIR / "sql" / "procrastinate_schema_3.9.0.sql").read_text()
+    installed = resources.files("procrastinate.sql").joinpath("schema.sql").read_text()
+    assert snapshot == installed, "Procrastinate schema changed: add a revision with its migration SQL"

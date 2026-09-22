@@ -37,6 +37,20 @@ def test_pool_settings(monkeypatch):
         Settings(db_pool_size=0)
 
 
+def test_job_settings(monkeypatch):
+    """Jobs are enqueued by default; inline mode and worker concurrency come from the env."""
+    monkeypatch.delenv("TABAYYUN_INLINE_JOBS", raising=False)
+    monkeypatch.delenv("TABAYYUN_WORKER_CONCURRENCY", raising=False)
+    s = Settings()
+    assert (s.inline_jobs, s.worker_concurrency) == (False, 2)
+    monkeypatch.setenv("TABAYYUN_INLINE_JOBS", "true")
+    monkeypatch.setenv("TABAYYUN_WORKER_CONCURRENCY", "4")
+    s = Settings()
+    assert (s.inline_jobs, s.worker_concurrency) == (True, 4)
+    with pytest.raises(ValidationError):
+        Settings(worker_concurrency=0)
+
+
 def test_test_database_url_defaults_to_unset(monkeypatch):
     """The database tests skip unless the URL is set explicitly."""
     monkeypatch.delenv("TABAYYUN_TEST_DATABASE_URL", raising=False)

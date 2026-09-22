@@ -28,7 +28,7 @@ Self-hostable time-series data-quality platform. Read `docs/` before changing de
 ## Commands
 - `make lint` / `make test` run everything. `make demo` runs the checks on a synthetic faulty series.
 - Rust: `cd core && cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check`
-- Python: `cd api && uv sync --extra dev && uv run pytest -q && uv run ruff check . && uv run mypy` (uv builds the core wheel from `../core/tabayyun-py`; Rust toolchain required). Database tests run when `TABAYYUN_TEST_DATABASE_URL` is set (`make dev-infra` provides one); `make db-upgrade` / `make db-revision m="..."` for migrations.
+- Python: `cd api && uv sync --extra dev && uv run pytest -q && uv run ruff check . && uv run mypy` (uv builds the core wheel from `../core/tabayyun-py`; Rust toolchain required). Database tests run when `TABAYYUN_TEST_DATABASE_URL` is set (`make dev-infra` provides one); `make db-upgrade` / `make db-revision m="..."` for migrations; `make worker-dev` runs the job worker (or `TABAYYUN_INLINE_JOBS=true`).
 - Bindings: `cd core/tabayyun-py && VIRTUAL_ENV=../../api/.venv ../../api/.venv/bin/maturin develop --release && ../../api/.venv/bin/pytest -q`
 - Web: `cd web && pnpm install --frozen-lockfile && pnpm lint && pnpm build`
 

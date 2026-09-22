@@ -55,7 +55,10 @@ def test_migrate_fresh_and_idempotent(db_url, fresh_schema):
     assert _current_revision(db_url) == head
     engine = create_engine(db_url)
     try:
-        assert set(inspect(engine).get_table_names()) == EXPECTED_TABLES | {"alembic_version"}
+        tables = {n for n in inspect(engine).get_table_names() if not n.startswith("procrastinate_")}
+        assert tables == EXPECTED_TABLES | {"alembic_version"}
+        # Migration 0002 brings the queue schema alongside.
+        assert "procrastinate_jobs" in inspect(engine).get_table_names()
     finally:
         engine.dispose()
     migrate.upgrade(db_url, "head", timescale="auto")
