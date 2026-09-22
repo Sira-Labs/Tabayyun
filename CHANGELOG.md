@@ -12,6 +12,11 @@ All notable changes to this project are documented here. The format follows
 - Python wheel `tabayyun_core` with Arrow PyCapsule in/out (pyarrow and polars).
 - FastAPI service with `POST /api/checks/run` on an uploaded CSV; web page listing findings.
 - Finding aggregation into episodes for recurring behaviour (ADR-0011).
+- PostgreSQL schema with Alembic migrations and optional TimescaleDB hypertables; runs API
+  (`POST/GET /api/runs`) executed by a Procrastinate worker (`TABAYYUN_ROLE=worker`).
+- Stored findings, metrics and scores per run, with findings deduplicated across runs and a
+  status lifecycle (`GET/PATCH /api/findings`, `GET /api/series/{id}/metrics|scores`,
+  ADR-0013).
 - Release pipeline publishing `tabayyun-api` and `tabayyun-web` images to GHCR with SBOM and
   provenance; production compose bundle with Caddy.
 - Apache-2.0 licence (ADR-0012), contribution guide, security policy, code of conduct, issue

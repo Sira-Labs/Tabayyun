@@ -9,6 +9,10 @@ and, for process-historian and oil-and-gas specifics, `docs/research/05-oil-gas-
 
 Legend: **Dim** = primary quality dimension. **Needs** = required series metadata or related
 series. **Sev** = default severity. **Auto** = default is learned from the baseline profile.
+**Evidence** bullets list the JSON stored with each finding; how findings are stored,
+deduplicated across runs (same check, same evidence keys, overlapping window) and triaged is
+decided in [ADR-0013](../adr/0013-run-and-finding-lifecycle.md), so a check keeps the evidence
+key set of one kind of finding stable.
 
 ## Overview
 

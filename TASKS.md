@@ -50,7 +50,7 @@ story ids there (`S6-1`) map to specs here.
       - The schema guard runs in the lifespan, not in `create_app()`: an unreachable
         database degrades `/healthz` instead of crashing, a revision mismatch exits 3.
       - Deployed-app criterion verified 2026-09-22 after PR #25 (`schema_revision` 0001).
-- [~] **002 Runs and the worker** — `docs/specs/002-runs-and-worker.md`
+- [x] **002 Runs and the worker** — `docs/specs/002-runs-and-worker.md`
       `POST /api/runs` + Procrastinate worker, uploads in Postgres, inline-jobs mode for
       tests, stale-run reaper, worker container and CapRover app.
       - Transactional enqueue calls Procrastinate's `procrastinate_defer_jobs_v1` on the
@@ -71,11 +71,22 @@ story ids there (`S6-1`) map to specs here.
       - The worker creates the `Uploads` source and the series row (ON CONFLICT DO NOTHING)
         and persists the score row now; findings and metrics (003) and metadata precedence
         (004) follow. `retry=False` is Procrastinate's `max_attempts=1`.
-      - Stays `[~]` until the `tabayyun-worker` CapRover app exists and processes a run;
-        ticked in the spec 003 PR.
-- [ ] **003 Findings persistence, dedup and API** — `docs/specs/003-findings-persistence.md`
+      - CapRover worker verified 2026-09-22 (release run 26): a run posted to the live API
+        went from `queued` to `succeeded`.
+- [x] **003 Findings persistence, dedup and API** — `docs/specs/003-findings-persistence.md`
       Persist scores/metrics/findings, overlap dedup with occurrences, status transitions,
       list/filter/paginate, ADR-0013 lifecycle.
+      - Dedup also requires the same evidence shape (top-level evidence keys) and a finding
+        created by an earlier run; the best overlap ratio wins. `tby.completeness` emits gaps
+        plus a whole-window finding over them, which a plain overlap rule would merge.
+      - `occurrences` counts runs, not merges; run stats add `n_findings_new` and
+        `n_findings_merged`.
+      - A union that moves `window_start` earlier is delete + insert under the same id:
+        the column is in the primary key and is the hypertable's partition column.
+      - A transaction advisory lock per series serialises dedup of concurrent runs.
+      - Stored windows round the start down and the end up to the microsecond.
+      - `run_id` filters on first or last run; ns and cursor helpers moved to
+        `services/timeconv.py` and `services/pagination.py` (runs reuse them).
 - [ ] **004 Series and sources from uploads** — `docs/specs/004-series-and-sources.md`
       `Uploads` source, series upsert, metadata precedence, `PATCH /api/series/{id}`.
 - [ ] **005 Runs list and report in the web app** — `docs/specs/005-runs-web.md`
