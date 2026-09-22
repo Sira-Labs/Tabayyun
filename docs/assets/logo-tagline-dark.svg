@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 220" width="820" height="220" role="img" aria-label="Tabayyun">
+
+<g transform="translate(0,10) scale(0.5)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="200" cy="200" r="172" stroke="#ffffff" stroke-width="24"/>
+<polyline points="72,232 98,196 120,256 142,186 164,246 186,214" stroke="#ffffff" stroke-width="24"/>
+<polyline points="186,214 232,282 338,138" stroke="#5eead4" stroke-width="28"/>
+<circle cx="142" cy="186" r="19" fill="#f59e0b" stroke="none"/>
+</g><text x="232" y="118" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="112" font-weight="600" letter-spacing="-2" fill="#ffffff">Tabayyun</text><text x="236" y="172" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="34" font-weight="400" fill="#94a3b8">Verify before you act.</text>
+</svg>
