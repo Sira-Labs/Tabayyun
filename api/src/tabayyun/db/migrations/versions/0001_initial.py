@@ -324,11 +324,13 @@ def _create_hypertables(mode: str) -> None:
         return
     conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS timescaledb"))
     for table, time_column in HYPERTABLES.items():
+        # CAST(:chunk AS interval), not :chunk::interval: text() does not recognise a bind that
+        # is directly followed by the :: cast operator.
         conn.execute(
             sa.text(
-                "SELECT create_hypertable(:table, :column, chunk_time_interval => :interval::interval, "
+                "SELECT create_hypertable(:table, :column, chunk_time_interval => CAST(:chunk AS interval), "
                 "create_default_indexes => false, if_not_exists => true)"
-            ).bindparams(table=table, column=time_column, interval=CHUNK_INTERVAL)
+            ).bindparams(table=table, column=time_column, chunk=CHUNK_INTERVAL)
         )
     log.info("hypertables created: %s", ", ".join(HYPERTABLES))
 
