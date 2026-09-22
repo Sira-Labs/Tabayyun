@@ -4,15 +4,14 @@ Lifecycle: `POST /api/runs` stores the raw upload and a `queued` run in one tran
 enqueues the job in the same transaction (or, with `TABAYYUN_INLINE_JOBS`, runs it in the
 request's background task). The worker moves the run to `running`, executes the core and
 persists the outcome in one transaction; any exception marks the run `failed` with a
-one-line message. Findings and metrics persistence arrives with spec 003, metadata
-precedence with spec 004; this module persists the score row and the run statistics.
+one-line message. The completion transaction persists the score row, the run statistics
+and, through `services.findings`, the metrics and deduplicated findings (spec 003); metadata
+precedence arrives with spec 004.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
-import binascii
 import json
 import uuid
 from dataclasses import asdict, dataclass
@@ -29,6 +28,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from tabayyun import core
 from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Run, Score, Series, Source, Upload
 from tabayyun.jobs.names import RUN_CHECKS_TASK, RUNS_QUEUE
+from tabayyun.services import findings as findings_service
+from tabayyun.services.pagination import decode_keyset, encode_keyset
+from tabayyun.services.timeconv import datetime_to_ns, ns_to_datetime, ns_to_datetime_ceil
 
 log = structlog.get_logger()
 
@@ -36,7 +38,6 @@ MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 UPLOADS_SOURCE_NAME = "Uploads"
 STALE_AFTER = timedelta(minutes=30)
 WORKER_LOST = "worker lost"
-EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 # Procrastinate's defer function, called on the run's own connection so that the job and the
 # run row commit or roll back together (ADR-0004). Priority 0, no locks, run immediately.
@@ -102,16 +103,6 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def ns_to_datetime(ns: int) -> datetime:
-    """Nanoseconds since the epoch to an aware datetime (microsecond precision)."""
-    return EPOCH + timedelta(microseconds=ns // 1000)
-
-
-def datetime_to_ns(value: datetime) -> int:
-    """Aware datetime to nanoseconds since the epoch."""
-    return int((value - EPOCH) // timedelta(microseconds=1)) * 1000
-
-
 def _error_line(exc: BaseException) -> str:
     message = str(exc).strip().splitlines()
     return message[0] if message else type(exc).__name__
@@ -171,17 +162,12 @@ async def get_run(session: AsyncSession, run_id: uuid.UUID) -> Run | None:
 
 def encode_cursor(run: Run) -> str:
     """Opaque keyset cursor for `list_runs`."""
-    raw = f"{run.created_at.isoformat()}|{run.id}".encode()
-    return base64.urlsafe_b64encode(raw).decode()
+    return encode_keyset(run.created_at, run.id)
 
 
 def decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
     """Inverse of `encode_cursor`; raises ValueError on garbage."""
-    try:
-        created_at, run_id = base64.urlsafe_b64decode(cursor.encode()).decode().split("|", 1)
-        return datetime.fromisoformat(created_at), uuid.UUID(run_id)
-    except (ValueError, UnicodeDecodeError, binascii.Error) as exc:
-        raise ValueError("invalid cursor") from exc
+    return decode_keyset(cursor)
 
 
 async def list_runs(session: AsyncSession, *, limit: int, cursor: str | None) -> tuple[list[Run], str | None]:
@@ -350,7 +336,7 @@ async def execute_run(factory: async_sessionmaker[AsyncSession], run_id: uuid.UU
                     status="succeeded",
                     finished_at=finished_at,
                     window_start=ns_to_datetime(report.window["start"]),
-                    window_end=ns_to_datetime(report.window["end"]),
+                    window_end=ns_to_datetime_ceil(report.window["end"]),
                     now_ns=report.now_ns,
                     error=None,
                 )
@@ -372,11 +358,16 @@ async def execute_run(factory: async_sessionmaker[AsyncSession], run_id: uuid.UU
                     computed_at=finished_at,
                 )
             )
+            outcome = await findings_service.persist_report(
+                session, run_id=run_id, series_id=series.id, report=report, now=finished_at
+            )
             stats = {
                 "n_series": 1,
                 "n_samples": report.n_samples,
                 "n_findings": len(report.findings),
                 "n_metrics": len(report.metrics),
+                "n_findings_new": outcome.new,
+                "n_findings_merged": outcome.merged,
                 "skipped": len(report.skipped),
                 "window": {"start": report.window["start"], "end": report.window["end"]},
                 "series": [
@@ -389,7 +380,13 @@ async def execute_run(factory: async_sessionmaker[AsyncSession], run_id: uuid.UU
         run_log.exception("run.persist_failed")
         await _mark_failed(factory, run_id, f"persist error: {_error_line(exc)}")
         return
-    run_log.info("run.finished", n_findings=len(report.findings), n_samples=report.n_samples)
+    run_log.info(
+        "run.finished",
+        n_findings=len(report.findings),
+        n_findings_new=outcome.new,
+        n_findings_merged=outcome.merged,
+        n_samples=report.n_samples,
+    )
 
 
 # Maintenance and health

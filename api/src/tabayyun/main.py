@@ -1,8 +1,8 @@
 """FastAPI application factory.
 
-Exposes health, version and stateless check execution, and owns the process-wide database
-engine (spec 001). Routers for auth, workspaces, series, runs, findings and corrections are
-added per `docs/architecture/03-system-architecture.md`.
+Exposes health, version, stateless check execution, runs, findings and series results, and
+owns the process-wide database engine (spec 001). Routers for auth, workspaces and corrections
+are added per `docs/architecture/03-system-architecture.md`.
 """
 
 from collections.abc import AsyncIterator
@@ -14,7 +14,7 @@ from fastapi import FastAPI
 
 from tabayyun import __version__
 from tabayyun.db import DB_OK, check_db, guard_schema, make_engine, make_session_factory
-from tabayyun.routers import checks, runs
+from tabayyun.routers import checks, findings, runs, series
 from tabayyun.services import runs as runs_service
 from tabayyun.settings import Settings, get_settings
 
@@ -54,6 +54,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(checks.router)
     app.include_router(runs.router)
+    app.include_router(findings.router)
+    app.include_router(series.router)
 
     @app.get("/healthz", tags=["ops"])
     async def healthz() -> dict[str, Any]:
