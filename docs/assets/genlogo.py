@@ -16,7 +16,6 @@ notice and the committed PNGs stay as they are.
 
 from __future__ import annotations
 
-import glob
 import os
 import shutil
 import subprocess
@@ -41,6 +40,11 @@ WEB_PUBLIC = ROOT / "web" / "public"
 NOISE = [(72, 232), (98, 196), (120, 256), (142, 186), (164, 246), (186, 214)]
 CHECK = [(186, 214), (232, 282), (338, 138)]
 FLAG = (142, 186)
+
+# Executable names Playwright's Chromium bundles use across versions and platforms. The
+# headless shell has no "new" headless mode and its window already equals the viewport.
+HEADLESS_SHELL_NAMES = {"headless_shell", "chrome-headless-shell", "chrome-headless-shell.exe"}
+CHROMIUM_NAMES = HEADLESS_SHELL_NAMES | {"chrome", "chrome.exe", "Chromium", "Google Chrome for Testing"}
 
 # PNG renders: (source svg, output path, width, height, background css colour or None).
 PNG_JOBS = [
@@ -143,12 +147,15 @@ def find_chromium() -> str | None:
     for cache in caches:
         if not cache:
             continue
-        for pattern in ("chromium_headless_shell-*/chrome-linux/headless_shell", "chromium-*/chrome-linux/chrome",
-                        "chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
-                        "chromium-*/chrome-win/chrome.exe"):
-            hits = sorted(glob.glob(str(Path(cache) / pattern)))
-            if hits:
-                return hits[-1]
+        # Bundle layouts differ by version (chrome-linux vs chrome-linux64, headless_shell vs
+        # chrome-headless-shell), so search every chromium* bundle for a known executable.
+        hits = sorted(
+            candidate for bundle in Path(cache).glob("chromium*") for candidate in bundle.rglob("*")
+            if candidate.name in CHROMIUM_NAMES and candidate.is_file() and os.access(candidate, os.X_OK)
+        )
+        if hits:
+            shells = [h for h in hits if h.name in HEADLESS_SHELL_NAMES]
+            return str((shells or hits)[-1])
     return None
 
 
@@ -168,8 +175,7 @@ def render_pngs(chromium: str) -> None:
             cmd = [chromium, "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
                    "--default-background-color=00000000", f"--window-size={width},{height}",
                    f"--screenshot={out}", page.as_uri()]
-            # headless_shell has no "new" mode; its window equals the viewport already.
-            if chromium.endswith("headless_shell"):
+            if Path(chromium).name in HEADLESS_SHELL_NAMES:
                 cmd.remove("--headless=new")
             subprocess.run(cmd, check=True, capture_output=True)
             print("rendered", out.relative_to(ROOT))
