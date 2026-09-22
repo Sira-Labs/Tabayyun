@@ -59,6 +59,7 @@ cargo run -q --bin tabayyun -- run --input /tmp/f.csv --quality-col quality --un
 
 # API (FastAPI) and web (Vite) in development
 make dev-infra            # Postgres+TimescaleDB, Keycloak (docker compose)
+make db-upgrade           # apply the schema migrations (alembic upgrade head)
 make api-dev              # http://localhost:8000/api/docs
 make web-dev              # http://localhost:5173
 ```

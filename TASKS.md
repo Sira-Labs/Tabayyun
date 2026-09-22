@@ -33,9 +33,24 @@ story ids there (`S6-1`) map to specs here.
 
 ## Sprint 6 — persistence and jobs (27 Sep – 3 Oct 2026)
 
-- [ ] **001 Persistence schema and migrations** — `docs/specs/001-persistence-schema.md`
+- [x] **001 Persistence schema and migrations** — `docs/specs/001-persistence-schema.md`
       SQLAlchemy 2 async models, Alembic, hypertables with the Apache-2-only switch, seed
       org/workspace, schema-revision guard at startup, CI Postgres service.
+      - Migrations are packaged (`tabayyun/db/migrations`) and the image runs
+        `python -m tabayyun.db.migrate upgrade head` on start; `api/alembic.ini` is only the
+        developer CLI entry. The wheel has no checkout to read `api/alembic/` from.
+      - Enumerated columns are text + named CHECK constraints, not Postgres enums: a later
+        spec extends the values with one `ALTER TABLE`, and autogenerate stays clean.
+      - Descending indexes are declared as `text("col DESC")` expressions in models and
+        migration alike; Alembic reflects them as expressions, and `postgresql_ops` diffs.
+      - Hypertables are created with `create_default_indexes => false` so the schema is
+        identical in `auto`, `on` and `off` mode and `alembic check` passes in every mode.
+      - Window bounds (`findings`, `runs`, `coverage`, `metrics.ts`) are `timestamptz`; core
+        findings carry ns since epoch and spec 003 converts at the persistence boundary.
+      - The schema guard runs in the lifespan, not in `create_app()`: an unreachable
+        database degrades `/healthz` instead of crashing, a revision mismatch exits 3.
+      - Last acceptance criterion (migration on the deployed CapRover app) is verified on the
+        first deploy after merge and ticked in the spec 002 PR.
 - [ ] **002 Runs and the worker** — `docs/specs/002-runs-and-worker.md`
       `POST /api/runs` + Procrastinate worker, uploads in Postgres, inline-jobs mode for
       tests, stale-run reaper, worker container and CapRover app.

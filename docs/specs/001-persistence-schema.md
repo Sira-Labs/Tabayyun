@@ -27,7 +27,7 @@ Settings (env prefix `TABAYYUN_`):
 | `DB_POOL_SIZE` | `5` | pool size per process |
 | `DB_POOL_MAX_OVERFLOW` | `10` | |
 | `TIMESCALE` | `auto` | `auto` detects the extension, `on` requires it, `off` never creates hypertables (Apache-2-only mode, ADR-0003) |
-| `TEST_DATABASE_URL` | unset | when set, `pytest` runs the database tests against it; otherwise they skip |
+| `TEST_DATABASE_URL` | unset | when set (`TABAYYUN_TEST_DATABASE_URL`), `pytest` runs the database tests against it; otherwise they skip |
 
 Commands: `make db-upgrade` (`cd api && uv run alembic upgrade head`), `make db-revision
 m="message"` (autogenerate), `make dev-infra` (existing compose with TimescaleDB).
@@ -35,10 +35,17 @@ m="message"` (autogenerate), `make dev-infra` (existing compose with TimescaleDB
 Package layout:
 
 ```
-api/src/tabayyun/db/__init__.py     engine factory, session dependency, `Base`
-api/src/tabayyun/db/models.py       SQLAlchemy 2 declarative models
-api/alembic.ini, api/alembic/env.py, api/alembic/versions/0001_initial.py
+api/src/tabayyun/db/__init__.py               engine factory, session dependency, `Base`, health check, schema guard
+api/src/tabayyun/db/models.py                 SQLAlchemy 2 declarative models
+api/src/tabayyun/db/migrate.py                programmatic Alembic (upgrade/downgrade/check, `python -m tabayyun.db.migrate`)
+api/src/tabayyun/db/migrations/               env.py, versions/0001_initial.py (packaged with the wheel)
+api/alembic.ini                               CLI convenience for developers, points at the packaged scripts
 ```
+
+Edited during implementation: the migration scripts live inside the package rather than in
+`api/alembic/` so that the api image, which installs the wheel and has no repository
+checkout, can run them from `python -m tabayyun.db.migrate`; `alembic.ini` stays at the api
+root for the CLI.
 
 Tables (all ids `uuid` primary keys generated in Python; timestamps `timestamptz`; every
 tenant table carries `org_id` and `workspace_id` so row-level security in spec 007 is one
@@ -95,19 +102,19 @@ the tenant model from spec 007; spec 007 migrates real memberships onto them.
 
 ## Acceptance criteria
 
-- [ ] `alembic upgrade head` on an empty Postgres 17 without TimescaleDB creates every table
+- [x] `alembic upgrade head` on an empty Postgres 17 without TimescaleDB creates every table
       above and the seed rows; a second run is a no-op.
-- [ ] The same on TimescaleDB makes `findings`, `metrics` and `scores` hypertables
+- [x] The same on TimescaleDB makes `findings`, `metrics` and `scores` hypertables
       (`timescaledb_information.hypertables` lists them); with `TIMESCALE=off` it does not.
-- [ ] `alembic check` passes in CI against a Postgres service container.
-- [ ] `/healthz` reports `db: degraded` when the database is unreachable and the process keeps
+- [x] `alembic check` passes in CI against a Postgres service container.
+- [x] `/healthz` reports `db: degraded` when the database is unreachable and the process keeps
       serving; `/api/version` includes `schema_revision`.
-- [ ] Starting the API against a database at an older revision exits with code 3 and a log line
+- [x] Starting the API against a database at an older revision exits with code 3 and a log line
       naming both revisions.
-- [ ] `TABAYYUN_DATABASE_URL` with the dev default is refused in prod (existing rule).
-- [ ] Database tests skip cleanly when `TEST_DATABASE_URL` is unset and run when it is set.
+- [x] `TABAYYUN_DATABASE_URL` with the dev default is refused in prod (existing rule).
+- [x] Database tests skip cleanly when `TEST_DATABASE_URL` is unset and run when it is set.
 - [ ] The deployed CapRover api app runs the migration on start and serves the new
-      `/api/version` field.
+      `/api/version` field. (Checked on the first deploy after merge; ticked in the spec 002 PR.)
 
 ## Test cases
 
@@ -120,7 +127,9 @@ Database (`api/tests/db/`, skipped without `TEST_DATABASE_URL`, run in CI with a
 - `test_hypertables_created` / `test_hypertables_skipped_when_off`.
 - `test_seed_rows_present`.
 - `test_session_rolls_back_on_error`.
-- `test_startup_refuses_old_schema`: downgrade one step, `create_app()` raises `SystemExit(3)`.
+- `test_startup_refuses_old_schema`: downgrade one step, the startup guard (`guard_schema`, run
+  by the app lifespan) raises `SystemExit(3)`; `create_app()` itself opens no connection so
+  that tests without a database can still build the app.
 
 CI: the `python api` job gains the service container and sets `TEST_DATABASE_URL`.
 

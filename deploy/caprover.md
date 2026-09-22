@@ -35,7 +35,11 @@ Internet ──▶ CapRover nginx (TLS) ──▶ tabayyun-web (Caddy :80) ─�
     | `TABAYYUN_DATABASE_URL` | `postgresql+psycopg://tabayyun:<password>@srv-captain--tabayyun-db:5432/tabayyun` |
     | `TABAYYUN_SESSION_SECRET` | a generated value, e.g. the output of `openssl rand -base64 48` |
     | `TABAYYUN_CACHE_DIR` | `/data/cache` |
+    | `TABAYYUN_TIMESCALE` | optional; `auto` (default) uses TimescaleDB when the extension exists, `off` never does |
 
+  - The image runs the schema migration (`alembic upgrade head`) on every start before
+    serving, so a redeploy upgrades the database in place; the app log shows the revision
+    and `GET /api/version` reports it as `schema_revision`.
   - Persistent directory: `/data/cache`, label `tabayyun-cache`
   - Container HTTP port: `8000`
 - HTTP Settings: no public domain needed (the web app proxies to it). If you want the API
@@ -109,6 +113,7 @@ Do not enable both paths for the same app, or each push deploys it twice.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `deploy-caprover` job fails with an HTML `404 Not Found` from nginx | `CAPROVER_SERVER` points at an app domain instead of the dashboard | Set it to `https://captain.<root-domain>` |
+| API log: `db.schema_mismatch` and the container exits with code 3 | the database is at another migration revision than the image (an older image after a newer one migrated, or a migration that failed) | Redeploy the newest image; it migrates on start. Never run two api versions against one database |
 | API log: `refusing to start in prod: ... ['TABAYYUN_DATABASE_URL']` | password is `tabayyun`, `changeme` or similar; prod rejects placeholders | Use a generated password in both the db app and the URL |
 | API log: same message naming `TABAYYUN_SESSION_SECRET` | secret missing, shorter than 16 characters or a placeholder | Generate one and Save & Update |
 | Web log: `dial tcp: lookup api ... no such host` | `TABAYYUN_API_UPSTREAM` missing or misspelled on the **web** app | Set it to `srv-captain--tabayyun-api:8000` (two dashes) and Save & Update |
