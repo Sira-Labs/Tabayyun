@@ -165,6 +165,40 @@ async def test_form_overrides_and_persists(client):
     assert r.json()["detail"][0]["loc"] == ["body", "physical_max"]
 
 
+async def test_patch_during_a_run_fails_the_run_instead_of_saving_bad_limits(client, app, monkeypatch):
+    """A PATCH that lands while the core runs is re-checked on the locked row: the run fails."""
+    import asyncio
+
+    from tabayyun.services import runs as runs_service
+
+    series_id = await _series_id(client, await _upload(client))
+    real_run_checks = runs_service.core.run_checks
+    loop = asyncio.get_running_loop()
+
+    def run_checks_while_patched(*args, **kwargs):
+        report = real_run_checks(*args, **kwargs)
+
+        async def patch() -> None:
+            r = await client.patch(f"/api/series/{series_id}", json={"physical_min": 60})
+            assert r.status_code == 200, r.text
+
+        asyncio.run_coroutine_threadsafe(patch(), loop).result()
+        return report
+
+    monkeypatch.setattr(runs_service.core, "run_checks", run_checks_while_patched)
+    r = await client.post(
+        "/api/runs",
+        files={"file": ("f.csv", sine_csv(), "text/csv")},
+        data={"series_id": "demo", "physical_max": "58"},
+    )
+    assert r.status_code == 202, r.text
+    run = (await client.get(f"/api/runs/{r.json()['id']}")).json()
+    assert run["status"] == "failed"
+    assert run["error"].startswith("invalid series metadata: physical_max")
+    stored = (await client.get(f"/api/series/{series_id}")).json()
+    assert (stored["physical_min"], stored["physical_max"], stored["n_runs"]) == (60, None, 1)
+
+
 async def test_series_summary_has_latest_score_and_open_findings(client):
     """Summary and detail carry the newest score, unresolved findings and the last run time."""
     first = await _upload(client, physical_max="55")

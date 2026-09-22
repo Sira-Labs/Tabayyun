@@ -176,7 +176,8 @@ async def upsert_upload_series(
     """Create the Uploads source and the series on first use, then save the upload's metadata.
 
     Both inserts use ON CONFLICT DO NOTHING so concurrent runs of a new series cannot fail on
-    the unique constraints.
+    the unique constraints. Raises MetadataError when the upload's limits no longer fit the
+    stored series (it was patched while the core ran); the caller fails the run.
     """
     await session.execute(
         pg_insert(Source)
@@ -211,6 +212,8 @@ async def upsert_upload_series(
         .with_for_update()
     )
     series = (await session.execute(stmt)).scalar_one()
+    # The series may have been patched while the core ran: check the result on the locked row.
+    validate_limits({**_values(series), **overrides}, changed=list(overrides))
     changed = {k: v for k, v in overrides.items() if getattr(series, k) != v}
     if changed:
         for key, value in changed.items():

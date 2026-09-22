@@ -355,6 +355,10 @@ async def execute_run(factory: async_sessionmaker[AsyncSession], run_id: uuid.UU
             }
             await session.execute(update(Run).where(Run.id == run_id).values(stats=stats))
             await session.execute(delete(Upload).where(Upload.run_id == run_id))
+    except series_service.MetadataError as exc:
+        # Rolled back: the series changed since the run started and no longer fits the upload.
+        await _mark_failed(factory, run_id, f"invalid series metadata: {exc}")
+        return
     except SQLAlchemyError as exc:
         run_log.exception("run.persist_failed")
         await _mark_failed(factory, run_id, f"persist error: {_error_line(exc)}")
