@@ -32,7 +32,7 @@ async def test_healthz_degraded_when_db_unreachable():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/healthz")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok", "db": DB_DEGRADED}
+    assert r.json() == {"status": "ok", "db": DB_DEGRADED, "queue": None}
 
 
 async def test_check_db_reports_degraded_on_timeout(monkeypatch):

@@ -73,4 +73,8 @@ async def test_lifespan_reports_schema_revision_and_db_ok(settings, fresh_schema
     ):
         version = (await c.get("/api/version")).json()
         assert version["schema_revision"] == migrate.head_revision()
-        assert (await c.get("/healthz")).json() == {"status": "ok", "db": DB_OK}
+        assert (await c.get("/healthz")).json() == {
+            "status": "ok",
+            "db": DB_OK,
+            "queue": {"pending": 0, "running": 0},
+        }

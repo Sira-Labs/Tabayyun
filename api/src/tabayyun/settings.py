@@ -25,6 +25,11 @@ class Settings(BaseSettings):
         description="auto: use TimescaleDB when the extension is available; on: require it; "
         "off: never create hypertables (Apache-2-only mode, ADR-0003).",
     )
+    inline_jobs: bool = Field(
+        default=False,
+        description="Execute jobs in the API process (tests, single-process dev) instead of enqueueing them.",
+    )
+    worker_concurrency: int = Field(default=2, ge=1, description="Jobs one worker process runs concurrently.")
     test_database_url: str | None = Field(
         default=None,
         description="When set, pytest runs the database tests against this URL; otherwise they skip.",

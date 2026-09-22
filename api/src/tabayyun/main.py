@@ -7,13 +7,15 @@ added per `docs/architecture/03-system-architecture.md`.
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import structlog
 from fastapi import FastAPI
 
 from tabayyun import __version__
-from tabayyun.db import check_db, guard_schema, make_engine, make_session_factory
-from tabayyun.routers import checks
+from tabayyun.db import DB_OK, check_db, guard_schema, make_engine, make_session_factory
+from tabayyun.routers import checks, runs
+from tabayyun.services import runs as runs_service
 from tabayyun.settings import Settings, get_settings
 
 log = structlog.get_logger()
@@ -45,17 +47,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/api/openapi.json",
     )
 
+    app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
     app.state.schema_revision = None
 
     app.include_router(checks.router)
+    app.include_router(runs.router)
 
     @app.get("/healthz", tags=["ops"])
-    async def healthz() -> dict[str, str]:
-        """Liveness plus database reachability."""
+    async def healthz() -> dict[str, Any]:
+        """Liveness plus database reachability and queue depth."""
         # Always 200: the container keeps running while the database restarts.
-        return {"status": "ok", "db": await check_db(engine)}
+        db = await check_db(engine)
+        queue = await runs_service.queue_counts(engine) if db == DB_OK else None
+        return {"status": "ok", "db": db, "queue": queue}
 
     @app.get("/api/version", tags=["ops"])
     async def version() -> dict[str, str | None]:
