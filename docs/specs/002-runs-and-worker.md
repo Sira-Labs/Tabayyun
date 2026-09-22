@@ -95,9 +95,9 @@ drop the core's exclusive `+1 ns` end.
       returns a traceback.
 - [x] Killing the worker mid-run leaves the run `running`; after the reaper task it is
       `failed` with `worker lost`.
-- [ ] The worker image starts with `python -m tabayyun.jobs` and processes a run on CapRover.
-      (Needs the `tabayyun-worker` app and its token; checked after merge, ticked in the
-      spec 003 PR.)
+- [x] The worker image starts with `python -m tabayyun.jobs` and processes a run on CapRover.
+      (Verified 2026-09-22: release run 26 deployed `tabayyun-worker`; a run posted to the
+      live API went from `queued` to `succeeded` with 700 samples, 1 finding and a score.)
 - [x] The uploads table row is deleted when the run reaches a terminal state (the CSV is not
       kept; the cache in spec 006 takes over) and the run keeps its stats.
 

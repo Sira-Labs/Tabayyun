@@ -27,7 +27,7 @@ GET   /api/findings?series_id&check_id&severity&dimension&status&run_id&since&un
 GET   /api/findings/{id}          → 200 Finding
 PATCH /api/findings/{id}          body {"status": "acked|muted|resolved|open", "reason": "…"}
       → 200 Finding
-GET   /api/series/{id}/metrics?name&since&until&limit  → 200 {"items": [{"ts","value","run_id"}]}
+GET   /api/series/{id}/metrics?name&since&until&limit  → 200 {"items": [{"ts","value","run_id","check_id","name"}]}
 GET   /api/series/{id}/scores?limit                    → 200 {"items": [Score]}
 ```
 
@@ -46,9 +46,11 @@ id`; `limit` 1–500, default 50; keyset cursor.
    series (`layer = raw`), one metrics row per core metric, findings through the dedup rule
    below. A run that fails persists nothing.
 2. Dedup rule: for each incoming finding, look for an existing finding with the same
-   `series_id` and `check_id`, `status in (open, acked)` and `window` overlapping the incoming
-   window. If found, update it: `window = union`, `severity`, `score_impact`, `summary`,
-   `evidence` from the incoming finding, `last_run_id = run`, `occurrences += 1`,
+   `series_id` and `check_id`, `status in (open, acked)`, the same evidence shape (set of
+   top-level evidence keys), created by an earlier run, and `window` overlapping the incoming
+   window; among several, the largest overlap ratio (intersection over union) wins. If found,
+   update it: `window = union`, `severity`, `score_impact`, `summary`, `evidence` from the
+   incoming finding, `last_run_id = run`, `occurrences += 1` once per run,
    `updated_at = now()`; an `acked` finding stays `acked`. If not found, insert with
    `first_run_id = last_run_id = run`, `status = open`. Two incoming findings that overlap the
    same existing one both merge into it. `muted` and `resolved` findings never absorb new
@@ -65,28 +67,47 @@ id`; `limit` 1–500, default 50; keyset cursor.
 
 ## Acceptance criteria
 
-- [ ] Uploading the synthetic faulty series twice yields the same number of findings as once,
+- [x] Uploading the synthetic faulty series twice yields the same number of findings as once,
       each with `occurrences = 2` and `last_run_id` pointing at the second run.
-- [ ] Uploading a second file whose gap window overlaps the first file's gap merges into one
+- [x] Uploading a second file whose gap window overlaps the first file's gap merges into one
       finding whose window is the union.
-- [ ] A finding `resolved` and then re-detected appears as a new finding.
-- [ ] `PATCH` with `muted` and no reason is 422; `muted → resolved` is 409.
-- [ ] The default list excludes `muted` and `resolved`; `status=all` includes them.
-- [ ] Filters and pagination return stable, non-overlapping pages ordered by window start.
-- [ ] Metrics and scores endpoints return what the run persisted, newest first.
-- [ ] ADR-0013 is merged and the catalogue's "Evidence" bullets link to it.
+- [x] A finding `resolved` and then re-detected appears as a new finding.
+- [x] `PATCH` with `muted` and no reason is 422; `muted → resolved` is 409.
+- [x] The default list excludes `muted` and `resolved`; `status=all` includes them.
+- [x] Filters and pagination return stable, non-overlapping pages ordered by window start.
+- [x] Metrics and scores endpoints return what the run persisted, newest first.
+- [x] ADR-0013 is merged and the catalogue's "Evidence" bullets link to it.
 
 ## Test cases
 
-Unit (`api/tests/test_findings_service.py`, database fixture):
+Unit (`api/tests/db/test_findings_service.py`, database fixture):
 - `test_insert_new_findings`, `test_merge_overlapping_open_finding_unions_window`,
   `test_acked_stays_acked_on_merge`, `test_resolved_not_merged_new_finding_created`,
-  `test_two_incoming_merge_into_one_existing`.
+  `test_two_incoming_merge_into_one_existing`; added `test_merge_growing_backwards_keeps_the_id`,
+  `test_other_evidence_shape_is_not_absorbed`, `test_best_overlap_wins_among_candidates`,
+  `test_findings_of_one_run_do_not_merge_with_each_other`, `test_other_check_is_not_absorbed`,
+  `test_metrics_rewritten_by_a_rerun`.
 
-Unit (`api/tests/test_findings_api.py`):
+Unit (`api/tests/db/test_findings_api.py`, inline jobs):
 - `test_list_defaults_to_open_and_acked`, `test_filters_and_cursor_pagination`,
   `test_status_transitions_table` (parametrised over the allowed and forbidden pairs),
-  `test_mute_requires_reason`, `test_metrics_and_scores_endpoints`.
+  `test_mute_requires_reason`, `test_metrics_and_scores_endpoints`; the acceptance criteria
+  are `test_same_upload_twice_keeps_one_finding_per_problem`,
+  `test_overlapping_gap_in_a_second_file_merges_into_the_union` and
+  `test_resolved_then_redetected_is_a_new_finding`.
+
+## Implementation edits
+
+- Dedup matches on evidence shape as well (behaviour 2): the synthetic faulty series showed
+  `tby.completeness` emitting each gap plus a whole-window finding spanning them, and "any
+  overlapping finding of the same check" folded the gaps into it. Findings of the same run
+  never merge with each other, and `occurrences` counts runs, so two incoming findings of one
+  run merging into one existing finding add one occurrence. Recorded in ADR-0013.
+- Metric items also carry `check_id` and `name`, since without the `name` filter the list
+  mixes metrics. `limit` is 1–1000 (default 100) for metrics and 1–500 (default 50) for scores.
+- `run_id` filters on `first_run_id` or `last_run_id`; the schema keeps no per-run link.
+- Stored window ends round up to the microsecond so the stored window contains the core's.
+- The database tests live in `api/tests/db/` next to the fixture of spec 001.
 
 ## Out of scope
 
