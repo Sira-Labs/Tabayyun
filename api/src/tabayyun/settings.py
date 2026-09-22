@@ -55,6 +55,7 @@ class Settings(BaseSettings):
 
 
 def _is_placeholder(value: str) -> bool:
+    """True for change-me style values and anything shorter than 16 characters."""
     lowered = value.lower()
     return (
         "change-me" in lowered or "changeme" in lowered or "placeholder" in lowered or len(value.strip()) < 16
@@ -63,4 +64,5 @@ def _is_placeholder(value: str) -> bool:
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    """Process-wide settings, read once from the environment."""
     return Settings()

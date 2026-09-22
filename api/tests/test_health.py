@@ -12,10 +12,12 @@ UNREACHABLE_DB = "postgresql+psycopg://nobody:nothing@127.0.0.1:1/nodb"
 
 @pytest.fixture
 def app():
+    """App bound to the default (dev) settings in test mode."""
     return create_app(Settings(env="test"))
 
 
 async def test_healthz(app):
+    """/healthz answers 200 with a db field whatever the database state."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/healthz")
     assert r.status_code == 200
@@ -53,6 +55,7 @@ async def test_schema_guard_tolerates_unreachable_db():
 
 
 async def test_version(app):
+    """/api/version reports the environment and a schema_revision field."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/api/version")
     assert r.status_code == 200
@@ -61,6 +64,7 @@ async def test_version(app):
 
 
 def test_prod_refuses_placeholders():
+    """Prod refuses missing and placeholder secrets."""
     with pytest.raises(RuntimeError):
         create_app(Settings(env="prod"))
     with pytest.raises(RuntimeError, match="SESSION_SECRET"):
@@ -74,6 +78,7 @@ def test_prod_refuses_placeholders():
 
 
 def test_prod_starts_without_oidc_when_secrets_are_real():
+    """Prod starts with real secrets even before OIDC is configured."""
     app = create_app(
         Settings(
             env="prod",

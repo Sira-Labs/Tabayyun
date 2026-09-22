@@ -32,6 +32,7 @@ async def test_session_rolls_back_on_error(settings, fresh_schema):
 
     @app.post("/_test/orgs")
     async def create_org(session: Annotated[AsyncSession, Depends(get_session)], fail: bool = False) -> dict:
+        """Insert one org and optionally fail afterwards, inside the request transaction."""
         session.add(Org(name="probe"))
         await session.flush()
         if fail:

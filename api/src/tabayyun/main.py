@@ -20,6 +20,7 @@ log = structlog.get_logger()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    """Build the FastAPI app with its routers, database engine and lifespan."""
     settings = settings or get_settings()
     settings.require_secrets_in_prod()
     # Lazy: no connection is opened until the first request or the startup guard.
@@ -27,6 +28,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        """Startup: schema guard; shutdown: dispose the engine."""
         log.info("api.start", env=settings.env, version=__version__)
         # Exits with code 3 on a schema mismatch; an unreachable database only degrades /healthz.
         app.state.schema_revision = await guard_schema(engine)
@@ -51,11 +53,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/healthz", tags=["ops"])
     async def healthz() -> dict[str, str]:
+        """Liveness plus database reachability."""
         # Always 200: the container keeps running while the database restarts.
         return {"status": "ok", "db": await check_db(engine)}
 
     @app.get("/api/version", tags=["ops"])
     async def version() -> dict[str, str | None]:
+        """Build version, environment and the schema revision seen at startup."""
         return {"version": __version__, "env": settings.env, "schema_revision": app.state.schema_revision}
 
     return app

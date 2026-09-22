@@ -93,6 +93,7 @@ async def current_revision(engine: AsyncEngine) -> str | None:
     from alembic.runtime.migration import MigrationContext
 
     def _read(conn: Any) -> str | None:
+        """Read the alembic_version row on a sync connection."""
         return MigrationContext.configure(conn).get_current_revision()
 
     async with engine.connect() as conn:

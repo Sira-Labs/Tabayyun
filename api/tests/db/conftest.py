@@ -60,6 +60,7 @@ def fresh_schema(db_url: str) -> Callable[[str], None]:
     """Callable that empties the schema and migrates to head with the given TimescaleDB mode."""
 
     def _fresh(mode: str = "auto") -> None:
+        """Downgrade to base and upgrade to head with the given TimescaleDB mode."""
         assert_test_database(db_url)
         migrate.downgrade(db_url, "base", timescale=mode)
         migrate.upgrade(db_url, "head", timescale=mode)

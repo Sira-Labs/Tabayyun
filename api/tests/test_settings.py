@@ -7,6 +7,7 @@ DB_ENV = ("TABAYYUN_TIMESCALE", "TABAYYUN_DB_POOL_SIZE", "TABAYYUN_DB_POOL_MAX_O
 
 
 def _clear_db_env(monkeypatch) -> None:
+    """Remove the database variables so defaults are observable."""
     for name in DB_ENV:
         monkeypatch.delenv(name, raising=False)
 

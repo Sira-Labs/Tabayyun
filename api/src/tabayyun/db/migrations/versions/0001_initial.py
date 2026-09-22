@@ -35,6 +35,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Create every table, index and constraint, seed the tenant, then the hypertables."""
     op.create_table(
         "orgs",
         sa.Column("id", sa.UUID(), nullable=False),
@@ -345,6 +346,7 @@ def _create_hypertables(mode: str) -> None:
 
 
 def downgrade() -> None:
+    """Drop everything in dependency order; hypertables drop with their tables."""
     op.drop_table("uploads")
     op.drop_index("ix_scores_series_id_computed_at", table_name="scores")
     op.drop_table("scores")
