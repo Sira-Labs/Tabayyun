@@ -310,6 +310,21 @@ def _seed_default_tenant() -> None:
     )
 
 
+def _preloaded_libraries(raw: object) -> set[str]:
+    """Library names from a `shared_preload_libraries` value, without paths, quotes or `.so`.
+
+    Entries may be bare names, `$libdir/timescaledb` or quoted paths; all of them count.
+    """
+    names = set()
+    for entry in str(raw or "").split(","):
+        name = entry.strip().strip("'\"").rsplit("/", 1)[-1]
+        if name.endswith(".so"):
+            name = name[:-3]
+        if name:
+            names.add(name)
+    return names
+
+
 def _create_hypertables(mode: str) -> None:
     """Convert findings, metrics and scores per TABAYYUN_TIMESCALE; see the module docstring."""
     if mode == "off":
@@ -326,8 +341,8 @@ def _create_hypertables(mode: str) -> None:
         return
     # CREATE EXTENSION terminates the connection when the library is not preloaded, which a
     # transaction cannot recover from; check shared_preload_libraries first.
-    preloaded = conn.execute(sa.text("SHOW shared_preload_libraries")).scalar() or ""
-    if "timescaledb" not in {name.strip() for name in str(preloaded).split(",")}:
+    preloaded = _preloaded_libraries(conn.execute(sa.text("SHOW shared_preload_libraries")).scalar())
+    if "timescaledb" not in preloaded:
         if mode == "on":
             raise RuntimeError("TABAYYUN_TIMESCALE=on but timescaledb is not in shared_preload_libraries")
         log.warning("timescaledb is not preloaded: findings, metrics and scores stay plain tables")
