@@ -167,3 +167,37 @@ async def test_healthz_reports_queue_depth(client):
     body = (await client.get("/healthz")).json()
     assert body["db"] == "ok"
     assert body["queue"] == {"pending": 0, "running": 0}
+
+
+async def test_late_completion_does_not_overwrite_a_reaped_run(client, app, monkeypatch):
+    """If the reaper failed the run while the core was busy, the worker's result is dropped."""
+    from sqlalchemy import update
+
+    real_run_checks = runs_service.core.run_checks
+
+    def run_checks_then_reap(*args, **kwargs):
+        report = real_run_checks(*args, **kwargs)
+        # Simulate the reaper: the run is failed with `worker lost` while the core ran.
+        import asyncio
+
+        async def reap():
+            async with app.state.session_factory() as session, session.begin():
+                await session.execute(
+                    update(Run)
+                    .where(Run.status == "running")
+                    .values(status="failed", error=runs_service.WORKER_LOST)
+                )
+
+        asyncio.run_coroutine_threadsafe(reap(), loop).result()
+        return report
+
+    loop = __import__("asyncio").get_running_loop()
+    monkeypatch.setattr(runs_service.core, "run_checks", run_checks_then_reap)
+    body = await _post_run(client, faulty_csv([]))
+    run = (await client.get(f"/api/runs/{body['id']}")).json()
+    assert run["status"] == "failed" and run["error"] == runs_service.WORKER_LOST
+    async with app.state.session_factory() as session:
+        scores = list(
+            (await session.execute(select(Score).where(Score.run_id == uuid.UUID(body["id"])))).scalars()
+        )
+    assert scores == []

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import json
 import uuid
 from dataclasses import asdict, dataclass
@@ -179,7 +180,7 @@ def decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
     try:
         created_at, run_id = base64.urlsafe_b64decode(cursor.encode()).decode().split("|", 1)
         return datetime.fromisoformat(created_at), uuid.UUID(run_id)
-    except (ValueError, UnicodeDecodeError) as exc:
+    except (ValueError, UnicodeDecodeError, binascii.Error) as exc:
         raise ValueError("invalid cursor") from exc
 
 
@@ -277,7 +278,7 @@ async def _mark_failed(factory: async_sessionmaker[AsyncSession], run_id: uuid.U
     async with factory() as session, session.begin():
         await session.execute(
             update(Run)
-            .where(Run.id == run_id)
+            .where(Run.id == run_id, Run.status.in_(("queued", "running")))
             .values(status="failed", error=message[:1000], finished_at=_now())
         )
         await session.execute(delete(Upload).where(Upload.run_id == run_id))
@@ -339,8 +340,26 @@ async def execute_run(factory: async_sessionmaker[AsyncSession], run_id: uuid.UU
 
     try:
         async with factory() as session, session.begin():
-            series = await _resolve_series(session, params.series_id)
             finished_at = _now()
+            # Only a run still `running` completes: the reaper may have failed it meanwhile.
+            # The persistence below is skipped (and rolled back) unless exactly one row changed.
+            result = await session.execute(
+                update(Run)
+                .where(Run.id == run_id, Run.status == "running")
+                .values(
+                    status="succeeded",
+                    finished_at=finished_at,
+                    window_start=ns_to_datetime(report.window["start"]),
+                    window_end=ns_to_datetime(report.window["end"]),
+                    now_ns=report.now_ns,
+                    error=None,
+                )
+            )
+            if int(getattr(result, "rowcount", 0) or 0) != 1:
+                await session.rollback()
+                run_log.warning("run.completion_skipped", reason="run no longer running")
+                return
+            series = await _resolve_series(session, params.series_id)
             session.add(
                 Score(
                     series_id=series.id,
@@ -364,19 +383,7 @@ async def execute_run(factory: async_sessionmaker[AsyncSession], run_id: uuid.UU
                     {"id": str(series.id), "external_id": series.external_id, "score": report.score.overall}
                 ],
             }
-            await session.execute(
-                update(Run)
-                .where(Run.id == run_id)
-                .values(
-                    status="succeeded",
-                    finished_at=finished_at,
-                    window_start=ns_to_datetime(report.window["start"]),
-                    window_end=ns_to_datetime(report.window["end"]),
-                    now_ns=report.now_ns,
-                    stats=stats,
-                    error=None,
-                )
-            )
+            await session.execute(update(Run).where(Run.id == run_id).values(stats=stats))
             await session.execute(delete(Upload).where(Upload.run_id == run_id))
     except SQLAlchemyError as exc:
         run_log.exception("run.persist_failed")

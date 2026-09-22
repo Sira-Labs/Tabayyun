@@ -1,12 +1,15 @@
 """Procrastinate job queue schema (spec 002, ADR-0004).
 
-Applies the schema shipped with the installed Procrastinate release so that one
-`migrate upgrade head` creates the queue tables next to ours. The file contains literal
-percent signs and dollar-quoted function bodies, so it runs through the driver cursor
-without parameter formatting. Autogenerate ignores `procrastinate_*` tables (see env.py).
+Applies the snapshot `sql/procrastinate_schema_3.9.0.sql`, copied from Procrastinate 3.9.0's
+`schema.sql`, so that one `migrate upgrade head` creates the queue tables next to ours and
+this revision keeps producing the same schema whatever Procrastinate version is installed
+later. The file contains literal percent signs and dollar-quoted function bodies, so it runs
+through the driver cursor without parameter formatting. Autogenerate ignores
+`procrastinate_*` tables (see env.py).
 
 Upgrading Procrastinate later: add a new revision that executes the SQL files it ships under
-`procrastinate/sql/migrations/` between the pinned and the new version.
+`procrastinate/sql/migrations/` between 3.9.0 and the new version, and update the snapshot
+test in `tests/test_migration_helpers.py`.
 
 Revision ID: 0002
 Revises: 0001
@@ -16,7 +19,7 @@ Create Date: 2026-09-22 08:05:00+00:00
 from __future__ import annotations
 
 from collections.abc import Sequence
-from importlib import resources
+from pathlib import Path
 from typing import Any
 
 from alembic import op
@@ -25,6 +28,8 @@ revision: str = "0002"
 down_revision: str | None = "0001"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
+
+SCHEMA_SNAPSHOT = Path(__file__).resolve().parent.parent / "sql" / "procrastinate_schema_3.9.0.sql"
 
 # Drops every table, function and type Procrastinate created, whatever its version.
 DROP_PROCRASTINATE = """
@@ -59,8 +64,7 @@ def _execute_raw(sql: str) -> None:
 
 def upgrade() -> None:
     """Create the Procrastinate tables, types, functions and triggers."""
-    schema_sql = resources.files("procrastinate.sql").joinpath("schema.sql").read_text()
-    _execute_raw(schema_sql)
+    _execute_raw(SCHEMA_SNAPSHOT.read_text())
 
 
 def downgrade() -> None:
