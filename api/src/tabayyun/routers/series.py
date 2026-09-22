@@ -1,23 +1,194 @@
-"""Series endpoints (spec 003): metric points and score history of one series.
-
-Spec 004 adds reading and editing the series itself on this router.
-"""
+"""Series endpoints: catalogue, metadata and partial updates (spec 004), metric points and
+score history (spec 003)."""
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tabayyun import core
 from tabayyun.db import get_session
+from tabayyun.db.models import Series
 from tabayyun.services import findings as findings_service
+from tabayyun.services import series as series_service
 from tabayyun.services.timeconv import datetime_to_ns, parse_time
 
 router = APIRouter(prefix="/api/series", tags=["series"])
+
+SeriesKind = core.SeriesKind
+FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
+
+
+class LatestScore(BaseModel):
+    """The newest raw-layer score of a series."""
+
+    overall: float
+    computed_at: datetime
+
+
+class SeriesSummary(BaseModel):
+    """One row of `GET /api/series`."""
+
+    id: str
+    source_id: str
+    external_id: str
+    name: str
+    unit: str | None
+    kind: str
+    latest_score: LatestScore | None
+    open_findings: int
+    last_run_at: datetime | None
+
+
+class SeriesList(BaseModel):
+    """One page of series and the cursor of the next page, if any."""
+
+    items: list[SeriesSummary]
+    next_cursor: str | None
+
+
+class SeriesOut(SeriesSummary):
+    """The full series: metadata, latest score and counts."""
+
+    expected_interval_ns: int | None
+    physical_min: float | None
+    physical_max: float | None
+    operational_min: float | None
+    operational_max: float | None
+    resolution: float | None
+    non_negative: bool | None
+    asset_path: str | None
+    metadata: dict[str, Any]
+    n_runs: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class SeriesPatch(BaseModel):
+    """Body of `PATCH /api/series/{id}`: any subset of the editable fields; null clears one."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=256)
+    unit: str | None = Field(default=None, max_length=32)
+    kind: SeriesKind | None = None
+    expected_interval_ns: int | None = Field(default=None, gt=0)
+    physical_min: FiniteFloat | None = None
+    physical_max: FiniteFloat | None = None
+    operational_min: FiniteFloat | None = None
+    operational_max: FiniteFloat | None = None
+    resolution: FiniteFloat | None = Field(default=None, gt=0)
+    non_negative: bool | None = None
+    asset_path: str | None = Field(default=None, max_length=512)
+    metadata: dict[str, Any] | None = None
+
+
+def _summary_fields(series: Series, stats: series_service.SeriesStats) -> dict[str, Any]:
+    """Fields shared by the summary and the full record."""
+    return {
+        "id": str(series.id),
+        "source_id": str(series.source_id),
+        "external_id": series.external_id,
+        "name": series.name,
+        "unit": series.unit,
+        "kind": series.kind,
+        "latest_score": stats.latest_score,
+        "open_findings": stats.open_findings,
+        "last_run_at": stats.last_run_at,
+    }
+
+
+def _series_out(series: Series, stats: series_service.SeriesStats) -> SeriesOut:
+    """The full record of one series."""
+    return SeriesOut(
+        **_summary_fields(series, stats),
+        expected_interval_ns=series.expected_interval_ns,
+        physical_min=series.physical_min,
+        physical_max=series.physical_max,
+        operational_min=series.operational_min,
+        operational_max=series.operational_max,
+        resolution=series.resolution,
+        non_negative=series.non_negative,
+        asset_path=series.asset_path,
+        metadata=series.metadata_,
+        n_runs=stats.n_runs,
+        created_at=series.created_at,
+        updated_at=series.updated_at,
+    )
+
+
+def _parse_series_id(series_id: str) -> uuid.UUID:
+    """A malformed id is simply not found (404)."""
+    try:
+        return uuid.UUID(series_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="series not found") from exc
+
+
+@router.get("", response_model=SeriesList)
+async def list_series(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    q: Annotated[str | None, Query(max_length=256)] = None,
+    source_id: str | None = None,
+    kind: SeriesKind | None = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    cursor: str | None = None,
+) -> SeriesList:
+    """Series by name; `q` matches name or external id case-insensitively."""
+    parsed_source: uuid.UUID | None = None
+    if source_id is not None:
+        try:
+            parsed_source = uuid.UUID(source_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="source_id is not a UUID") from exc
+    try:
+        rows, next_cursor = await series_service.list_series(
+            session, q=q or None, source_id=parsed_source, kind=kind, limit=limit, cursor=cursor
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    stats = await series_service.series_stats(session, [s.id for s in rows])
+    return SeriesList(
+        items=[SeriesSummary(**_summary_fields(s, stats[s.id])) for s in rows], next_cursor=next_cursor
+    )
+
+
+@router.get("/{series_id}", response_model=SeriesOut)
+async def get_series(series_id: str, session: Annotated[AsyncSession, Depends(get_session)]) -> SeriesOut:
+    """One series with its metadata, latest score and counts."""
+    series = await series_service.get_series(session, _parse_series_id(series_id))
+    if series is None:
+        raise HTTPException(status_code=404, detail="series not found")
+    stats = await series_service.series_stats(session, [series.id])
+    return _series_out(series, stats[series.id])
+
+
+@router.patch("/{series_id}", response_model=SeriesOut)
+async def patch_series(
+    series_id: str,
+    patch: Annotated[SeriesPatch, Body()],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SeriesOut:
+    """Partial update; the merged metadata is validated and 422 names the offending field."""
+    changes = patch.model_dump(include=patch.model_fields_set)
+    try:
+        series = await series_service.patch_series(
+            session, _parse_series_id(series_id), changes, now=datetime.now(UTC)
+        )
+    except series_service.MetadataError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=[{"loc": ["body", exc.field], "msg": exc.message, "type": "value_error"}],
+        ) from exc
+    if series is None:
+        raise HTTPException(status_code=404, detail="series not found")
+    stats = await series_service.series_stats(session, [series.id])
+    return _series_out(series, stats[series.id])
 
 
 class MetricPoint(BaseModel):
@@ -61,7 +232,7 @@ async def _series_id_or_404(session: AsyncSession, series_id: str) -> uuid.UUID:
         parsed = uuid.UUID(series_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="series not found") from exc
-    if await findings_service.get_series(session, parsed) is None:
+    if await series_service.get_series(session, parsed) is None:
         raise HTTPException(status_code=404, detail="series not found")
     return parsed
 

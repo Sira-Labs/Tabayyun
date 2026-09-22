@@ -5,8 +5,8 @@ enqueues the job in the same transaction (or, with `TABAYYUN_INLINE_JOBS`, runs 
 request's background task). The worker moves the run to `running`, executes the core and
 persists the outcome in one transaction; any exception marks the run `failed` with a
 one-line message. The completion transaction persists the score row, the run statistics
-and, through `services.findings`, the metrics and deduplicated findings (spec 003); metadata
-precedence arrives with spec 004.
+and, through `services.findings`, the metrics and deduplicated findings (spec 003); series
+metadata follows the precedence of `services.series` (spec 004).
 """
 
 from __future__ import annotations
@@ -16,26 +16,24 @@ import json
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
-import pyarrow as pa
 import structlog
 from sqlalchemy import delete, func, select, text, tuple_, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from tabayyun import core
-from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Run, Score, Series, Source, Upload
+from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Run, Score, Upload
 from tabayyun.jobs.names import RUN_CHECKS_TASK, RUNS_QUEUE
 from tabayyun.services import findings as findings_service
+from tabayyun.services import series as series_service
 from tabayyun.services.pagination import decode_keyset, encode_keyset
 from tabayyun.services.timeconv import datetime_to_ns, ns_to_datetime, ns_to_datetime_ceil
 
 log = structlog.get_logger()
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-UPLOADS_SOURCE_NAME = "Uploads"
 STALE_AFTER = timedelta(minutes=30)
 WORKER_LOST = "worker lost"
 
@@ -74,6 +72,7 @@ class RunParams:
     physical_min: float | None = None
     physical_max: float | None = None
     now_ns: int | None = None
+    ts_unit: str = "auto"
 
     def to_json(self) -> dict[str, Any]:
         """Plain dict for the `uploads.params` column."""
@@ -87,15 +86,23 @@ class RunParams:
 
 
 def parse_upload(
-    data: bytes, *, ts_col: str, value_col: str, quality_col: str | None, ingest_col: str | None
-) -> pa.Table:
+    data: bytes,
+    *,
+    ts_col: str,
+    value_col: str,
+    quality_col: str | None,
+    ingest_col: str | None,
+    ts_unit: core.TsUnit = "auto",
+) -> core.ParsedCsv:
     """Validate size and parse a CSV upload; raises `UploadError` with the HTTP status."""
     if len(data) > MAX_UPLOAD_BYTES:
         raise UploadError(413, "upload larger than 50 MiB")
     if not data:
         raise UploadError(400, "empty upload")
     try:
-        return core.read_csv(data, ts_col, value_col, quality_col or None, ingest_col or None)
+        return core.read_csv(data, ts_col, value_col, quality_col or None, ingest_col or None, ts_unit)
+    except core.TimestampUnitError as exc:
+        raise UploadError(422, str(exc)) from exc
     except Exception as exc:  # pyarrow raises several ArrowInvalid/KeyError variants
         raise UploadError(422, f"cannot parse CSV: {exc}") from exc
 
@@ -220,49 +227,6 @@ def run_to_dict(run: Run) -> dict[str, Any]:
 # Execution (worker path)
 
 
-async def _resolve_series(session: AsyncSession, external_id: str) -> Series:
-    """The series for an upload: the workspace's `Uploads` source and the series by external id.
-
-    Both are created on first use with ON CONFLICT DO NOTHING so concurrent runs of a new
-    series cannot fail on the unique constraints. Metadata precedence arrives with spec 004.
-    """
-    await session.execute(
-        pg_insert(Source)
-        .values(
-            id=uuid.uuid4(),
-            org_id=DEFAULT_ORG_ID,
-            workspace_id=DEFAULT_WORKSPACE_ID,
-            type="upload",
-            name=UPLOADS_SOURCE_NAME,
-            config={},
-            health={},
-        )
-        .on_conflict_do_nothing(index_elements=["workspace_id", "name"])
-    )
-    source_id = (
-        await session.execute(
-            select(Source.id).where(
-                Source.workspace_id == DEFAULT_WORKSPACE_ID, Source.name == UPLOADS_SOURCE_NAME
-            )
-        )
-    ).scalar_one()
-    await session.execute(
-        pg_insert(Series)
-        .values(
-            id=uuid.uuid4(),
-            org_id=DEFAULT_ORG_ID,
-            workspace_id=DEFAULT_WORKSPACE_ID,
-            source_id=source_id,
-            external_id=external_id,
-            name=external_id,
-            metadata_={},
-        )
-        .on_conflict_do_nothing(index_elements=["source_id", "external_id"])
-    )
-    stmt = select(Series).where(Series.source_id == source_id, Series.external_id == external_id)
-    return (await session.execute(stmt)).scalar_one()
-
-
 async def _mark_failed(factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID, message: str) -> None:
     """Fail a queued or running run with `message` and drop its upload, in its own transaction."""
     async with factory() as session, session.begin():
@@ -287,28 +251,36 @@ async def execute_run(factory: async_sessionmaker[AsyncSession], run_id: uuid.UU
         run.started_at = _now()
         upload = await session.get(Upload, run_id)
         payload = None if upload is None else (upload.data, RunParams.from_json(upload.params))
+        # Stored metadata is read, not created: a run that fails leaves no series behind.
+        stored = (
+            None
+            if payload is None
+            else await series_service.find_upload_series(session, payload[1].series_id)
+        )
     run_log.info("run.started")
 
     try:
         if payload is None:
             raise RunFailureError("upload missing")
         data, params = payload
+        overrides = series_service.upload_overrides(params.unit, params.physical_min, params.physical_max)
         try:
-            table = parse_upload(
+            merged = series_service.merged_for_run(stored, overrides)
+        except series_service.MetadataError as exc:
+            raise RunFailureError(f"invalid series metadata: {exc}") from exc
+        try:
+            parsed = parse_upload(
                 data,
                 ts_col=params.ts_col,
                 value_col=params.value_col,
                 quality_col=params.quality_col,
                 ingest_col=params.ingest_col,
+                ts_unit=cast(core.TsUnit, params.ts_unit),  # validated when the run was created
             )
         except UploadError as exc:
             raise RunFailureError(exc.detail) from exc
-        meta = core.SeriesMetaIn(
-            id=params.series_id,
-            unit=params.unit or None,
-            physical_min=params.physical_min,
-            physical_max=params.physical_max,
-        )
+        table = parsed.table
+        meta = series_service.meta_for_core(params.series_id, merged)
         # The core releases the GIL; a thread keeps the worker's event loop responsive.
         report = await asyncio.to_thread(
             core.run_checks,
@@ -349,7 +321,9 @@ async def execute_run(factory: async_sessionmaker[AsyncSession], run_id: uuid.UU
                 await session.rollback()
                 run_log.warning("run.completion_skipped", reason="run no longer running")
                 return
-            series = await _resolve_series(session, params.series_id)
+            series = await series_service.upsert_upload_series(
+                session, params.series_id, overrides, now=finished_at
+            )
             session.add(
                 Score(
                     series_id=series.id,
@@ -373,6 +347,7 @@ async def execute_run(factory: async_sessionmaker[AsyncSession], run_id: uuid.UU
                 "n_findings_new": outcome.new,
                 "n_findings_merged": outcome.merged,
                 "skipped": len(report.skipped),
+                "ts_unit": parsed.ts_unit,
                 "window": {"start": report.window["start"], "end": report.window["end"]},
                 "series": [
                     {"id": str(series.id), "external_id": series.external_id, "score": report.score.overall}

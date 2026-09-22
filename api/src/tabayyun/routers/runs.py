@@ -14,8 +14,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tabayyun import core
 from tabayyun.db import get_session
 from tabayyun.services import runs as runs_service
+from tabayyun.services import series as series_service
 from tabayyun.services.runs import MAX_UPLOAD_BYTES, RunParams, UploadError
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
@@ -62,6 +64,7 @@ async def create_run(
     physical_min: Annotated[float | None, Form()] = None,
     physical_max: Annotated[float | None, Form()] = None,
     now_ns: Annotated[int | None, Form()] = None,
+    ts_unit: Annotated[core.TsUnit, Form(description="Unit of epoch integer timestamps")] = "auto",
 ) -> RunCreated:
     """Store the upload, create a queued run and enqueue it; 202 with the run id."""
     data = await file.read(MAX_UPLOAD_BYTES + 1)
@@ -75,6 +78,7 @@ async def create_run(
         physical_min=physical_min,
         physical_max=physical_max,
         now_ns=now_ns,
+        ts_unit=ts_unit,
     )
     try:
         # Parse now so a bad file fails the request; the table is discarded, the bytes kept.
@@ -84,9 +88,20 @@ async def create_run(
             value_col=value_col,
             quality_col=params.quality_col,
             ingest_col=params.ingest_col,
+            ts_unit=ts_unit,
         )
     except UploadError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    # The form's limits must fit the stored series (spec 004); checked again by the worker.
+    stored = await series_service.find_upload_series(session, series_id)
+    overrides = series_service.upload_overrides(params.unit, physical_min, physical_max)
+    try:
+        series_service.merged_for_run(stored, overrides)
+    except series_service.MetadataError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=[{"loc": ["body", exc.field], "msg": exc.message, "type": "value_error"}],
+        ) from exc
     run = await runs_service.create_run(
         session,
         data=data,

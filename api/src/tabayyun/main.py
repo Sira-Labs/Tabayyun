@@ -14,7 +14,7 @@ from fastapi import FastAPI
 
 from tabayyun import __version__
 from tabayyun.db import DB_OK, check_db, guard_schema, make_engine, make_session_factory
-from tabayyun.routers import checks, findings, runs, series
+from tabayyun.routers import checks, findings, runs, series, sources
 from tabayyun.services import runs as runs_service
 from tabayyun.settings import Settings, get_settings
 
@@ -56,6 +56,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(runs.router)
     app.include_router(findings.router)
     app.include_router(series.router)
+    app.include_router(sources.router)
 
     @app.get("/healthz", tags=["ops"])
     async def healthz() -> dict[str, Any]:

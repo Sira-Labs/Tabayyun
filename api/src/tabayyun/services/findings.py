@@ -32,7 +32,6 @@ from tabayyun.db.models import (
     Finding,
     Metric,
     Score,
-    Series,
 )
 from tabayyun.services.pagination import decode_keyset, encode_keyset
 from tabayyun.services.timeconv import datetime_to_ns, ns_to_datetime, ns_to_datetime_ceil
@@ -383,12 +382,6 @@ async def change_status(
     await session.flush()
     log.info("finding.status", finding_id=str(finding_id), status=status)
     return finding
-
-
-async def get_series(session: AsyncSession, series_id: uuid.UUID) -> Series | None:
-    """The series in the default workspace, or None."""
-    stmt = select(Series).where(Series.id == series_id, Series.workspace_id == DEFAULT_WORKSPACE_ID)
-    return (await session.execute(stmt)).scalar_one_or_none()
 
 
 async def list_metrics(
