@@ -40,7 +40,12 @@ export function RunChecks() {
 
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    run.mutate(new FormData(e.currentTarget));
+    const form = new FormData(e.currentTarget);
+    // Optional numeric fields: an empty string is not a float for the API, so drop them.
+    for (const key of ["physical_min", "physical_max", "unit", "quality_col"]) {
+      if (form.get(key) === "") form.delete(key);
+    }
+    run.mutate(form);
   }
 
   return (
@@ -69,6 +74,14 @@ export function RunChecks() {
         <label className="flex flex-col gap-1 text-sm">
           <span>Quality column</span>
           <input name="quality_col" placeholder="optional" className="rounded border border-slate-300 p-2 dark:border-slate-700 dark:bg-slate-950" />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span>Physical minimum (range check)</span>
+          <input name="physical_min" type="number" step="any" inputMode="decimal" placeholder="optional" className="rounded border border-slate-300 p-2 dark:border-slate-700 dark:bg-slate-950" />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span>Physical maximum (range check)</span>
+          <input name="physical_max" type="number" step="any" inputMode="decimal" placeholder="optional" className="rounded border border-slate-300 p-2 dark:border-slate-700 dark:bg-slate-950" />
         </label>
         <div className="flex items-end">
           <button type="submit" disabled={run.isPending} className="min-h-11 rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900">
