@@ -37,7 +37,7 @@ Internet ──▶ CapRover nginx (TLS) ──▶ tabayyun-web (Caddy :80) ─�
     | `TABAYYUN_CACHE_DIR` | `/data/cache` |
     | `TABAYYUN_TIMESCALE` | optional; `auto` (default) uses TimescaleDB when the extension exists, `off` never does |
 
-  - The image runs the schema migration (`alembic upgrade head`) on every start before
+  - The image runs the schema migration (`python -m tabayyun.db.migrate upgrade head`) on every start before
     serving, so a redeploy upgrades the database in place; the app log shows the revision
     and `GET /api/version` reports it as `schema_revision`.
   - Persistent directory: `/data/cache`, label `tabayyun-cache`
