@@ -51,6 +51,7 @@ class UploadError(Exception):
     """An upload the API rejects before storing it; carries the HTTP status to answer with."""
 
     def __init__(self, status_code: int, detail: str) -> None:
+        """Keep the HTTP status and the detail for the router."""
         super().__init__(detail)
         self.status_code = status_code
         self.detail = detail
@@ -100,10 +101,12 @@ def parse_upload(
 
 
 def _now() -> datetime:
+    """Current time, timezone-aware UTC."""
     return datetime.now(UTC)
 
 
 def _error_line(exc: BaseException) -> str:
+    """First line of an exception message, or its type name when the message is empty."""
     message = str(exc).strip().splitlines()
     return message[0] if message else type(exc).__name__
 
@@ -261,6 +264,7 @@ async def _resolve_series(session: AsyncSession, external_id: str) -> Series:
 
 
 async def _mark_failed(factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID, message: str) -> None:
+    """Fail a queued or running run with `message` and drop its upload, in its own transaction."""
     async with factory() as session, session.begin():
         await session.execute(
             update(Run)
@@ -365,7 +369,7 @@ async def execute_run(factory: async_sessionmaker[AsyncSession], run_id: uuid.UU
                 "n_series": 1,
                 "n_samples": report.n_samples,
                 "n_findings": len(report.findings),
-                "n_metrics": len(report.metrics),
+                "n_metrics": outcome.metrics,
                 "n_findings_new": outcome.new,
                 "n_findings_merged": outcome.merged,
                 "skipped": len(report.skipped),

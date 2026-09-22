@@ -21,6 +21,8 @@ router = APIRouter(prefix="/api/series", tags=["series"])
 
 
 class MetricPoint(BaseModel):
+    """One metric point; `ts` is ns since the epoch."""
+
     ts: int
     value: float
     run_id: str
@@ -29,10 +31,14 @@ class MetricPoint(BaseModel):
 
 
 class MetricList(BaseModel):
+    """Metric points of one series, newest first."""
+
     items: list[MetricPoint]
 
 
 class ScoreOut(BaseModel):
+    """One stored score row of a series."""
+
     series_id: str
     run_id: str
     layer: str
@@ -44,10 +50,13 @@ class ScoreOut(BaseModel):
 
 
 class ScoreList(BaseModel):
+    """Score rows of one series, newest first."""
+
     items: list[ScoreOut]
 
 
 async def _series_id_or_404(session: AsyncSession, series_id: str) -> uuid.UUID:
+    """Parse the series id and check it exists in the workspace; 404 otherwise."""
     try:
         parsed = uuid.UUID(series_id)
     except ValueError as exc:
@@ -58,6 +67,7 @@ async def _series_id_or_404(session: AsyncSession, series_id: str) -> uuid.UUID:
 
 
 def _time_or_422(value: str | None, name: str) -> datetime | None:
+    """Parse an optional RFC 3339 or epoch-ns query parameter; 422 when malformed."""
     if value is None:
         return None
     try:

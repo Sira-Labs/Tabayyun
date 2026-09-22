@@ -82,6 +82,7 @@ class TransitionError(Exception):
     """A status change the lifecycle does not allow; carries the current status."""
 
     def __init__(self, current: str, requested: str) -> None:
+        """Remember the current and the requested status for the 409 response."""
         super().__init__(f"cannot change status from {current} to {requested}")
         self.current = current
         self.requested = requested
@@ -112,6 +113,7 @@ def _window(finding: core.Finding) -> tuple[datetime, datetime]:
 
 
 def _shape(evidence: dict[str, Any]) -> frozenset[str]:
+    """Evidence shape: the set of top-level evidence keys, which names the kind of finding."""
     return frozenset(evidence)
 
 
@@ -130,6 +132,7 @@ async def _best_candidate(
     incoming: core.Finding,
     window: tuple[datetime, datetime],
 ) -> Finding | None:
+    """The existing finding the incoming one merges into, or None (rule in the module docstring)."""
     start, end = window
     stmt = (
         select(Finding)
@@ -162,6 +165,7 @@ async def _merge(
     window: tuple[datetime, datetime],
     now: datetime,
 ) -> None:
+    """Fold the incoming finding into `existing`: union window, newest facts, one occurrence per run."""
     new_start = min(existing.window_start, window[0])
     fields: dict[str, Any] = {
         "window_end": max(existing.window_end, window[1]),
@@ -206,14 +210,24 @@ async def _merge(
 def _metric_rows(
     run_id: uuid.UUID, series_id: uuid.UUID, metrics: Iterable[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """One row per (check, name, ts); null values (NaN in the core) are skipped."""
+    """One row per (check, name, stored ts); null values (NaN in the core) are skipped.
+
+    `metrics.ts` has microsecond precision, so points of one metric less than a microsecond
+    apart share a row: the point with the latest nanosecond timestamp is kept.
+    """
     rows: dict[tuple[str, str, datetime], dict[str, Any]] = {}
+    latest_ns: dict[tuple[str, str, datetime], int] = {}
     for metric in metrics:
         value = metric.get("value")
         if value is None:
             continue
-        ts = ns_to_datetime(int(metric["ts"]))
-        rows[(metric["check_id"], metric["name"], ts)] = {
+        ts_ns = int(metric["ts"])
+        ts = ns_to_datetime(ts_ns)
+        key = (metric["check_id"], metric["name"], ts)
+        if key in latest_ns and latest_ns[key] > ts_ns:
+            continue
+        latest_ns[key] = ts_ns
+        rows[key] = {
             "series_id": series_id,
             "run_id": run_id,
             "check_id": metric["check_id"],

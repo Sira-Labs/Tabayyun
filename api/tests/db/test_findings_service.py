@@ -31,6 +31,7 @@ def _finding(
     summary: str = "No data",
     evidence: dict | None = None,
 ) -> core.Finding:
+    """A core finding on `[start_min, end_min)` minutes after T0."""
     return core.Finding(
         check_id=check_id,
         series_id="demo",
@@ -44,6 +45,7 @@ def _finding(
 
 
 def _report(findings: list[core.Finding], metrics: list[dict] | None = None) -> core.CheckReport:
+    """A minimal core report carrying `findings` and `metrics`."""
     return core.CheckReport(
         series_id="demo",
         n_samples=100,
@@ -60,10 +62,12 @@ class Ctx:
     """Session factory plus the series every test writes to."""
 
     def __init__(self, factory, series_id: uuid.UUID) -> None:
+        """Keep the session factory and the series id."""
         self.factory = factory
         self.series_id = series_id
 
     async def new_run(self) -> uuid.UUID:
+        """Insert a succeeded run row and return its id."""
         async with self.factory() as session, session.begin():
             run = Run(
                 org_id=DEFAULT_ORG_ID,
@@ -78,6 +82,7 @@ class Ctx:
             return run.id
 
     async def persist(self, findings: list[core.Finding], metrics: list[dict] | None = None):
+        """Persist a report for a new run; returns the run id and the outcome."""
         run_id = await self.new_run()
         async with self.factory() as session, session.begin():
             outcome = await findings_service.persist_report(
@@ -90,11 +95,13 @@ class Ctx:
         return run_id, outcome
 
     async def findings(self) -> list[Finding]:
+        """All stored findings ordered by window start."""
         async with self.factory() as session:
             stmt = select(Finding).order_by(Finding.window_start, Finding.created_at)
             return list((await session.execute(stmt)).scalars())
 
     async def set_status(self, status: str) -> None:
+        """Force every stored finding into `status`."""
         async with self.factory() as session, session.begin():
             await session.execute(update(Finding).values(status=status))
 
@@ -112,6 +119,7 @@ async def ctx(db_url, fresh_schema):
 
 
 def _minutes(value: datetime) -> float:
+    """Minutes after T0 of a stored bound."""
     return (datetime_to_ns(value) - T0) / MINUTE
 
 
@@ -235,3 +243,15 @@ async def test_metrics_rewritten_by_a_rerun(ctx):
     async with ctx.factory() as session:
         rows = list((await session.execute(select(Metric))).scalars())
     assert [(r.name, r.value, r.run_id) for r in rows] == [("completeness", 0.8, second)]
+
+
+async def test_points_within_one_microsecond_keep_the_latest(ctx):
+    """Two points of one metric < 1 µs apart share a stored row; the later ns point wins."""
+    base = {"check_id": "tby.latency", "name": "lag", "series_id": "demo"}
+    later = {**base, "ts": T0 + 900, "value": 2.0}
+    earlier = {**base, "ts": T0 + 100, "value": 1.0}
+    _, outcome = await ctx.persist([], [later, earlier])
+    assert outcome.metrics == 1
+    async with ctx.factory() as session:
+        [row] = list((await session.execute(select(Metric))).scalars())
+    assert row.value == 2.0

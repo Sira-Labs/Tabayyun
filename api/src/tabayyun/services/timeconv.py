@@ -35,10 +35,11 @@ def parse_time(value: str) -> datetime:
     Raises ValueError with a message fit for a 422 response.
     """
     text = value.strip()
-    if _EPOCH_NS.match(text):
-        return ns_to_datetime(int(text))
     try:
+        if _EPOCH_NS.match(text):
+            return ns_to_datetime(int(text))
         parsed = datetime.fromisoformat(text)
-    except ValueError as exc:
+    except (ValueError, OverflowError) as exc:
+        # OverflowError: an epoch value outside the datetime range (years 1–9999).
         raise ValueError(f"not RFC 3339 or epoch ns: {value!r}") from exc
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)

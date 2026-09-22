@@ -26,6 +26,8 @@ StatusName = Literal["open", "acked", "muted", "resolved"]
 
 
 class FindingOut(BaseModel):
+    """The `Finding` response of spec 003; `window` bounds are ns since the epoch."""
+
     id: str
     check_id: str
     series_id: str
@@ -46,6 +48,8 @@ class FindingOut(BaseModel):
 
 
 class FindingList(BaseModel):
+    """One page of findings and the cursor of the next page, if any."""
+
     items: list[FindingOut]
     next_cursor: str | None
 
@@ -58,12 +62,14 @@ class StatusChange(BaseModel):
 
     @model_validator(mode="after")
     def _muting_needs_reason(self) -> StatusChange:
+        """Reject `muted` without a non-blank reason."""
         if self.status == "muted" and not (self.reason or "").strip():
             raise ValueError("muting a finding needs a non-empty reason")
         return self
 
 
 def _uuid_or_422(value: str | None, name: str) -> uuid.UUID | None:
+    """Parse an optional UUID query parameter; 422 when malformed."""
     if value is None:
         return None
     try:
@@ -86,6 +92,7 @@ def _choices(value: str | None, allowed: tuple[str, ...], name: str) -> tuple[st
 
 
 def _time_or_422(value: str | None, name: str) -> datetime | None:
+    """Parse an optional RFC 3339 or epoch-ns query parameter; 422 when malformed."""
     if value is None:
         return None
     try:
@@ -142,6 +149,7 @@ async def list_findings(
 
 
 def _finding_id(finding_id: str) -> uuid.UUID:
+    """Parse a finding id from the path; a malformed id is simply not found (404)."""
     try:
         return uuid.UUID(finding_id)
     except ValueError as exc:

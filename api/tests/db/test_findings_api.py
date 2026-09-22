@@ -48,6 +48,7 @@ def hourly_csv(first_hour: int, last_hour: int, missing: range) -> bytes:
 
 
 async def _post_run(client, csv: bytes, **form: str) -> dict:
+    """Post an upload with inline jobs and return the finished run."""
     data = {"series_id": "demo", "unit": "m3/h", **form}
     r = await client.post("/api/runs", files={"file": ("f.csv", csv, "text/csv")}, data=data)
     assert r.status_code == 202, r.text
@@ -57,12 +58,14 @@ async def _post_run(client, csv: bytes, **form: str) -> dict:
 
 
 async def _all_findings(client, **params: str) -> list[dict]:
+    """Every finding matching `params` in one page."""
     r = await client.get("/api/findings", params={"limit": 500, **params})
     assert r.status_code == 200, r.text
     return r.json()["items"]
 
 
 async def _set_status(app, finding_id: str, status: str) -> None:
+    """Force a finding's status directly in the database."""
     async with app.state.session_factory() as session, session.begin():
         await session.execute(
             update(Finding).where(Finding.id == uuid.UUID(finding_id)).values(status=status)
@@ -187,7 +190,13 @@ async def test_filters_and_cursor_pagination(client):
     iso = datetime.fromtimestamp(since / 1e9, tz=UTC).isoformat()
     assert target["id"] in [f["id"] for f in await _all_findings(client, since=iso)]
 
-    for bad in ({"severity": "urgent"}, {"cursor": "garbage"}, {"since": "yesterday"}, {"series_id": "x"}):
+    for bad in (
+        {"severity": "urgent"},
+        {"cursor": "garbage"},
+        {"since": "yesterday"},
+        {"series_id": "x"},
+        {"until": "9" * 30},
+    ):
         assert (await client.get("/api/findings", params=bad)).status_code == 422, bad
     assert (await client.get("/api/findings", params={"limit": 501})).status_code == 422
 
