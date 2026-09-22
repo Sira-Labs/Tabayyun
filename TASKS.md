@@ -19,6 +19,18 @@ story ids there (`S6-1`) map to specs here.
       - Sprint 5 lesson: a Dependabot Node major bump removed Corepack from the web image;
         Node majors are now ignored by Dependabot and taken by hand on the LTS line.
 
+## Sprint 5 — landing and planning (20 – 26 Sep 2026)
+
+- [x] S5-1 web image copies `pnpm-workspace.yaml`, doc corrections (PR #16, with the Node 22
+      pin).
+- [x] S5-2 sprint plan merged and linked (PR #15); spec-driven workflow, specs 001–005,
+      this backlog (PR #22).
+- [ ] S5-3 owner: confirm the api app's session secret is generated, delete merged branches.
+- [x] S5-4 upload page exposes `physical_min` / `physical_max`.
+      - Implemented on the existing page rather than waiting for spec 005's `/runs/new`,
+        because the API already accepts the fields; spec 005 keeps them when the form moves.
+      - Empty inputs are dropped before submit: FastAPI parses `physical_min=""` as a 422.
+
 ## Sprint 6 — persistence and jobs (27 Sep – 3 Oct 2026)
 
 - [ ] **001 Persistence schema and migrations** — `docs/specs/001-persistence-schema.md`

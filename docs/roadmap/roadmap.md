@@ -23,12 +23,16 @@ Progress log:
   (PELT on daily medians); scoring v2 merges overlapping findings per dimension; release
   pipeline builds `tabayyun-api` and `tabayyun-web` images to GHCR with SBOM and provenance,
   production compose bundle with Caddy (auto-TLS, security headers), optional SSH deploy job.
-- **2026-09-21** sprint 4 (in progress): release images fixed and deployed to CapRover
+- **2026-09-21** sprint 4: release images fixed and deployed to CapRover
   (Hetzner) from GHCR; research 05 (oil and gas); CLI accepts historian-style timestamps and
   negative limits; `flatline` reports a frame frozen for its whole window even when the
   profile is constant; `linear_runs` no longer overlap (linear share was reported above
   100 % on compressed 1 Hz data); test datasets (UCI household, OPSD, Petrobras 3W) with
   measured expectations.
+- **2026-09-22** sprint 5: finding aggregation into episodes (ADR-0011, PR #5), Apache-2.0
+  licence and governance docs (ADR-0012, PR #7), Node 22 pin after a Dependabot Node 25
+  bump broke the web image, weekly sprint plan (`sprints.md`), spec-driven workflow with
+  specs 001–005 and `TASKS.md`, physical limits on the upload page.
 
 Goal: a self-hosted install that ingests from Parquet/CSV, PI Web API and OPC UA, runs the
 30 checks on a schedule, scores series, shows findings in a dashboard, lets a user correct a
