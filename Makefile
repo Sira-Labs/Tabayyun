@@ -1,5 +1,5 @@
 # Developer entry points. Each directory also works on its own (cargo / uv / pnpm).
-.PHONY: all core api web test lint fmt synth demo
+.PHONY: all core api web test lint fmt synth demo dev-infra api-dev web-dev db-upgrade db-revision
 
 all: lint test
 
@@ -32,6 +32,13 @@ dev-infra:
 
 api-dev:
 	cd api && uv run uvicorn tabayyun.main:app --reload --port 8000
+
+# Database schema: apply migrations / autogenerate a new one from the models (m="message").
+db-upgrade:
+	cd api && uv run alembic upgrade head
+
+db-revision:
+	cd api && uv run alembic revision --autogenerate -m "$(m)"
 
 web-dev:
 	cd web && pnpm dev
