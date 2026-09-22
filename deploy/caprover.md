@@ -47,7 +47,28 @@ Internet ──▶ CapRover nginx (TLS) ──▶ tabayyun-web (Caddy :80) ─�
 - Deployment tab → **Enable App Token**, copy it (used by CI below). For the first deploy,
   *Deploy via ImageName*: `ghcr.io/thedatadudech/tabayyun-api:latest`.
 
-## 3. Web app: `tabayyun-web`
+## 3. Worker app: `tabayyun-worker`
+
+Runs are executed by a worker process, not by the API. Create app `tabayyun-worker`
+(persistent data ticked, same `/data/cache` directory label `tabayyun-cache` as the api so
+spec 006's Parquet cache is shared) with the api image and one extra variable:
+
+| Name | Value |
+|---|---|
+| `TABAYYUN_ROLE` | `worker` |
+| the four api variables | identical to the api app (`TABAYYUN_ENV`, `TABAYYUN_DATABASE_URL`, `TABAYYUN_SESSION_SECRET`, `TABAYYUN_CACHE_DIR`) |
+| `TABAYYUN_WORKER_CONCURRENCY` | optional, default `2` |
+
+- No HTTP settings: the worker serves nothing. Leave the container port at its default and
+  do not enable HTTPS or connect a domain.
+- Deployment tab → **Enable App Token**, copy it into the GitHub secret
+  `CAPROVER_APP_TOKEN_WORKER`. The release workflow deploys the worker only when that secret
+  exists, so nothing breaks before the app is created. First deploy via ImageName:
+  `ghcr.io/thedatadudech/tabayyun-api:latest`.
+- The worker exits with code 3 until the api has migrated the schema to the same revision;
+  CapRover restarts it. Its log shows `worker.start` with the revision once it runs.
+
+## 4. Web app: `tabayyun-web`
 
 - Create app `tabayyun-web` (no persistent data).
 - App Configs → Environment variables: `TABAYYUN_API_UPSTREAM=srv-captain--tabayyun-api:8000`
@@ -60,7 +81,7 @@ Internet ──▶ CapRover nginx (TLS) ──▶ tabayyun-web (Caddy :80) ─�
 
 Open the domain: the page should show the API version and let you upload a CSV.
 
-## 4. Continuous deployment from GitHub Actions
+## 5. Continuous deployment from GitHub Actions
 
 The `deploy-caprover` job in `.github/workflows/release.yml` deploys the images built by
 each push to `main` (tag `sha-<short>`) using CapRover's official action. Configure in the
@@ -73,12 +94,14 @@ repository → Settings → Secrets and variables → Actions:
 | variable | `CAPROVER_APP_WEB` | `tabayyun-web` (optional, default) |
 | secret | `CAPROVER_APP_TOKEN_API` | app token from the API app's Deployment tab |
 | secret | `CAPROVER_APP_TOKEN_WEB` | app token from the web app's Deployment tab |
+| variable | `CAPROVER_APP_WORKER` | `tabayyun-worker` (optional, default) |
+| secret | `CAPROVER_APP_TOKEN_WORKER` | app token from the worker app; the worker deploy step is skipped while it is unset |
 
 The job is skipped until `CAPROVER_SERVER` exists. Images are public on GHCR, so CapRover
 needs no registry credentials; if the repository ever becomes private, add the registry
 under CapRover → Cluster → Docker Registries first.
 
-## 5. Alternative: let CapRover build from GitHub (Method 3)
+## 6. Alternative: let CapRover build from GitHub (Method 3)
 
 Instead of pulling images from GHCR, each app can clone the repository and build its own
 image on the server. Both Dockerfiles use the repository root as build context, so the

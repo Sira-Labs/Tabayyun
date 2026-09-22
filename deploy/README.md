@@ -67,6 +67,15 @@ zstd -d < tabayyun-images.tar.zst | docker load
 `deploy/compose.dev.yaml` starts only Postgres+TimescaleDB and Keycloak; run the API and web
 on the host (`make db-upgrade` once, then `make api-dev`, `make web-dev`).
 
+## Worker
+
+Runs execute in a separate process. The compose bundle starts one `worker` service from the
+api image with `TABAYYUN_ROLE=worker`; it waits until the api has migrated the schema (it
+exits with code 3 and restarts until then) and processes the `runs` and `maintenance`
+queues. Scale it with `docker compose up -d --scale worker=2`; each worker runs
+`TABAYYUN_WORKER_CONCURRENCY` jobs at once. `GET /healthz` on the api reports
+`queue: {pending, running}`.
+
 ## Schema migrations
 
 The api image runs `python -m tabayyun.db.migrate upgrade head` (the packaged Alembic

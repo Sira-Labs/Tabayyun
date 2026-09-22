@@ -19,7 +19,9 @@ tab; when I come back the run shows its status, how long it took and its finding
 ## Interface
 
 Job queue: Procrastinate (ADR-0004) with the Postgres connector on `DATABASE_URL`; app object
-`tabayyun.jobs.app`; task `run_checks_job(run_id: str)` in queue `runs`, `max_attempts=1`.
+`tabayyun.jobs.app`; task `run_checks_job(run_id: str)` in queue `runs`, `max_attempts=1`
+(`retry=False`). Migration `0002` applies Procrastinate's schema so one migrate command
+creates the queue tables next to ours.
 
 Settings: `TABAYYUN_INLINE_JOBS` (default `false`): when `true` the API executes the job in
 the request's background task instead of enqueueing, for tests and single-process dev.
@@ -45,10 +47,16 @@ GET  /api/runs?limit=50&cursor=    → 200 {"items": [Run], "next_cursor"}
  "error": null}
 ```
 
-Worker process: `procrastinate --app tabayyun.jobs.app worker --queues runs` from the api
-image; compose service `worker` and CapRover app `tabayyun-worker` with the same environment
-as the api app and no HTTP port. Upload bytes live in the `uploads` table so api and worker
-need no shared filesystem.
+Worker process: `python -m tabayyun.jobs` (schema guard, then a Procrastinate worker on the
+`runs` and `maintenance` queues) from the api image with `TABAYYUN_ROLE=worker`; compose
+service `worker` and CapRover app `tabayyun-worker` with the same environment as the api
+app and no HTTP port. Upload bytes live in the `uploads` table so api and worker need no
+shared filesystem.
+
+Edited during implementation: the role switch (`TABAYYUN_ROLE`) replaces a separate command
+because CapRover apps run the image's CMD; the exact ns window bounds are kept in
+`runs.stats.window` next to the `timestamptz` columns, which hold microseconds and would
+drop the core's exclusive `+1 ns` end.
 
 ## Behaviour
 
@@ -62,7 +70,9 @@ need no shared filesystem.
    resolves source and series (spec 004), calls `core.run_checks` with the stored series
    metadata merged with the upload parameters, persists scores, metrics and findings (spec
    003) in one transaction with the run update, sets `status = succeeded`, `finished_at`,
-   `stats` and `window`.
+   `stats` and `window`. In this spec the worker creates the `Uploads` source and the series
+   row by external id and persists the score row; metrics and findings follow in spec 003,
+   metadata precedence in spec 004.
 4. Any exception in the worker marks the run `failed` with `error` set to a one-line message
    (`cannot parse CSV: …`, `core error: …`), never a traceback, and the exception is logged
    with the run id. A crashed worker (job lost) leaves the run `running`; a periodic
@@ -77,16 +87,18 @@ need no shared filesystem.
 
 ## Acceptance criteria
 
-- [ ] `POST /api/runs` returns 202 with an id within 200 ms for a 50 MiB file (parsing only).
-- [ ] With a worker running, the run reaches `succeeded` and `GET /api/runs/{id}` shows
+- [x] `POST /api/runs` returns 202 with an id within 200 ms for a 50 MiB file (parsing only).
+- [x] With a worker running, the run reaches `succeeded` and `GET /api/runs/{id}` shows
       stats matching what `POST /api/checks/run` returns for the same file.
-- [ ] With `INLINE_JOBS=true` the same passes without a worker (CI path).
-- [ ] A CSV with a broken value column yields `failed` with a readable `error`; the API never
+- [x] With `INLINE_JOBS=true` the same passes without a worker (CI path).
+- [x] A CSV with a broken value column yields `failed` with a readable `error`; the API never
       returns a traceback.
-- [ ] Killing the worker mid-run leaves the run `running`; after the reaper task it is
+- [x] Killing the worker mid-run leaves the run `running`; after the reaper task it is
       `failed` with `worker lost`.
-- [ ] The worker image starts with `procrastinate … worker` and processes a run on CapRover.
-- [ ] The uploads table row is deleted when the run reaches a terminal state (the CSV is not
+- [ ] The worker image starts with `python -m tabayyun.jobs` and processes a run on CapRover.
+      (Needs the `tabayyun-worker` app and its token; checked after merge, ticked in the
+      spec 003 PR.)
+- [x] The uploads table row is deleted when the run reaches a terminal state (the CSV is not
       kept; the cache in spec 006 takes over) and the run keeps its stats.
 
 ## Test cases
@@ -94,10 +106,13 @@ need no shared filesystem.
 Unit (`api/tests/test_runs_api.py`, inline jobs, database fixture from spec 001):
 - `test_post_run_returns_202_and_queued`.
 - `test_run_succeeds_inline_and_matches_stateless_endpoint`.
-- `test_run_failed_on_bad_csv_has_message_not_traceback`.
+- `test_run_failed_on_core_error_has_message_not_traceback` (a broken file is a 422 in the
+  request, so the failed-run path is exercised with a core error) and
+  `test_unparsable_csv_is_422_in_the_request`.
 - `test_list_runs_pagination`.
 - `test_get_run_unknown_404`.
-- `test_upload_deleted_after_terminal_state`.
+- `test_upload_deleted_after_terminal_state`, `test_score_row_persisted`,
+  `test_enqueue_is_transactional_with_the_run`, `test_healthz_reports_queue_depth`.
 
 Unit (`api/tests/test_jobs.py`): `test_reaper_marks_stale_runs_failed`.
 

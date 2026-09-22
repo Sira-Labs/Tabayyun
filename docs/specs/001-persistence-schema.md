@@ -113,8 +113,8 @@ the tenant model from spec 007; spec 007 migrates real memberships onto them.
       naming both revisions.
 - [x] `TABAYYUN_DATABASE_URL` with the dev default is refused in prod (existing rule).
 - [x] Database tests skip cleanly when `TEST_DATABASE_URL` is unset and run when it is set.
-- [ ] The deployed CapRover api app runs the migration on start and serves the new
-      `/api/version` field. (Checked on the first deploy after merge; ticked in the spec 002 PR.)
+- [x] The deployed CapRover api app runs the migration on start and serves the new
+      `/api/version` field. (Verified 2026-09-22 after PR #25: `schema_revision` 0001, `db` ok.)
 
 ## Test cases
 
