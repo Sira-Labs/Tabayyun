@@ -1,4 +1,23 @@
+<div align="center">
+
+![Tabayyun](docs/assets/logo-dark.svg#gh-dark-mode-only)
+![Tabayyun](docs/assets/logo-light.svg#gh-light-mode-only)
+
+</div>
+
 # Tabayyun
+
+**Verify time series before you act on them.**
+
+[![CI](https://github.com/thedatadudech/Tabayyun/actions/workflows/ci.yml/badge.svg)](https://github.com/thedatadudech/Tabayyun/actions/workflows/ci.yml)
+[![Release](https://github.com/thedatadudech/Tabayyun/actions/workflows/release.yml/badge.svg)](https://github.com/thedatadudech/Tabayyun/actions/workflows/release.yml)
+[![Version](https://img.shields.io/github/v/release/thedatadudech/Tabayyun?include_prereleases&label=version)](https://github.com/thedatadudech/Tabayyun/releases)
+[![Rust](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fthedatadudech%2FTabayyun%2Fmain%2Fcore%2FCargo.toml&query=%24.workspace.package.rust-version&prefix=%E2%89%A5%20&label=rust&color=dea584)](core/Cargo.toml)
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776ab)](api/pyproject.toml)
+[![Node](https://img.shields.io/badge/node-22%20LTS-5fa04e)](web/package.json)
+[![Images](https://img.shields.io/badge/images-ghcr.io-2496ed)](https://github.com/thedatadudech?tab=packages&repo_name=Tabayyun)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![CodeRabbit](https://img.shields.io/coderabbit/prs/github/thedatadudech/Tabayyun?labelColor=171717&color=FF570A&label=CodeRabbit%20reviews)](https://coderabbit.ai)
 
 > *Tabayyun* (تبيّن): to verify a report before acting on it.
 
@@ -9,9 +28,11 @@ untrustworthy, routes findings to the people who can fix them, and lets them cor
 with full lineage and deliver the corrected series downstream. First target vertical:
 **energy** (PV, wind, grid, metering, storage).
 
-Status: **R1 sprint 3 in progress.** The Rust core runs 20 of the 30 catalogue checks, ships
-as a Python wheel, the API + web run the checks on an uploaded CSV, and the release
-pipeline publishes deployable images to GHCR (see `deploy/README.md`).
+Status: **R1, sprint 6 next** (weekly sprints, `docs/roadmap/sprints.md`). The Rust core runs
+20 of the 30 catalogue checks with findings aggregated into episodes, ships as a Python
+wheel, the API and web app run the checks on an uploaded CSV, the release pipeline publishes
+images to GHCR and deploys them to CapRover, and a pilot instance is live. Work follows written
+specs in `docs/specs/` with the backlog in `TASKS.md`.
 
 ## Why the name
 

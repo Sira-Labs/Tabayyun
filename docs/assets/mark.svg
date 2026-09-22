@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400" role="img" aria-label="Tabayyun">
+
+<g transform="translate(0,0) scale(1.0)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="200" cy="200" r="172" stroke="#0f172a" stroke-width="24"/>
+<polyline points="72,232 98,196 120,256 142,186 164,246 186,214" stroke="#0f172a" stroke-width="24"/>
+<polyline points="186,214 232,282 338,138" stroke="#0e9f8f" stroke-width="28"/>
+<circle cx="142" cy="186" r="19" fill="#f59e0b" stroke="none"/>
+</g>
+</svg>

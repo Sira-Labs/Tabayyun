@@ -1,10 +1,17 @@
 {
   "name": "Tabayyun",
   "short_name": "Tabayyun",
-  "description": "Time-series data quality",
+  "description": "Verify industrial time series before you act on them",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#0f172a",
-  "icons": []
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
 }
