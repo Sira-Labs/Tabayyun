@@ -15,15 +15,18 @@ from tabayyun.settings import Settings
 
 @pytest.fixture
 def settings(db_url) -> Settings:
+    """Test settings bound to the test database."""
     return Settings(env="test", database_url=db_url)
 
 
 async def _count_orgs(app) -> int:
+    """Number of rows in orgs through a fresh session."""
     async with app.state.session_factory() as session:
         return int(await session.scalar(select(func.count()).select_from(Org)) or 0)
 
 
 async def test_session_rolls_back_on_error(settings, fresh_schema):
+    """A handler that raises leaves no row behind; one that returns commits."""
     fresh_schema("auto")
     app = create_app(settings)
 
@@ -47,6 +50,7 @@ async def test_session_rolls_back_on_error(settings, fresh_schema):
 
 
 async def test_startup_refuses_old_schema(settings, db_url, fresh_schema):
+    """A database behind head makes the startup guard exit with code 3."""
     fresh_schema("auto")
     migrate.downgrade(db_url, "-1")
     engine = make_engine(settings)
@@ -59,6 +63,7 @@ async def test_startup_refuses_old_schema(settings, db_url, fresh_schema):
 
 
 async def test_lifespan_reports_schema_revision_and_db_ok(settings, fresh_schema):
+    """After startup /api/version reports the head revision and /healthz reports db ok."""
     fresh_schema("auto")
     app = create_app(settings)
     async with (

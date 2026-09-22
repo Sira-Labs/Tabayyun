@@ -23,6 +23,7 @@ HYPERTABLES = {"findings", "metrics", "scores"}
 
 
 def _current_revision(url: str) -> str | None:
+    """Revision stamped in the database (None before the first migration)."""
     engine = create_engine(url)
     try:
         with engine.connect() as conn:
@@ -48,6 +49,7 @@ def _hypertables(url: str) -> set[str]:
 
 
 def test_migrate_fresh_and_idempotent(db_url, fresh_schema):
+    """An empty database migrates to head with exactly the spec's tables; a second upgrade is a no-op."""
     fresh_schema("auto")
     head = migrate.head_revision()
     assert _current_revision(db_url) == head
@@ -61,11 +63,13 @@ def test_migrate_fresh_and_idempotent(db_url, fresh_schema):
 
 
 def test_models_match_migrations(db_url, fresh_schema):
+    """Autogenerate against the migrated schema finds nothing to change."""
     fresh_schema("auto")
     migrate.check(db_url)  # raises AutogenerateError when models and migrations drift
 
 
 def test_seed_rows_present(db_url, fresh_schema):
+    """Migration 0001 seeds the default org and workspace with the fixed ids."""
     fresh_schema("auto")
     engine = create_engine(db_url)
     try:
@@ -79,6 +83,7 @@ def test_seed_rows_present(db_url, fresh_schema):
 
 
 def test_hypertables_created(db_url, fresh_schema, timescale_available):
+    """auto mode converts the three result tables when TimescaleDB is available."""
     if not timescale_available:
         pytest.skip("timescaledb extension not available on this server")
     fresh_schema("auto")
@@ -86,11 +91,13 @@ def test_hypertables_created(db_url, fresh_schema, timescale_available):
 
 
 def test_hypertables_skipped_when_off(db_url, fresh_schema):
+    """off mode never creates hypertables, even on a TimescaleDB server."""
     fresh_schema("off")
     assert _hypertables(db_url) & HYPERTABLES == set()
 
 
 def test_timescale_on_requires_extension(db_url, fresh_schema, timescale_available):
+    """on mode succeeds with the extension and fails cleanly without it."""
     if timescale_available:
         fresh_schema("on")
         assert _hypertables(db_url) == HYPERTABLES

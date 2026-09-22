@@ -43,6 +43,12 @@ DB_DEGRADED = "degraded"
 SCHEMA_MISMATCH_EXIT_CODE = 3
 
 
+def _error_line(exc: BaseException) -> str:
+    """First line of the exception message, or the class name when the message is empty."""
+    message = str(exc).strip()
+    return message.splitlines()[0] if message else type(exc).__name__
+
+
 class Base(DeclarativeBase):
     """Declarative base shared by every model; `metadata` is the Alembic target."""
 
@@ -77,7 +83,7 @@ async def check_db(engine: AsyncEngine) -> str:
         async with asyncio.timeout(DB_HEALTH_TIMEOUT_S), engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
     except (SQLAlchemyError, OSError, TimeoutError) as exc:
-        log.warning("db.unreachable", error=str(exc).splitlines()[0])
+        log.warning("db.unreachable", error=_error_line(exc))
         return DB_DEGRADED
     return DB_OK
 
@@ -107,7 +113,7 @@ async def guard_schema(engine: AsyncEngine) -> str | None:
     try:
         current = await current_revision(engine)
     except (SQLAlchemyError, OSError) as exc:
-        log.warning("db.schema_unverified", error=str(exc).splitlines()[0], head=head)
+        log.warning("db.schema_unverified", error=_error_line(exc), head=head)
         return None
     if current != head:
         log.error("db.schema_mismatch", current=current, head=head, hint="run: alembic upgrade head")

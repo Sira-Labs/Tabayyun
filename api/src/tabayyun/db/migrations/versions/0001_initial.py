@@ -310,6 +310,7 @@ def _seed_default_tenant() -> None:
 
 
 def _create_hypertables(mode: str) -> None:
+    """Convert findings, metrics and scores per TABAYYUN_TIMESCALE; see the module docstring."""
     if mode == "off":
         log.info("TABAYYUN_TIMESCALE=off: hypertables not created")
         return
@@ -321,6 +322,14 @@ def _create_hypertables(mode: str) -> None:
         if mode == "on":
             raise RuntimeError("TABAYYUN_TIMESCALE=on but the timescaledb extension is not available")
         log.warning("timescaledb extension not available: findings, metrics and scores stay plain tables")
+        return
+    # CREATE EXTENSION terminates the connection when the library is not preloaded, which a
+    # transaction cannot recover from; check shared_preload_libraries first.
+    preloaded = conn.execute(sa.text("SHOW shared_preload_libraries")).scalar() or ""
+    if "timescaledb" not in {name.strip() for name in str(preloaded).split(",")}:
+        if mode == "on":
+            raise RuntimeError("TABAYYUN_TIMESCALE=on but timescaledb is not in shared_preload_libraries")
+        log.warning("timescaledb is not preloaded: findings, metrics and scores stay plain tables")
         return
     conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS timescaledb"))
     for table, time_column in HYPERTABLES.items():

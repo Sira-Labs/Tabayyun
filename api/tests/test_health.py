@@ -1,7 +1,8 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from tabayyun.db import DB_DEGRADED, DB_OK, guard_schema, make_engine
+import tabayyun.db
+from tabayyun.db import DB_DEGRADED, DB_OK, check_db, guard_schema, make_engine
 from tabayyun.main import create_app
 from tabayyun.settings import Settings
 
@@ -24,6 +25,7 @@ async def test_healthz(app):
 
 
 async def test_healthz_degraded_when_db_unreachable():
+    """/healthz stays 200 and reports db degraded when nothing answers."""
     app = create_app(Settings(env="test", database_url=UNREACHABLE_DB))
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/healthz")
@@ -31,7 +33,18 @@ async def test_healthz_degraded_when_db_unreachable():
     assert r.json() == {"status": "ok", "db": DB_DEGRADED}
 
 
+async def test_check_db_reports_degraded_on_timeout(monkeypatch):
+    """A timeout (whose exception has no message) is reported as degraded, not raised."""
+    monkeypatch.setattr(tabayyun.db, "DB_HEALTH_TIMEOUT_S", 0.0)
+    engine = make_engine(Settings(env="test", database_url=UNREACHABLE_DB))
+    try:
+        assert await check_db(engine) == DB_DEGRADED
+    finally:
+        await engine.dispose()
+
+
 async def test_schema_guard_tolerates_unreachable_db():
+    """An unreachable database yields no revision instead of exiting."""
     engine = make_engine(Settings(env="test", database_url=UNREACHABLE_DB))
     try:
         assert await guard_schema(engine) is None

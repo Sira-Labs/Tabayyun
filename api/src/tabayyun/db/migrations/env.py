@@ -20,6 +20,10 @@ target_metadata = Base.metadata
 # Tables owned by other components live in the same database but are not ours to diff.
 FOREIGN_TABLE_PREFIXES = ("procrastinate_", "_timescaledb")
 
+# Session-level advisory lock key: several api replicas may start at once and each runs the
+# migration; the lock serialises them and is released when the connection closes.
+MIGRATION_LOCK_KEY = 7_412_022_950_001
+
 
 def include_object(obj: Any, name: str | None, type_: str, reflected: bool, compare_to: Any) -> bool:
     """Keep Procrastinate's and TimescaleDB's tables out of autogenerate."""
@@ -47,6 +51,8 @@ def run_migrations_online() -> None:
         config.get_section(config.config_ini_section, {}), prefix="sqlalchemy.", poolclass=pool.NullPool
     )
     with connectable.connect() as connection:
+        connection.exec_driver_sql("SELECT pg_advisory_lock(%s)", (MIGRATION_LOCK_KEY,))
+        connection.commit()  # ends the autobegun transaction; the session lock stays held
         context.configure(
             connection=connection,
             target_metadata=target_metadata,

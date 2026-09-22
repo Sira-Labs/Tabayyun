@@ -51,15 +51,18 @@ FINDING_STATUSES = ("open", "acked", "muted", "resolved")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
+    """SQL for a CHECK constraint restricting `column` to `values`."""
     quoted = ", ".join(f"'{v}'" for v in values)
     return f"{column} IN ({quoted})"
 
 
 def _uuid_pk() -> Mapped[uuid.UUID]:
+    """UUID primary key generated in Python."""
     return mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
 
 def _created_at() -> Mapped[datetime]:
+    """`timestamptz` column defaulting to the database clock."""
     return mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
