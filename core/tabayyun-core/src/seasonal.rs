@@ -17,6 +17,9 @@ use crate::time::{NS_PER_DAY, NS_PER_HOUR};
 pub const DEFAULT_CANDIDATES_NS: [i64; 3] = [NS_PER_DAY, 7 * NS_PER_DAY, 365 * NS_PER_DAY];
 /// A detrended autocorrelation at the period's lag below this is no rhythm.
 pub const MIN_ACF: f64 = 0.3;
+/// Largest regularised grid (about 57 years of hours): a stray timestamp far from the rest
+/// would otherwise allocate a grid of mostly empty bins, on every profile.
+pub const MAX_BINS: usize = 500_000;
 /// A period needs at least this many steps, and the data at least this many periods.
 const MIN_STEPS_PER_PERIOD: usize = 4;
 const MIN_PERIODS: usize = 3;
@@ -28,14 +31,22 @@ pub fn step_for(frame: &SeriesFrame) -> Option<i64> {
 }
 
 /// Mean of the usable finite values per bin of `step_ns`, bins anchored at multiples of the
-/// step since the epoch. Returns the first bin's start and one value per bin (NaN when empty).
+/// step since the epoch. Returns the first bin's start and one value per bin (NaN when empty);
+/// no values when the span would need more than [`MAX_BINS`] bins.
 pub fn regularise(frame: &SeriesFrame, step_ns: i64) -> (i64, Vec<f64>) {
     let (Some(first), Some(last)) = (frame.first_ts(), frame.last_ts()) else { return (0, Vec::new()) };
     if step_ns <= 0 {
         return (0, Vec::new());
     }
-    let start = first.div_euclid(step_ns) * step_ns;
-    let n = ((last.div_euclid(step_ns) * step_ns - start) / step_ns + 1) as usize;
+    let Some(start) = first.div_euclid(step_ns).checked_mul(step_ns) else { return (0, Vec::new()) };
+    let Some(n) = last
+        .checked_sub(start)
+        .map(|span| span / step_ns + 1)
+        .and_then(|n| usize::try_from(n).ok())
+        .filter(|&n| n <= MAX_BINS)
+    else {
+        return (start, Vec::new());
+    };
     let (mut sum, mut count) = (vec![0.0; n], vec![0u32; n]);
     for i in 0..frame.len() {
         let v = frame.values[i];
@@ -303,6 +314,25 @@ mod tests {
         assert!(v[1].is_nan());
         assert_eq!(v[2], 2.5);
         assert_eq!(step_for(&f), Some(NS_PER_HOUR));
+    }
+
+    #[test]
+    fn huge_span_is_not_regularised() {
+        // A stray timestamp at the end of time must not allocate a grid of empty hours.
+        let f = SeriesFrame::with_default_quality(
+            SeriesMeta::new("s"),
+            vec![0, NS_PER_HOUR, i64::MAX],
+            vec![1.0, 2.0, 3.0],
+        )
+        .unwrap();
+        assert!(regularise(&f, NS_PER_HOUR).1.is_empty());
+        assert_eq!(detect(&f, &DEFAULT_CANDIDATES_NS), None);
+        // Nor may timestamps far apart on both sides overflow the span (2^63 does not fit).
+        let far = 1i64 << 62;
+        let f = SeriesFrame::with_default_quality(SeriesMeta::new("s"), vec![-far, 0, far], vec![1.0; 3])
+            .unwrap();
+        assert!(regularise(&f, NS_PER_HOUR).1.is_empty());
+        assert_eq!(detect(&f, &DEFAULT_CANDIDATES_NS), None);
     }
 
     #[test]
