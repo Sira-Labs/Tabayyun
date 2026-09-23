@@ -5,39 +5,43 @@ Decisions are recorded in `docs/adr/`. This document is the map. Research backin
 
 ## Overview
 
+```mermaid
+flowchart TB
+    subgraph client["Browser / PWA"]
+        spa["Vite + React 19 SPA<br/>TanStack Router / Query · shadcn/ui<br/>uPlot (time series) · ECharts (other)"]
+    end
+
+    proxy["Caddy / nginx<br/>TLS · static files · security headers · rate limit"]
+
+    subgraph external["External systems"]
+        idp["Identity: Keycloak (or Zitadel)<br/>Google · Entra · SAML · passkeys"]
+        sources["Sources: PI Web API · OPC UA · Parquet / CSV<br/>SQL / ODBC · MQTT / Sparkplug · Modbus / SunSpec<br/>Kafka · IEC 60870-5-104 · cloud historians"]
+    end
+
+    subgraph apiapp["tabayyun-api (Python 3.12, FastAPI, SQLAlchemy 2 async, Pydantic v2)"]
+        rest["REST / OpenAPI · SSE · admin · share links<br/>auth (OIDC BFF) · authorize()"]
+        worker["Procrastinate worker<br/>upload and dataset runs · connectors · scheduler<br/>plugin host (sandboxed Python checks)"]
+        core["tabayyun_core (Rust, PyO3 wheel, Arrow at the boundary)<br/>check kernels and cross-series checks (ADR-0015)<br/>profiling · scoring · M4 · Parquet cache · DataFusion SQL"]
+    end
+
+    subgraph storage["Storage"]
+        pg[("PostgreSQL 17 + TimescaleDB<br/>metadata · RBAC · audit<br/>findings, metrics, scores (hypertables)<br/>job queue")]
+        cache[("Parquet cache<br/>local disk or S3 (RustFS)<br/>layer / source / bucket / year / month<br/>raw observations, immutable")]
+    end
+
+    spa -- "HTTPS (cookie session)" --> proxy
+    proxy -. "SSE live updates" .-> spa
+    proxy --> rest
+    rest -- "OIDC" --> idp
+    rest -- "runs, findings, admin" --> pg
+    rest -- "charts, explorer SQL" --> core
+    pg -- "jobs (LISTEN / NOTIFY)" --> worker
+    worker -- "results" --> pg
+    sources -- "connectors, Arrow batches" --> worker
+    worker --> core
+    core <-- "read / write" --> cache
 ```
-                 ┌──────────────────────── Browser / PWA ─────────────────────────┐
-                 │  Vite + React 19 SPA · TanStack Router/Query · shadcn/ui        │
-                 │  uPlot (time series) · ECharts (other) · static files, hash CSP │
-                 └───────────────▲───────────────────────────────▲─────────────────┘
-                                 │ HTTPS (cookie session)         │ SSE (live updates)
-┌────────────────────────────────┴───────────────────────────────┴───────────────────┐
-│ Caddy / nginx  (TLS, static files, security headers, rate limit)                    │
-└────────────────────────────────┬────────────────────────────────────────────────────┘
-                                 │
-┌────────────────────────────────▼────────────────────────────────────────────────────┐
-│ tabayyun-api  (Python 3.12, FastAPI, SQLAlchemy 2 async, Pydantic v2)               │
-│   auth (OIDC BFF) · authorize() · REST/OpenAPI · SSE · admin · share links          │
-│   connector framework (Python; Arrow C stream out)                                  │
-│   scheduler + job queue: Procrastinate (Postgres LISTEN/NOTIFY)                      │
-│   plugin host: Python checks in sandboxed worker pool (cgroups, no network)          │
-│                                                                                     │
-│   tabayyun_core  (Rust, PyO3 wheel, zero-copy Arrow)                                 │
-│     check kernels over SeriesFrame buffers (ADR-0015) · profiling · scoring ·        │
-│     downsampling (M4/MinMaxLTTB) · Parquet cache reader/writer · DataFusion SQL      │
-└───────────┬───────────────────────────────┬─────────────────────────────────────────┘
-            │                               │
-┌───────────▼─────────────┐   ┌─────────────▼──────────────────────┐   ┌────────────────┐
-│ PostgreSQL 17           │   │ Parquet cache                       │   │ Identity       │
-│ + TimescaleDB           │   │ local disk or S3 (RustFS)           │   │ Keycloak or    │
-│ metadata · RBAC · audit │   │ source/tag_bucket/year/month        │   │ Zitadel        │
-│ findings · scores (hyper│   │ raw observations, immutable         │   │ Google, Entra, │
-│ tables) · job queue     │   │                                     │   │ SAML, passkeys │
-└─────────────────────────┘   └─────────────────────────────────────┘   └────────────────┘
-            ▲
-   Sources: PI Web API · OPC UA · Parquet/CSV · SQL/ODBC · MQTT/Sparkplug · Modbus/SunSpec ·
-            Kafka · IEC 60870-5-104 · cloud historians (Cognite, SiteWise, IoT Hub)
-```
+
 
 ## Components
 
@@ -90,6 +94,31 @@ in the IdP; enterprise SSO is a per-organisation OIDC/SAML connection.
 
 ## Data flow of a run
 
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User or scheduler
+    participant API as tabayyun-api
+    participant PG as PostgreSQL
+    participant W as Worker
+    participant C as Parquet cache
+    participant K as tabayyun_core
+
+    U->>API: POST /api/runs {dataset_id} (or a suite schedule)
+    API->>PG: queued run with stats.window, job deferred in the same transaction
+    API-->>U: 202 {id, status: queued}
+    PG-->>W: job via LISTEN / NOTIFY
+    W->>PG: claim the run, load series, groups and coverage
+    opt missing ranges (connectors, S9-1)
+        W->>C: fetch_window writes new observations, coverage recorded
+    end
+    W->>C: read the dataset's series for the window
+    W->>K: run_checks_multi(series, metas, groups, window)
+    K-->>W: one report per series, skipped groups
+    W->>PG: scores, metrics, deduplicated findings, stats, succeeded
+    Note over W,PG: alerts (S10-5) and SSE events follow on the new findings
+```
+
 1. Scheduler enqueues `run_suite(suite_id, window)`; a user starts one with `POST /api/runs
    {dataset_id}` (spec 008, trigger `manual`).
 2. Worker resolves the dataset to a series list, checks the Parquet cache for coverage, and
@@ -108,6 +137,21 @@ in the IdP; enterprise SSO is a per-organisation OIDC/SAML connection.
 7. SSE publishes `run.completed` and `finding.created` events to connected clients.
 
 ## Data flow of a correction
+
+The stages of one correction (the status names settle with corrections v1 in sprint 11; only
+*proposed* is fixed so far):
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> Proposed: window on a chart or a finding,<br/>or a RepairFlow after a suite run
+    Proposed --> Computed: apply_repair writes corrected layer vN<br/>and lineage; raw stays untouched
+    Computed --> Approved: editor approves,<br/>or the flow auto-approves
+    Computed --> Rejected: editor rejects
+    Approved --> Published: publish_correction to PublishTargets<br/>(never the original source tag)
+    Rejected --> [*]
+    Published --> [*]
+```
 
 1. A user selects a window on a series chart (or a finding's window) and picks an operation,
    or a RepairFlow runs after a suite run over the findings it is configured to handle.
