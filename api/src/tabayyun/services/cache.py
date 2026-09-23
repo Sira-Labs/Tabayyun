@@ -79,7 +79,7 @@ class RunCache:
         """Write one series to the raw layer; blocking, call it from a thread.
 
         Raises:
-            CacheError: the store cannot be opened or the write failed.
+            CacheError: the store cannot be opened or the write failed, whatever the cause.
         """
         try:
             report = self._open().write(
@@ -92,8 +92,12 @@ class RunCache:
                 quality_col=quality_col,
                 ingest_col=ingest_col,
             )
-        except ValueError as exc:  # the core maps store and Parquet errors to ValueError
-            raise CacheError(str(exc).splitlines()[0][:500]) from exc
+        # The core maps store and Parquet errors to ValueError, but the cache step runs after the
+        # run succeeded and must never fail it: any ordinary error (a panic surfacing as
+        # RuntimeError, a TypeError from a bad store config) becomes a CacheError.
+        except Exception as exc:  # noqa: BLE001
+            lines = str(exc).strip().splitlines()
+            raise CacheError((lines[0] if lines else type(exc).__name__)[:500]) from exc
         return CacheWrite(
             rows=int(report["rows"]),
             files=len(report["files"]),
