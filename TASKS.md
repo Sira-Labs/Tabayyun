@@ -161,6 +161,14 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
 
 Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, SMTP):
 `docs/roadmap/sprints.md`, "Owner and external dependencies".
+- [x] Keycloak at miftachun.apps.data-and-ai-dude.ch: named admin, OTP and brute-force
+      protection in the master realm (23 Sep).
+- [x] Google OAuth client (External, redirect `…/realms/tabayyun/broker/google/endpoint`);
+      credentials in the owner's password manager, to CapRover env vars in S8-1 (23 Sep).
+- [x] SMTP through the Google Workspace relay (`smtp-relay.gmail.com:587`, allowed by the
+      server IP); SPF, DKIM and DMARC fixed on data-and-ai-dude.com and .ch (23 Sep).
+- [ ] Around 7 Oct: move both DMARC records from `p=none` to `p=quarantine` once the
+      reports show only Google sending (reminder scheduled).
 
 ## Later sprints
 
