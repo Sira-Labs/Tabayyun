@@ -84,8 +84,9 @@ forecast window.
 | Needed by | Item | Owner action |
 |---|---|---|
 | now | S5-3 | confirm the api app's session secret is generated; delete merged branches |
-| S8 (~26 Sep) | Google login | Google Cloud OAuth client (web), redirect URI on the live domain; client id and secret as CapRover env vars |
-| S8 (~26 Sep) | Keycloak | CapRover app for Keycloak with its own database, admin credentials as env vars, and an app token secret for the release workflow |
+| S7 (now) | cache bucket | MinIO bucket `tabayyun-cache` and an access key limited to it; worker env `TABAYYUN_CACHE_URL`, `TABAYYUN_S3_*` (spec 006) |
+| S8 (~26 Sep) | Google login | Google Cloud OAuth client (web) with redirect URI `https://miftachun.apps.data-and-ai-dude.ch/realms/tabayyun/broker/google/endpoint` (Keycloak brokers Google); id and secret go to Keycloak's Google provider via env at realm import |
+| S8 (~26 Sep) | Keycloak | done 23 Sep: `miftachun.apps.data-and-ai-dude.ch` (one realm per product; `tabayyun` realm imported in S8-1); owner still to replace the bootstrap admin and enable OTP |
 | S8 (~26 Sep) | email | SMTP account and credentials (invitations in S8-4, alerts in S10-5) |
 | S9 (~29 Sep) | PI Web API | optional: read access to a PI Web API test server; without it the connector is tested against recorded fixtures only |
 | S13 (~8 Oct) | pilot | pilot site, contact and install date; an 8-core server for the performance run |
@@ -138,7 +139,7 @@ Goal: data is cached once and checks can see more than one series.
 | S7-5 | Check 23 `tby.redundant_disagreement` (learned spread + margin, explicit tolerance override) | M | synthetic 2oo3 tests |
 | S7-6 | Check 24 `tby.balance_residual` (balance group definition, propagated uncertainty, suspect member) | S | synthetic inlet/outlet tests |
 | S7-7 | Check 21 `tby.seasonality_break` (daily/weekly strength vs profile) | S | OPSD load positive, wind negative |
-| S7-8 | Datasets API: explicit series selection and query selection, window policy; related-series suggestion job (correlation over cache) | C | dataset feeds a run |
+| S7-8 | Datasets API: explicit series selection, window policy, series groups (related, redundant, balance), dataset runs from the cache (query selection and related-series suggestions moved to sprints 9 and 10) | S | dataset feeds a run with cross-series findings |
 | S7-9 | `tby.physical_range` aggregates excursions into episodes (ADR-0011), as spikes do (follow-up from spec 005) | C | a limit inside the normal range yields one finding per episode, not one per excursion |
 | S7-10 | CLI: per-column epoch `ts_unit` inference and the 1971–2199 range check (ADR-0014 parity with the API) | C | CLI and API read the same epoch file to the same instants |
 

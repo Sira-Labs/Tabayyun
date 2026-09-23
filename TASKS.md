@@ -114,19 +114,21 @@ next session reads). Sprint priorities, actual dates and the forecast live in
         limit set inside the normal range gave 34 findings in the local check. ADR-0011's
         episode rule should apply to it as it does to spikes.
 
-## Sprint 7 — Parquet cache and cross-series checks (next; forecast end 26 – 28 Sep)
+## Sprint 7 — Parquet cache and cross-series checks (started 23 Sep 2026)
 
-Specs to write at sprint start (stories S7-1 … S7-10 in `docs/roadmap/sprints.md`; 007 is
-taken by the RLS spec that specs 001–004 already reference; the two could-haves S7-9 and
-S7-10 are the follow-ups recorded under 004 and 005):
-- [ ] 006 Parquet cache and coverage
-- [ ] 008 Multi-series core API and datasets
-- [ ] 009 `tby.correlation_break`
-- [ ] 010 `tby.redundant_disagreement`
-- [ ] 011 `tby.balance_residual`
-- [ ] 012 `tby.seasonality_break`
-- [ ] 016 `tby.physical_range` episodes (S7-9, could)
-- [ ] 017 CLI epoch `ts_unit` parity (S7-10, could)
+Branch `sprint/07-cache-cross-series`, one PR per spec, in this order (must-haves first).
+Sprint decisions (23 Sep): cache on S3-compatible storage now (live: the existing MinIO;
+dev and CI: SeaweedFS, since MinIO community builds ended in 2025); cross-series checks
+reach the API through series groups and dataset runs (S7-8 raised to should); checks stay
+Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
+- [ ] **006 Parquet cache on local disk or S3, coverage** — `docs/specs/006-parquet-cache.md` (S7-1, S7-2)
+- [ ] **008 Multi-series checks, series groups and dataset runs** — `docs/specs/008-multi-series-and-datasets.md` (S7-3, S7-8)
+- [ ] **009 `tby.correlation_break`** — `docs/specs/009-correlation-break.md` (S7-4)
+- [ ] **010 `tby.redundant_disagreement`** — `docs/specs/010-redundant-disagreement.md` (S7-5)
+- [ ] **011 `tby.balance_residual`** — `docs/specs/011-balance-residual.md` (S7-6)
+- [ ] **012 Seasonality in the profile, `tby.seasonality_break`** — `docs/specs/012-seasonality-break.md` (S7-7)
+- [ ] **016 `tby.physical_range` episodes** — `docs/specs/016-physical-range-episodes.md` (S7-9, could)
+- [ ] **017 CLI epoch units match the API** — `docs/specs/017-cli-epoch-units.md` (S7-10, could)
 
 ## Sprint 8 — login, tenants and RBAC (forecast end 29 Sep – 1 Oct)
 
