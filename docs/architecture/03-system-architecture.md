@@ -90,17 +90,20 @@ in the IdP; enterprise SSO is a per-organisation OIDC/SAML connection.
 
 ## Data flow of a run
 
-1. Scheduler enqueues `run_suite(suite_id, window)`.
+1. Scheduler enqueues `run_suite(suite_id, window)`; a user starts one with `POST /api/runs
+   {dataset_id}` (spec 008, trigger `manual`).
 2. Worker resolves the dataset to a series list, checks the Parquet cache for coverage, and
    enqueues `fetch_window` jobs for missing ranges per source (connector-specific batching
    and rate limits).
 3. Connector writes new observations to the cache (append-only, idempotent by
    `(series, ts)`), and records coverage.
-4. Worker calls `core.run_checks(series_batches, configs, baselines)`; Rust runs each check
-   as a kernel over each series (cross-series checks over each series group) and returns
-   findings and metrics as Arrow (ADR-0015).
-5. Python persists findings (deduplicating against open findings with overlapping windows),
-   metrics (hypertable), and updated scores.
+4. Worker calls `core.run_checks_multi(series_batches, metas, groups, window)`; Rust runs each
+   check as a kernel over each series with its own profile and each cross-series check over
+   every series group whose members all have data, on one grid (`align`), and returns one
+   report per series plus the skipped groups (spec 008, ADR-0015).
+5. Python persists findings (deduplicating against open findings with overlapping windows,
+   and of the same group for cross-series findings; ADR-0013), metrics (hypertable), and
+   updated scores, per series in one transaction.
 6. Alert rules are evaluated on the new findings; notifications are enqueued.
 7. SSE publishes `run.completed` and `finding.created` events to connected clients.
 
@@ -124,7 +127,7 @@ in the IdP; enterprise SSO is a per-organisation OIDC/SAML connection.
 ## Storage layout
 
 - **Postgres:** `orgs`, `workspaces`, `users`, `memberships`, `teams`, `sources`, `series`,
-  `datasets`, `checks`, `check_configs`, `suites`, `runs`, `findings` (hypertable on
+  `datasets`, `series_groups`, `checks`, `check_configs`, `suites`, `runs`, `findings` (hypertable on
   `window_start`), `metrics` (hypertable), `scores` (hypertable), `alert_rules`,
   `notifications`, `shares`, `audit_events`, `procrastinate_*`.
 - **Parquet cache:** `cache/{layer}/{source_id}/{tag_bucket}/{year}/{month}/part-*.parquet` where `layer` is `raw` or `corrected/v{n}`, columns

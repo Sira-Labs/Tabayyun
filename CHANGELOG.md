@@ -26,6 +26,10 @@ All notable changes to this project are documented here. The format follows
 - Parquet cache of raw observations on local disk or S3-compatible storage (RustFS): upload
   runs write their series and record coverage; `tabayyun_core.Cache` and
   `tabayyun cache write|read|bench` (spec 006).
+- Multi-series checks: series groups (`/api/series-groups`, kinds related, redundant and
+  balance), datasets (`/api/datasets`) and dataset runs over the Parquet cache
+  (`POST /api/runs {dataset_id}`); `tabayyun_core.run_checks_multi` and
+  `tabayyun check-multi` (spec 008).
 - Release pipeline publishing `tabayyun-api` and `tabayyun-web` images to GHCR with SBOM and
   provenance; production compose bundle with Caddy.
 - Apache-2.0 licence (ADR-0012), contribution guide, security policy, code of conduct, issue

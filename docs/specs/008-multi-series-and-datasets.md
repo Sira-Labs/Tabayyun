@@ -130,15 +130,15 @@ POST   /api/runs            JSON {dataset_id, now?}  → 202 {run_id, status: "q
 
 ## Acceptance criteria
 
-- [ ] `align` unit tests: common grid from the coarsest interval, mean per bin, NaN for
+- [x] `align` unit tests: common grid from the coarsest interval, mean per bin, NaN for
       empty bins, members with offset timestamps line up.
-- [ ] `run_multi` runs single-series checks per frame and a fake cross check per matching
+- [x] `run_multi` runs single-series checks per frame and a fake cross check per matching
       group; a group with a missing member is skipped and reported.
-- [ ] Bindings round trip: three pyarrow tables and one group produce three reports.
-- [ ] CLI `check-multi` on a synthetic wide CSV prints per-series findings.
-- [ ] Migration 0003 upgrades and downgrades cleanly; `alembic check` is clean.
-- [ ] Group and dataset routes pass their validation tests (every 422 and 409 path above).
-- [ ] A dataset run over two cached uploads produces per-series scores and findings, with
+- [x] Bindings round trip: three pyarrow tables and one group produce three reports.
+- [x] CLI `check-multi` on a synthetic wide CSV prints per-series findings.
+- [x] Migration 0003 upgrades and downgrades cleanly; `alembic check` is clean.
+- [x] Group and dataset routes pass their validation tests (every 422 and 409 path above).
+- [x] A dataset run over two cached uploads produces per-series scores and findings, with
       `stats.missing` and `groups_skipped` filled correctly; rerunning does not double findings.
 - [ ] On the live system: two uploaded series, a group and a dataset produce a dataset run
       with cross-series findings (after specs 009–010 land).
@@ -149,6 +149,46 @@ Unit (`tabayyun-core`): `align::tests::*`, `registry::tests::run_multi_*`.
 Bindings: `test_run_checks_multi`.
 API: `tests/db/test_groups_api.py`, `tests/db/test_datasets_api.py`,
 `tests/db/test_dataset_runs.py` (uses the local cache store in a temp dir).
+
+## Implementation edits
+
+Recorded on 2026-09-23 while implementing; the interface above is otherwise as built.
+
+- `Registry::run_multi` takes a `profiles` map (series id → `Profile`). Several single-series
+  checks behave differently with a profile in the context (flatline, spikes, changepoint and
+  the evidence `source`), and upload runs pass each series' own profile; without the map a
+  dataset run would report different findings than an upload of the same data, and dedup
+  would miss merges. `run_multi_with` takes the cross checks as an argument (the built-in list
+  is empty until specs 009–011), which is how the tests inject a fake cross check.
+- `SeriesGroup::validate` holds the structural rules (2–32 distinct members, roles per kind,
+  params an object); the API repeats them with field names for 422 responses and adds the
+  workspace existence check.
+- Bindings: `run_checks_multi(tables, metas, groups, configs, *, now_ns, window,
+  compute_profile, ts_col, value_col, quality_col, ingest_col)` returns
+  `{"reports": {series_id: report}, "groups_skipped": [...]}`. `window` makes completeness
+  and scores relative to the dataset window rather than the data's extent.
+- CLI: `check-multi` also takes `--metas metas.json` (series id → metadata) and `--now`.
+- `POST /api/runs` with JSON answers with the upload shape of spec 002,
+  `{id, status: "queued", created_at}`, rather than `{run_id, status}`, so clients handle one
+  shape. The body's `now` is RFC 3339 or epoch ns. Run responses gain `dataset_id`; a dataset
+  run's trigger is `manual`.
+- A group with a member outside the dataset is listed in `groups_skipped` with reason
+  `members not in dataset` (the spec only named members without data); silently leaving it
+  out would hide why a group produced nothing.
+- `stats.skipped_checks` entries of a dataset run carry `series_id`. `stats.missing` lists only
+  series with gaps; a write covers `[first sample, last sample + 1 ns)` rounded up to the
+  microsecond, so the gap after hourly data starts 1 µs after the last sample.
+- Series are keyed by their UUID inside a dataset run (frames, groups, reports); the series
+  name stays in the metadata. The ingest column is used only when every cached series has
+  one, because the binding takes one column name for all tables.
+- A cache read failure fails a dataset run (`cache read failed: …`), unlike an upload's cache
+  write: without the read there is no data.
+- List endpoints page like the others (`limit`, `cursor`, `next_cursor`). `last` accepts
+  `m`, `h`, `d` and `w` units. A group's kind cannot be changed by PATCH (its members'
+  roles depend on it).
+- The worker job dispatches on the run's trigger (`services/execution.py`); dataset runs live
+  in `services/dataset_runs.py`, which imports `services.runs` as a module to keep the
+  `runs → jobs → tasks → execution` import cycle harmless.
 
 ## Out of scope
 

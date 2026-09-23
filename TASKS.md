@@ -130,7 +130,15 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
         `cargo audit`), independent of parquet's version.
       - Done 2026-09-23: CI runs the S3 tests against RustFS; a live two-month upload wrote
         2 objects and its coverage row.
-- [ ] **008 Multi-series checks, series groups and dataset runs** — `docs/specs/008-multi-series-and-datasets.md` (S7-3, S7-8)
+- [~] **008 Multi-series checks, series groups and dataset runs** — `docs/specs/008-multi-series-and-datasets.md` (S7-3, S7-8)
+      - `run_multi` takes each series' profile so a dataset run finds what an upload of the
+        same data finds (the checks' adaptive thresholds depend on it).
+      - Cross checks are injected (`run_multi_with`); the built-in list stays empty until
+        009–011, so dataset runs today run the single-series checks and report groups.
+      - Groups with a member outside the dataset are reported in `groups_skipped`, not dropped.
+      - `POST /api/runs` JSON answers with the upload's `{id, status, created_at}` shape.
+      - Cross-series findings merge only within their group (ADR-0013 amendment).
+      - Stays `[~]` until the live criterion, which needs 009–010.
 - [ ] **009 `tby.correlation_break`** — `docs/specs/009-correlation-break.md` (S7-4)
 - [ ] **010 `tby.redundant_disagreement`** — `docs/specs/010-redundant-disagreement.md` (S7-5)
 - [ ] **011 `tby.balance_residual`** — `docs/specs/011-balance-residual.md` (S7-6)
