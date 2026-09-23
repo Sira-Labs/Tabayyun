@@ -156,8 +156,9 @@ struct RunArgs {
     /// JSON file with a list of {"id": ..., "params": {...}} check configs.
     #[arg(long)]
     config: Option<PathBuf>,
-    /// Compute the baseline profile on the file itself and use it for adaptive thresholds.
-    #[arg(long, default_value_t = true)]
+    /// Compute the baseline profile on the file itself and use it for adaptive thresholds
+    /// (`--profile false` turns it off).
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     profile: bool,
     /// Pretty-print JSON.
     #[arg(long)]
@@ -185,8 +186,9 @@ struct CheckMultiArgs {
     /// JSON file with a list of {"id": ..., "params": {...}} check configs.
     #[arg(long)]
     config: Option<PathBuf>,
-    /// Compute each series' baseline profile on the file itself for adaptive thresholds.
-    #[arg(long, default_value_t = true)]
+    /// Compute each series' baseline profile on the file itself for adaptive thresholds
+    /// (`--profile false` turns it off).
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     profile: bool,
     /// Pretty-print JSON.
     #[arg(long)]

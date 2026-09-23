@@ -95,3 +95,21 @@ fn check_multi_rejects_invalid_groups_and_unknown_columns() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("column `nope` not found"));
     std::fs::remove_dir_all(dir).ok();
 }
+
+#[test]
+fn profile_can_be_turned_off() {
+    let dir = scratch("profile");
+    let csv = wide_csv(&dir);
+    let run = |extra: &[&str]| -> serde_json::Value {
+        let out = Command::new(env!("CARGO_BIN_EXE_tabayyun"))
+            .args(["check-multi", csv.to_str().unwrap(), "--value-cols", "a"])
+            .args(extra)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+    assert!(run(&[])["reports"]["a"]["profile"].is_object());
+    assert!(run(&["--profile", "false"])["reports"]["a"]["profile"].is_null());
+    std::fs::remove_dir_all(dir).ok();
+}
