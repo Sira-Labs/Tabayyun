@@ -67,6 +67,7 @@ async def test_run_succeeds_inline_and_matches_stateless_endpoint(client):
     assert run["stats"]["n_findings"] == len(report["findings"])
     assert run["stats"]["n_metrics"] == len(report["metrics"])
     assert run["stats"]["skipped"] == len(report["skipped"])
+    assert run["stats"]["skipped_checks"] == report["skipped"]
     assert run["window"] == report["window"]
     assert run["now_ns"] == report["now_ns"]
     assert run["duration_ms"] is not None and run["duration_ms"] >= 0

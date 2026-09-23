@@ -347,6 +347,8 @@ async def execute_run(factory: async_sessionmaker[AsyncSession], run_id: uuid.UU
                 "n_findings_new": outcome.new,
                 "n_findings_merged": outcome.merged,
                 "skipped": len(report.skipped),
+                # Which checks could not run and what they need, for the run report (spec 005).
+                "skipped_checks": report.skipped,
                 "ts_unit": parsed.ts_unit,
                 "window": {"start": report.window["start"], "end": report.window["end"]},
                 "series": [
