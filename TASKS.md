@@ -117,8 +117,8 @@ next session reads). Sprint priorities, actual dates and the forecast live in
 ## Sprint 7 — Parquet cache and cross-series checks (started 23 Sep 2026)
 
 Branch `sprint/07-cache-cross-series`, one PR per spec, in this order (must-haves first).
-Sprint decisions (23 Sep): cache on S3-compatible storage now (live: the existing MinIO;
-dev and CI: SeaweedFS, since MinIO community builds ended in 2025); cross-series checks
+Sprint decisions (23 Sep): cache on S3-compatible storage now (RustFS 1.0 live, in dev and
+in CI; it replaced an unmaintained MinIO the same day); cross-series checks
 reach the API through series groups and dataset runs (S7-8 raised to should); checks stay
 Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
 - [ ] **006 Parquet cache on local disk or S3, coverage** — `docs/specs/006-parquet-cache.md` (S7-1, S7-2)

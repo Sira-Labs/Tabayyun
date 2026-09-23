@@ -9,8 +9,7 @@ Sprint 7, stories S7-1 and S7-2. Depends on: 001 (coverage table), 002 (worker),
 
 Raw observations are stored once in an append-only Parquet cache and read back by series
 and time range. The cache lives on local disk (development, CLI, single-node installs) or on
-any S3-compatible store (the live system uses the existing MinIO; the dev bundle and CI use
-SeaweedFS). Every successful upload run writes its series to the cache and records the
+any S3-compatible store (RustFS 1.0 on the live system, in the dev bundle and in CI). Every successful upload run writes its series to the cache and records the
 range it covered, and a pure planner answers "which parts of this window are missing". Dataset
 runs (spec 008) read from the cache; connectors (S9-1) fill the missing ranges.
 
@@ -26,7 +25,7 @@ Rust (`tabayyun_core::cache`):
 ```rust
 pub struct StoreConfig {            // no env reading in the core; callers pass it in
     pub url: String,                // "/var/lib/tabayyun/cache", "file:///...", "s3://bucket/prefix"
-    pub s3_endpoint: Option<String>,        // e.g. "http://srv-captain--minio:9000"
+    pub s3_endpoint: Option<String>,        // e.g. "http://srv-captain--rustfs:9000"
     pub s3_region: Option<String>,          // default "us-east-1"
     pub s3_access_key_id: Option<String>,
     pub s3_secret_access_key: Option<String>,
@@ -126,11 +125,11 @@ flags or the same environment variables.
       newer values; untouched timestamps keep the old ones.
 - [ ] Reads prune: a read of one series for one month opens only that bucket and month
       (asserted through a counting store wrapper in the test).
-- [ ] The same round trip passes against an S3 endpoint in CI (SeaweedFS service container,
-      test enabled by `TABAYYUN_TEST_S3_URL`).
+- [ ] The same round trip passes against an S3 endpoint in CI (RustFS service container,
+      pinned to the live version, test enabled by `TABAYYUN_TEST_S3_URL`).
 - [ ] `tabayyun cache bench --rows 10000000` writes and reads 10 M rows; the numbers are
       recorded in this spec.
-- [ ] An upload run on the live system writes its series to the MinIO bucket and a
+- [ ] An upload run on the live system writes its series to the RustFS bucket and a
       `coverage` row; `stats.cache.written` is true. A run with the store unreachable still
       succeeds with `stats.cache.written = false`.
 - [ ] `missing_ranges` unit tests pass (empty, full, gaps at both ends, overlapping and
@@ -148,24 +147,22 @@ API (`api/tests`): `test_missing_ranges.py`; `tests/db/test_runs_cache.py`
 
 ## Deployment
 
-- Live: the worker gets `TABAYYUN_CACHE_URL=s3://tabayyun-cache`, the internal MinIO endpoint
-  `http://srv-captain--minio:9000` with `TABAYYUN_S3_ALLOW_HTTP=true`, and a dedicated access
-  key whose policy allows only that bucket. The owner creates the bucket and the key;
+- Live: a CapRover app running RustFS 1.0 (Apache-2.0), pinned to an exact version tag,
+  persistent directory at `/data`, no public domain for the S3 API. The worker gets
+  `TABAYYUN_CACHE_URL=s3://tabayyun-cache`, the internal endpoint
+  `http://srv-captain--rustfs:9000` with `TABAYYUN_S3_ALLOW_HTTP=true`, and a dedicated
+  access key whose policy allows only that bucket. The owner creates the bucket and the key;
   `deploy/README.md` lists the steps. The api does not need the cache until the chart
   endpoints (sprint 9).
-- Verified 2026-09-23 before implementation: from inside the worker container, pyarrow wrote,
-  listed, read and deleted a Parquet object in `tabayyun-cache` over the internal endpoint.
-  The live MinIO predates 2025, so AWS-SDK clients with the 2025 default of streamed
-  checksums (pyarrow, boto3, `aws s3`) fail uploads with `411 MissingContentLength` unless
-  run with `AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED` and
-  `AWS_RESPONSE_CHECKSUM_VALIDATION=WHEN_REQUIRED`. The core's `object_store` client sends
-  plain `Content-Length` uploads; the S3 test in this spec uploads with the same client
-  settings the worker uses, and the live acceptance run confirms it against this MinIO.
-- Dev: `deploy/compose.dev.yaml` gains a SeaweedFS service with S3 on port 8333; CI adds the
-  same image as a service for the S3 test.
-- Note on MinIO: community builds and images ended in October 2025 and the repository was
-  archived in April 2026, so the bundle does not ship it; the existing live MinIO keeps
-  working because Tabayyun speaks plain S3, and replacing it is a configuration change.
+- Dev and CI: `deploy/compose.dev.yaml` gains the same RustFS image with S3 on port 9000; CI
+  runs it as a service container for the S3 test, so tests exercise the store that runs live.
+- History (23 Sep 2026): the first live setup used an existing MinIO. Its community builds and
+  images ended in October 2025 and the repository was archived in April 2026; that MinIO
+  also predated 2025 and rejected uploads from AWS-SDK clients using the 2025 streamed
+  checksums (`411 MissingContentLength`) unless they set
+  `AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED`. The cache was still empty, so the store
+  was replaced by RustFS 1.0 (GA 16 Sep 2026) the same day; the cache holds only rebuildable
+  copies (ADR-0003), so a later store change is a configuration change plus re-uploads.
 
 ## Out of scope
 

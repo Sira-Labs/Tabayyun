@@ -29,7 +29,7 @@ Decisions are recorded in `docs/adr/`. This document is the map. Research backin
             │                               │
 ┌───────────▼─────────────┐   ┌─────────────▼──────────────────────┐   ┌────────────────┐
 │ PostgreSQL 17           │   │ Parquet cache                       │   │ Identity       │
-│ + TimescaleDB           │   │ local disk or S3/MinIO              │   │ Keycloak or    │
+│ + TimescaleDB           │   │ local disk or S3 (RustFS)           │   │ Keycloak or    │
 │ metadata · RBAC · audit │   │ source/tag_bucket/year/month        │   │ Zitadel        │
 │ findings · scores (hyper│   │ raw observations, immutable         │   │ Google, Entra, │
 │ tables) · job queue     │   │                                     │   │ SAML, passkeys │
@@ -136,7 +136,7 @@ in the IdP; enterprise SSO is a per-organisation OIDC/SAML connection.
 
 | Shape | Contents | Use |
 |---|---|---|
-| `docker compose` bundle | api, worker(s), frontend (static in Caddy), Postgres+Timescale, Keycloak, optional S3-compatible store (any; the dev bundle uses SeaweedFS since MinIO community builds ended in 2025) | default, air-gapped tarball |
+| `docker compose` bundle | api, worker(s), frontend (static in Caddy), Postgres+Timescale, Keycloak, optional S3-compatible store (any; the bundle uses RustFS since MinIO community builds ended in 2025) | default, air-gapped tarball |
 | Helm chart | same, with HPA for workers | Kubernetes customers |
 | `tabayyun-core` CLI | Rust binary | offline profiling, CI checks, benchmarks, edge pre-checks |
 
