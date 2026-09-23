@@ -41,7 +41,7 @@ pub fn regularise(frame: &SeriesFrame, step_ns: i64) -> (i64, Vec<f64>) {
     let Some(start) = first.div_euclid(step_ns).checked_mul(step_ns) else { return (0, Vec::new()) };
     let Some(n) = last
         .checked_sub(start)
-        .map(|span| span / step_ns + 1)
+        .and_then(|span| (span / step_ns).checked_add(1))
         .and_then(|n| usize::try_from(n).ok())
         .filter(|&n| n <= MAX_BINS)
     else {
@@ -333,6 +333,10 @@ mod tests {
             .unwrap();
         assert!(regularise(&f, NS_PER_HOUR).1.is_empty());
         assert_eq!(detect(&f, &DEFAULT_CANDIDATES_NS), None);
+        // A one-nanosecond step over the whole positive range: the bin count itself overflows.
+        let f = SeriesFrame::with_default_quality(SeriesMeta::new("s"), vec![0, 1, i64::MAX], vec![1.0; 3])
+            .unwrap();
+        assert!(regularise(&f, 1).1.is_empty());
     }
 
     #[test]
