@@ -7,11 +7,16 @@ use arrow::array::RecordBatch;
 use arrow::compute::concat_batches;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use pyo3_arrow::{PyRecordBatch, PyRecordBatchReader};
+use std::collections::BTreeMap;
 use tabayyun_core::cache::{Cache, StoreConfig};
 use tabayyun_core::downsample::m4;
 use tabayyun_core::synth::{generate, inject, Rng, SynthSpec};
-use tabayyun_core::{CheckConfig, CheckContext, Profile, Registry, Scorer, SeriesFrame, SeriesMeta, Window};
+use tabayyun_core::{
+    CheckConfig, CheckContext, CheckOutput, Profile, Registry, Scorer, SeriesFrame, SeriesGroup, SeriesMeta,
+    Window,
+};
 
 fn err<E: std::fmt::Display>(e: E) -> PyErr {
     PyValueError::new_err(e.to_string())
@@ -72,19 +77,97 @@ fn run_checks(
             ctx = ctx.with_profile(p.clone());
         }
         let out = Registry::run(&configs, &frame, &ctx).map_err(err)?;
-        let score = Scorer::default().score_window(&frame.meta.id, &out.findings, ctx.window);
-        let report = serde_json::json!({
-            "series_id": frame.meta.id,
-            "n_samples": frame.len(),
-            "window": ctx.window,
-            "now_ns": ctx.now_ns,
-            "profile": profile,
-            "score": score,
-            "findings": out.findings,
-            "metrics": out.metrics,
-            "skipped": out.skipped.iter().map(|(c, f)| serde_json::json!({"check_id": c, "missing": f})).collect::<Vec<_>>(),
-        });
-        serde_json::to_string(&report).map_err(err)
+        serde_json::to_string(&report_json(&frame, &ctx, profile.as_ref(), out)).map_err(err)
+    })
+}
+
+/// The per-series report shape shared by `run_checks` and `run_checks_multi`.
+fn report_json(
+    frame: &SeriesFrame,
+    ctx: &CheckContext,
+    profile: Option<&Profile>,
+    out: CheckOutput,
+) -> serde_json::Value {
+    let score = Scorer::default().score_window(&frame.meta.id, &out.findings, ctx.window);
+    serde_json::json!({
+        "series_id": frame.meta.id,
+        "n_samples": frame.len(),
+        "window": ctx.window,
+        "now_ns": ctx.now_ns,
+        "profile": profile,
+        "score": score,
+        "findings": out.findings,
+        "metrics": out.metrics,
+        "skipped": out.skipped.iter().map(|(c, f)| serde_json::json!({"check_id": c, "missing": f})).collect::<Vec<_>>(),
+    })
+}
+
+/// Run single-series checks on several series and cross-series checks on their groups (spec
+/// 008). `tables` maps series id to an Arrow batch/stream; `metas_json` is a JSON object of
+/// series id to metadata (missing entries get `{"id": ...}`); `groups_json` a JSON list of
+/// groups. `window` is `(start_ns, end_ns)`; without it the window spans the data (extended
+/// to `now_ns`). Returns JSON `{"reports": {id: report}, "groups_skipped": [...]}`.
+#[pyfunction]
+#[pyo3(signature = (tables, metas_json, groups_json, configs_json=None, now_ns=None, window=None, compute_profile=true, ts_col="ts", value_col="value", quality_col=None, ingest_col=None))]
+#[allow(clippy::too_many_arguments)]
+fn run_checks_multi(
+    py: Python<'_>,
+    tables: &Bound<'_, PyDict>,
+    metas_json: &str,
+    groups_json: &str,
+    configs_json: Option<&str>,
+    now_ns: Option<i64>,
+    window: Option<(i64, i64)>,
+    compute_profile: bool,
+    ts_col: &str,
+    value_col: &str,
+    quality_col: Option<&str>,
+    ingest_col: Option<&str>,
+) -> PyResult<String> {
+    let mut metas: BTreeMap<String, SeriesMeta> = serde_json::from_str(metas_json).map_err(err)?;
+    let groups: Vec<SeriesGroup> = serde_json::from_str(groups_json).map_err(err)?;
+    let configs: Vec<CheckConfig> = match configs_json {
+        Some(s) => serde_json::from_str(s).map_err(err)?,
+        None => Registry::default_multi_configs(),
+    };
+    let mut frames = Vec::with_capacity(tables.len());
+    for (key, data) in tables.iter() {
+        let id: String = key.extract()?;
+        let meta = metas.remove(&id).unwrap_or_else(|| SeriesMeta::new(id.clone()));
+        if meta.id != id {
+            return Err(PyValueError::new_err(format!("metadata for series {id} names series {}", meta.id)));
+        }
+        let batch = batch_from_py(&data)?;
+        let frame =
+            SeriesFrame::from_record_batch_ext(meta, &batch, ts_col, value_col, quality_col, ingest_col);
+        frames.push(frame.map_err(err)?);
+    }
+    if let Some((start, end)) = window.filter(|(s, e)| s >= e) {
+        return Err(PyValueError::new_err(format!("window start {start} is not before its end {end}")));
+    }
+    py.detach(move || {
+        let data_window = || {
+            let start = frames.iter().filter_map(SeriesFrame::first_ts).min().unwrap_or(0);
+            let end = frames.iter().filter_map(SeriesFrame::last_ts).max().map_or(start, |t| t + 1);
+            Window::new(start, end.max(now_ns.unwrap_or(i64::MIN)))
+        };
+        let window = window.map_or_else(data_window, |(s, e)| Window::new(s, e));
+        let ctx = CheckContext { now_ns: now_ns.unwrap_or(window.end - 1), window, profile: None };
+        let profiles: BTreeMap<String, Profile> = if compute_profile {
+            frames.iter().map(|f| (f.meta.id.clone(), Profile::compute(f))).collect()
+        } else {
+            BTreeMap::new()
+        };
+        let mut out = Registry::run_multi(&configs, &frames, &profiles, &groups, &ctx).map_err(err)?;
+        let reports: serde_json::Map<String, serde_json::Value> = frames
+            .iter()
+            .map(|f| {
+                let output = out.per_series.remove(&f.meta.id).unwrap_or_default();
+                (f.meta.id.clone(), report_json(f, &ctx, profiles.get(&f.meta.id), output))
+            })
+            .collect();
+        let result = serde_json::json!({"reports": reports, "groups_skipped": out.groups_skipped});
+        serde_json::to_string(&result).map_err(err)
     })
 }
 
@@ -238,6 +321,7 @@ fn builtin_checks() -> Vec<String> {
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_checks, m)?)?;
+    m.add_function(wrap_pyfunction!(run_checks_multi, m)?)?;
     m.add_function(wrap_pyfunction!(profile, m)?)?;
     m.add_function(wrap_pyfunction!(downsample_m4, m)?)?;
     m.add_function(wrap_pyfunction!(synth, m)?)?;
