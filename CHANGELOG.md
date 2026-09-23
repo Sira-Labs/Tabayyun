@@ -32,6 +32,8 @@ All notable changes to this project are documented here. The format follows
   `tabayyun check-multi` (spec 008).
 - `tby.correlation_break`: related or redundant series that stop agreeing, or whose lag
   moves, are reported per pair (spec 009, catalogue 22).
+- `tby.redundant_disagreement`: redundant sensors that disagree beyond a tolerance, naming the
+  one that is off when three or more vote (spec 010, catalogue 23).
 - Release pipeline publishing `tabayyun-api` and `tabayyun-web` images to GHCR with SBOM and
   provenance; production compose bundle with Caddy.
 - Apache-2.0 licence (ADR-0012), contribution guide, security policy, code of conduct, issue

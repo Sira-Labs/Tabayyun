@@ -146,7 +146,11 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
         correlation held and the reference lag is stable (both found on 3W WELL-00019).
       - 3W: dead PDG gauges on WELL-00001 skip; WELL-00019 (hydrate) keeps ρ ≈ −1 through the
         event, one short unexplained dip flagged. Follow-up: the CLI cannot read brotli Parquet.
-- [ ] **010 `tby.redundant_disagreement`** — `docs/specs/010-redundant-disagreement.md` (S7-5)
+- [x] **010 `tby.redundant_disagreement`** — `docs/specs/010-redundant-disagreement.md` (S7-5)
+      - Metric carries the group (`max_abs_diff:<group>`) so a series in two groups keeps both.
+      - Auto tolerance for 3+ members from the MAD of deviations from the bin median, floored
+        at 2 × the data's estimated resolution when metadata has none.
+      - Short runs are dropped before close runs merge (spec order), so blips stay silent.
 - [ ] **011 `tby.balance_residual`** — `docs/specs/011-balance-residual.md` (S7-6)
 - [ ] **012 Seasonality in the profile, `tby.seasonality_break`** — `docs/specs/012-seasonality-break.md` (S7-7)
 - [ ] **016 `tby.physical_range` episodes** — `docs/specs/016-physical-range-episodes.md` (S7-9, could)

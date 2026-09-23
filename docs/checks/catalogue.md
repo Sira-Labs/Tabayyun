@@ -42,7 +42,7 @@ Status column: ✅ implemented in `core/tabayyun-core/src/checks/`, ⬜ planned.
 | 20 | `tby.changepoint` | Abrupt regime change | plausibility | — | medium | ✅ |
 | 21 | `tby.seasonality_break` | Periodic pattern lost or changed | plausibility | baseline (auto) | low | ⬜ |
 | 22 | `tby.correlation_break` | Related series stopped agreeing | consistency | series group (related, redundant) | high | ✅ |
-| 23 | `tby.redundant_disagreement` | Redundant sensors disagree | accuracy | redundant series, tolerance | high | ⬜ |
+| 23 | `tby.redundant_disagreement` | Redundant sensors disagree | accuracy | series group (redundant), tolerance optional | high | ✅ |
 | 24 | `tby.balance_residual` | Energy/mass balance violated | consistency | balance group definition | high | ⬜ |
 | 25 | `energy.metering.register_reconciliation` | Interval sum ≠ register advance | consistency | register series, multiplier | high | ⬜ |
 | 26 | `energy.metering.usage_plausibility` | Zero runs, high/low vs history, reactive-without-active | plausibility | paired kvarh (optional) | medium | ⬜ |
@@ -331,10 +331,18 @@ Profiles are versioned and stored; findings link to the profile they used.
 
 ### 23. `tby.redundant_disagreement` — Redundant sensors disagree
 - **Dim:** accuracy. **Sev:** high.
-- **Algorithm:** |A − B| > `tolerance` for ≥ `min_duration`; with ≥3 sensors, median
-  voting identifies the outlier. Tolerance from class accuracy (meters: 1.5 × class
-  accuracy at full load) or metadata.
-- **Params:** `tolerance`; `min_duration` 15 min.
+- **Algorithm:** members of a `redundant` series group (spec 008) on one grid; a bin counts
+  when at least two members have a value. Two sensors: |A − B| > tolerance, judged around
+  zero so a constant bias is a disagreement. Three or more: |x − bin median| > tolerance per
+  member; a lone deviating member is the bin's suspect. Runs shorter than `min_duration` are
+  dropped, runs closer than `min_duration` merge; one finding per episode, on the member that
+  was the suspect in ≥ 80 % of its bins, else on the first member with `suspect` null.
+  Tolerance: `tolerance`, else `tolerance_pct` of the members' median magnitude, else
+  k × 1.4826 × MAD of the differences floored at 2 × the coarsest resolution. Metric
+  `max_abs_diff:<group>` per member and day. Class-accuracy presets (meters: 1.5 × class
+  accuracy at full load) are S14-1.
+- **Params:** `tolerance`, `tolerance_pct`, `k` 4, `min_duration` 15 min, `grid` auto; group
+  `params` override them.
 - **Sources:** Elexon main/check 1.5 × class; AEMO check meter 5 %.
 
 ### 24. `tby.balance_residual` — Energy/mass balance violated
