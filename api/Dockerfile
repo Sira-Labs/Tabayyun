@@ -32,7 +32,7 @@ RUN uv export --no-dev --no-emit-project --no-emit-package tabayyun-core --froze
 RUN useradd --system --uid 10001 --create-home tabayyun \
  && mkdir -p /data/cache && chown -R tabayyun /data
 USER tabayyun
-ENV TABAYYUN_ENV=prod TABAYYUN_CACHE_DIR=/data/cache
+ENV TABAYYUN_ENV=prod TABAYYUN_CACHE_URL=/data/cache
 EXPOSE 8000
 # api role: probes /healthz; worker role: healthy while the process runs (no HTTP).
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD ["tabayyun-api", "healthcheck"]
