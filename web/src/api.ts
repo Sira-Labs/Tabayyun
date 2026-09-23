@@ -30,17 +30,21 @@ export function detailText(detail: unknown): string | null {
   return null;
 }
 
+/** Error text from a response body: JSON `detail`, else short plain text; HTML pages keep the status. */
+export function errorMessage(body: string, fallback: string): string {
+  try {
+    return detailText((JSON.parse(body) as { detail?: unknown }).detail) ?? fallback;
+  } catch {
+    const text = body.trim();
+    return text && !text.startsWith("<") ? text.slice(0, 300) : fallback;
+  }
+}
+
 /** Fetch JSON with the CSRF header; throws ApiError with the server's detail. */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(path, { credentials: "same-origin", ...init, headers: { ...HEADERS, ...init.headers } });
   if (!res.ok) {
-    let message = `${res.status} ${res.statusText}`.trim();
-    try {
-      message = detailText(((await res.json()) as { detail?: unknown }).detail) ?? message;
-    } catch {
-      /* non-JSON error body */
-    }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, errorMessage(await res.text(), `${res.status} ${res.statusText}`.trim()));
   }
   return (await res.json()) as T;
 }
@@ -67,12 +71,29 @@ function query(params: Record<string, string | number | undefined>): string {
   return s ? `?${s}` : "";
 }
 
+// Upper bound on pages followed for one list, so a server bug cannot loop the client forever.
+const MAX_PAGES = 50;
+
+/** Every item of a keyset-paginated list, following `next_cursor`. */
+export async function allPages<T>(url: (cursor?: string) => string): Promise<Page<T>> {
+  const items: T[] = [];
+  let cursor: string | undefined;
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const page = await apiGet<Page<T>>(url(cursor));
+    items.push(...page.items);
+    if (!page.next_cursor) return { items, next_cursor: null };
+    cursor = page.next_cursor;
+  }
+  return { items, next_cursor: cursor ?? null };
+}
+
 export const api = {
   createRun: (form: FormData) => request<RunCreated>("/api/runs", { method: "POST", body: form }),
   getRun: (id: string) => apiGet<Run>(`/api/runs/${encodeURIComponent(id)}`),
   listRuns: (cursor?: string, limit = 25) => apiGet<Page<Run>>(`/api/runs${query({ cursor, limit })}`),
   listRunFindings: (runId: string) =>
-    apiGet<Page<Finding>>(`/api/findings${query({ run_id: runId, status: "all", limit: 500 })}`),
+    allPages<Finding>((cursor) => `/api/findings${query({ run_id: runId, status: "all", limit: 500, cursor })}`),
   getSeries: (id: string) => apiGet<Series>(`/api/series/${encodeURIComponent(id)}`),
-  listScores: (seriesId: string) => apiGet<Page<ScoreRow>>(`/api/series/${encodeURIComponent(seriesId)}/scores${query({ limit: 100 })}`),
+  runScores: (seriesId: string, runId: string) =>
+    apiGet<Page<ScoreRow>>(`/api/series/${encodeURIComponent(seriesId)}/scores${query({ run_id: runId, limit: 10 })}`),
 };

@@ -54,8 +54,8 @@ export function RunsList() {
                 <th scope="col" className="p-2">Status</th>
                 <th scope="col" className="p-2">Series</th>
                 <th scope="col" className="p-2">Started</th>
-                <th scope="col" className="p-2 text-right">Duration</th>
-                <th scope="col" className="p-2 text-right">Findings</th>
+                <th scope="col" className="hidden p-2 text-right sm:table-cell">Duration</th>
+                <th scope="col" className="hidden p-2 text-right sm:table-cell">Findings</th>
                 <th scope="col" className="p-2 text-right">Score</th>
               </tr>
             </thead>
@@ -70,9 +70,9 @@ export function RunsList() {
                       {run.series[0]?.external_id ?? "run"}
                     </Link>
                   </td>
-                  <td className="p-2 whitespace-nowrap text-xs">{formatLocalTime(run.started_at ?? run.created_at)}</td>
-                  <td className="p-2 text-right tabular-nums">{duration(run)}</td>
-                  <td className="p-2 text-right tabular-nums">{run.stats.n_findings ?? "—"}</td>
+                  <td className="p-2 text-xs sm:whitespace-nowrap">{formatLocalTime(run.started_at ?? run.created_at)}</td>
+                  <td className="hidden p-2 text-right tabular-nums sm:table-cell">{duration(run)}</td>
+                  <td className="hidden p-2 text-right tabular-nums sm:table-cell">{run.stats.n_findings ?? "—"}</td>
                   <td className="p-2 text-right tabular-nums">{run.series[0] ? run.series[0].score.toFixed(1) : "—"}</td>
                 </tr>
               ))}

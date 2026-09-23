@@ -101,11 +101,12 @@ function Findings({ run }: { run: Run }) {
 function Scores({ run }: { run: Run }) {
   const seriesId = run.series[0]?.id;
   const scores = useQuery({
-    queryKey: ["scores", seriesId],
-    queryFn: () => api.listScores(seriesId!),
+    queryKey: ["scores", seriesId, run.id],
+    queryFn: () => api.runScores(seriesId!, run.id),
     enabled: Boolean(seriesId),
   });
   const row = scores.data?.items.find((s) => s.run_id === run.id);
+  // run.series[].score is stored on the run at completion, so it is this run's overall score.
   const overall = row?.overall ?? run.series[0]?.score;
   if (overall === undefined) return null;
   return (
