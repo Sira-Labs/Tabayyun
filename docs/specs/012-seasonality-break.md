@@ -44,7 +44,7 @@ Check params:
 | `drop` | 0.5 | flag when strength < (1 − drop) × reference |
 | `candidates` | `["1d", "7d", "365d"]` | periods considered |
 | `segment` | auto | max(4 × period, 7d) |
-| `ref_segments` | 4 | leading segments that form the reference when no baseline profile exists |
+| `ref_segments` | 4 | leading segments that form the reference (the run's profile is not used) |
 
 Evidence: `period_ns` (the period detected in the episode, null when none), `period_ref_ns`,
 `strength` (mean strength at the reference period), `strength_ref`, `strength_new` (strength

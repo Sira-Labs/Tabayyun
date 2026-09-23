@@ -40,7 +40,7 @@ Status column: ✅ implemented in `core/tabayyun-core/src/checks/`, ⬜ planned.
 | 18 | `tby.level_drift` | Slow bias / trend in the level | accuracy | baseline (auto) | medium | ✅ |
 | 19 | `tby.distribution_drift` | Distribution changed vs reference | plausibility | baseline (auto) | medium | ✅ |
 | 20 | `tby.changepoint` | Abrupt regime change | plausibility | — | medium | ✅ |
-| 21 | `tby.seasonality_break` | Periodic pattern lost or changed | plausibility | baseline (auto) | low | ✅ |
+| 21 | `tby.seasonality_break` | Periodic pattern lost or changed | plausibility | — | low | ✅ |
 | 22 | `tby.correlation_break` | Related series stopped agreeing | consistency | series group (related, redundant) | high | ✅ |
 | 23 | `tby.redundant_disagreement` | Redundant sensors disagree | accuracy | series group (redundant), tolerance optional | high | ✅ |
 | 24 | `tby.balance_residual` | Energy/mass balance violated | consistency | balance group definition | high | ✅ |
