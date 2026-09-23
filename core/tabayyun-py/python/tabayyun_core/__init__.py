@@ -14,7 +14,7 @@ from tabayyun_core import _native
 
 __version__: str = _native.__version__
 
-__all__ = ["Cache", "builtin_checks", "downsample_m4", "profile", "run_checks", "synth", "__version__"]
+__all__ = ["Cache", "builtin_checks", "downsample_m4", "profile", "run_checks", "run_checks_multi", "synth", "__version__"]
 
 
 def builtin_checks() -> list[str]:
@@ -50,6 +50,46 @@ def run_checks(
             meta_json,
             configs_json,
             now_ns,
+            compute_profile,
+            ts_col,
+            value_col,
+            quality_col,
+            ingest_col,
+        )
+    )
+
+
+def run_checks_multi(
+    tables: dict[str, Any],
+    metas: dict[str, dict[str, Any]] | None = None,
+    groups: list[dict[str, Any]] | None = None,
+    configs: list[dict[str, Any]] | None = None,
+    *,
+    now_ns: int | None = None,
+    window: tuple[int, int] | None = None,
+    compute_profile: bool = True,
+    ts_col: str = "ts",
+    value_col: str = "value",
+    quality_col: str | None = None,
+    ingest_col: str | None = None,
+) -> dict[str, Any]:
+    """Run checks on several series and cross-series checks on their groups (spec 008).
+
+    ``tables`` maps series id to Arrow data; ``metas`` maps series id to metadata as in
+    :func:`run_checks`. ``groups`` is a list of ``{"id", "name", "kind", "members":
+    [{"series_id", "role"}], "params"}`` with kind ``related``, ``redundant`` or ``balance``.
+    ``window`` is ``(start_ns, end_ns)``; without it the window spans the data. Returns
+    ``{"reports": {series_id: report}, "groups_skipped": [{"group_id", "reason", "missing"}]}``
+    where each report has the shape :func:`run_checks` returns.
+    """
+    return json.loads(
+        _native.run_checks_multi(
+            tables,
+            json.dumps(metas or {}),
+            json.dumps(groups or []),
+            None if configs is None else json.dumps(configs),
+            now_ns,
+            window,
             compute_profile,
             ts_col,
             value_col,

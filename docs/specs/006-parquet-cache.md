@@ -137,9 +137,14 @@ flags or the same environment variables.
       94643e9: rust core and python api jobs green against RustFS 1.0.0.)
 - [x] `tabayyun cache bench --rows 10000000` writes and reads 10 M rows; the numbers are
       recorded in this spec (Benchmarks).
-- [ ] An upload run on the live system writes its series to the RustFS bucket and a
+- [x] An upload run on the live system writes its series to the RustFS bucket and a
       `coverage` row; `stats.cache.written` is true. A run with the store unreachable still
-      succeeds with `stats.cache.written = false`.
+      succeeds with `stats.cache.written = false`. (Live 2026-09-23 after PR #31, release
+      run 31: an hourly CSV of 720 rows from 25 Nov to 24 Dec 2023 uploaded as `cache-check`
+      succeeded with `stats.cache = {written: true, rows: 720, files: 2}`, one object per
+      month; the coverage row is committed in the same transaction as `stats.cache`. The
+      unreachable-store half is covered by `tests/db/test_runs_cache.py` in CI rather than
+      by breaking the live store.)
 - [x] `missing_ranges` unit tests pass (empty, full, gaps at both ends, overlapping and
       touching ranges).
 - [x] `make lint` and `make test` pass; the wheel still builds for Python 3.11+.

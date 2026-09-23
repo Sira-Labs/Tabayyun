@@ -16,6 +16,8 @@ pub enum Error {
     Serde(#[from] serde_json::Error),
     #[error("cache error: {0}")]
     Cache(String),
+    #[error("invalid group {group}: {reason}")]
+    InvalidGroup { group: String, reason: String },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

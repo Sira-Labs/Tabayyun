@@ -1,16 +1,19 @@
-//! `tabayyun` CLI: run the built-in checks on a CSV or Parquet file, or generate synthetic
-//! test data. Output is JSON so it can feed the API, notebooks or CI.
+//! `tabayyun` CLI: run the built-in checks on a CSV or Parquet file (one series, or one per
+//! column with cross-series checks over groups), or generate synthetic test data. Output is
+//! JSON so it can feed the API, notebooks or CI.
 
 use chrono::{DateTime, Utc};
 use clap::{Args, Parser, Subcommand};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::PathBuf;
 use tabayyun_core::cache::{Cache, StoreConfig};
 use tabayyun_core::synth::{self, inject, Rng, SynthSpec};
 use tabayyun_core::time::NS_PER_SEC;
 use tabayyun_core::{
-    CheckConfig, CheckContext, Profile, Quality, Registry, Scorer, SeriesFrame, SeriesMeta, Window,
+    CheckConfig, CheckContext, CheckOutput, Profile, Quality, Registry, Scorer, SeriesFrame, SeriesGroup,
+    SeriesMeta, Window,
 };
 
 #[derive(Parser)]
@@ -24,6 +27,9 @@ struct Cli {
 enum Cmd {
     /// Run checks on a file and print findings and scores as JSON.
     Run(RunArgs),
+    /// Run checks on a wide file (one series per value column) and cross-series checks on
+    /// groups; prints one report per series and the groups that could not run (spec 008).
+    CheckMulti(CheckMultiArgs),
     /// Generate a synthetic series (CSV) with optional injected faults.
     Synth(SynthArgs),
     /// List built-in checks.
@@ -150,8 +156,39 @@ struct RunArgs {
     /// JSON file with a list of {"id": ..., "params": {...}} check configs.
     #[arg(long)]
     config: Option<PathBuf>,
-    /// Compute the baseline profile on the file itself and use it for adaptive thresholds.
-    #[arg(long, default_value_t = true)]
+    /// Compute the baseline profile on the file itself and use it for adaptive thresholds
+    /// (`--profile false` turns it off).
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    profile: bool,
+    /// Pretty-print JSON.
+    #[arg(long)]
+    pretty: bool,
+}
+
+#[derive(Args)]
+struct CheckMultiArgs {
+    /// Wide input file (.csv or .parquet): one timestamp column and one column per series.
+    file: PathBuf,
+    /// Comma-separated value columns; each becomes a series named after its column.
+    #[arg(long, value_delimiter = ',', required = true)]
+    value_cols: Vec<String>,
+    #[arg(long, default_value = "ts")]
+    ts_col: String,
+    /// JSON file with a list of series groups ({"id", "name", "kind", "members", "params"}).
+    #[arg(long)]
+    groups: Option<PathBuf>,
+    /// JSON file mapping series id (the column name) to metadata (unit, physical_min, ...).
+    #[arg(long)]
+    metas: Option<PathBuf>,
+    /// "Now" for staleness (RFC 3339). Default: last timestamp in the file.
+    #[arg(long)]
+    now: Option<String>,
+    /// JSON file with a list of {"id": ..., "params": {...}} check configs.
+    #[arg(long)]
+    config: Option<PathBuf>,
+    /// Compute each series' baseline profile on the file itself for adaptive thresholds
+    /// (`--profile false` turns it off).
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     profile: bool,
     /// Pretty-print JSON.
     #[arg(long)]
@@ -190,6 +227,7 @@ fn real_main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Cmd::Synth(a) => synth_cmd(a),
         Cmd::Run(a) => run_cmd(a),
+        Cmd::CheckMulti(a) => check_multi_cmd(a),
         Cmd::Cache(c) => cache_cmd(c),
     }
 }
@@ -294,8 +332,70 @@ fn run_cmd(a: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
         None => Registry::default_configs(),
     };
     let out = Registry::run(&configs, &frame, &ctx)?;
+    print_json(&report_json(&frame, &ctx, profile.as_ref(), out), a.pretty)
+}
+
+fn check_multi_cmd(a: CheckMultiArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let mut metas: BTreeMap<String, SeriesMeta> = match &a.metas {
+        Some(p) => serde_json::from_reader(File::open(p)?)?,
+        None => BTreeMap::new(),
+    };
+    let groups: Vec<SeriesGroup> = match &a.groups {
+        Some(p) => serde_json::from_reader(File::open(p)?)?,
+        None => Vec::new(),
+    };
+    let configs: Vec<CheckConfig> = match &a.config {
+        Some(p) => serde_json::from_reader(File::open(p)?)?,
+        None => Registry::default_multi_configs(),
+    };
+    let mut frames = Vec::with_capacity(a.value_cols.len());
+    for col in &a.value_cols {
+        let meta = metas.remove(col).unwrap_or_else(|| SeriesMeta::new(col));
+        if meta.id != *col {
+            return Err(format!("metadata for column {col} names series {}", meta.id).into());
+        }
+        let src = InputArgs {
+            input: a.file.clone(),
+            ts_col: a.ts_col.clone(),
+            value_col: col.clone(),
+            quality_col: None,
+            ingest_col: None,
+            series_id: col.clone(),
+        };
+        frames.push(load(&src, meta)?);
+    }
+    let start = frames.iter().filter_map(SeriesFrame::first_ts).min().unwrap_or(0);
+    let end = frames.iter().filter_map(SeriesFrame::last_ts).max().map_or(start, |t| t + 1);
+    let mut ctx = CheckContext { now_ns: end - 1, window: Window::new(start, end), profile: None };
+    if let Some(now) = &a.now {
+        ctx.now_ns = rfc3339_ns(now)?;
+        ctx.window = Window::new(start, end.max(ctx.now_ns));
+    }
+    let profiles: BTreeMap<String, Profile> = if a.profile {
+        frames.iter().map(|f| (f.meta.id.clone(), Profile::compute(f))).collect()
+    } else {
+        BTreeMap::new()
+    };
+    let mut out = Registry::run_multi(&configs, &frames, &profiles, &groups, &ctx)?;
+    let reports: serde_json::Map<String, serde_json::Value> = frames
+        .iter()
+        .map(|f| {
+            let output = out.per_series.remove(&f.meta.id).unwrap_or_default();
+            (f.meta.id.clone(), report_json(f, &ctx, profiles.get(&f.meta.id), output))
+        })
+        .collect();
+    print_json(&serde_json::json!({"reports": reports, "groups_skipped": out.groups_skipped}), a.pretty)
+}
+
+/// One series' report: findings, metrics, score, profile and skipped checks.
+fn report_json(
+    frame: &SeriesFrame,
+    ctx: &CheckContext,
+    profile: Option<&Profile>,
+    out: CheckOutput,
+) -> serde_json::Value {
     let score = Scorer::default().score_window(&frame.meta.id, &out.findings, ctx.window);
-    let report = serde_json::json!({
+    serde_json::json!({
         "series_id": frame.meta.id,
         "n_samples": frame.len(),
         "window": ctx.window,
@@ -305,8 +405,11 @@ fn run_cmd(a: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
         "findings": out.findings,
         "metrics": out.metrics,
         "skipped": out.skipped.iter().map(|(c, f)| serde_json::json!({"check_id": c, "missing": f})).collect::<Vec<_>>(),
-    });
-    let s = if a.pretty { serde_json::to_string_pretty(&report)? } else { serde_json::to_string(&report)? };
+    })
+}
+
+fn print_json(value: &serde_json::Value, pretty: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let s = if pretty { serde_json::to_string_pretty(value)? } else { serde_json::to_string(value)? };
     println!("{s}");
     Ok(())
 }

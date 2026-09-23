@@ -8,7 +8,9 @@ check that is `open` or `acked`, has the same evidence shape (its set of top-lev
 keys, which tells a gap from the whole-window completeness finding of the same check), was
 not created by the same run, and overlaps the incoming window. Among several candidates the
 one with the largest overlap ratio (intersection over union) wins. `muted` and `resolved`
-findings never absorb: a problem re-reported after resolution is a new finding.
+findings never absorb: a problem re-reported after resolution is a new finding. A
+cross-series finding (evidence with `group_id`, spec 008) merges only into a finding of the
+same group, so two groups sharing a series never merge their findings (ADR-0013 amendment).
 """
 
 from __future__ import annotations
@@ -148,7 +150,12 @@ async def _best_candidate(
         .with_for_update()
     )
     shape = _shape(incoming.evidence)
-    candidates = [f for f in (await session.execute(stmt)).scalars() if _shape(f.evidence) == shape]
+    group = incoming.evidence.get("group_id")
+    candidates = [
+        f
+        for f in (await session.execute(stmt)).scalars()
+        if _shape(f.evidence) == shape and (group is None or f.evidence.get("group_id") == group)
+    ]
     if not candidates:
         return None
     # max() keeps the first of equal ratios, i.e. the earliest window (query order).

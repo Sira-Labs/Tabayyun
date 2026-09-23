@@ -18,6 +18,8 @@ EXPECTED_TABLES = {
     "metrics",
     "scores",
     "coverage",
+    "series_groups",
+    "series_group_members",
 }
 HYPERTABLES = {"findings", "metrics", "scores"}
 
@@ -108,3 +110,35 @@ def test_timescale_on_requires_extension(db_url, fresh_schema, timescale_availab
     with pytest.raises(RuntimeError, match="TABAYYUN_TIMESCALE=on"):
         fresh_schema("on")
     assert _current_revision(db_url) is None  # the failed migration left nothing behind
+
+
+def test_0003_downgrades_and_upgrades(db_url, fresh_schema):
+    """Migration 0003 downgrades to 0002 (groups gone, plain dataset FKs) and back cleanly."""
+    fresh_schema("auto")
+
+    def fk_rules() -> dict[str, str]:
+        engine = create_engine(db_url)
+        try:
+            with engine.connect() as conn:
+                rows = conn.execute(
+                    text(
+                        "SELECT conname, confdeltype FROM pg_constraint WHERE conname IN "
+                        "('fk_runs_dataset_id_datasets', 'fk_dataset_series_dataset_id_datasets')"
+                    )
+                )
+                return {r[0]: r[1] for r in rows}
+        finally:
+            engine.dispose()
+
+    assert fk_rules() == {"fk_runs_dataset_id_datasets": "n", "fk_dataset_series_dataset_id_datasets": "c"}
+    migrate.downgrade(db_url, "0002")
+    assert _current_revision(db_url) == "0002"
+    assert fk_rules() == {"fk_runs_dataset_id_datasets": "a", "fk_dataset_series_dataset_id_datasets": "a"}
+    engine = create_engine(db_url)
+    try:
+        assert "series_groups" not in inspect(engine).get_table_names()
+    finally:
+        engine.dispose()
+    migrate.upgrade(db_url, "head", timescale="auto")
+    assert _current_revision(db_url) == migrate.head_revision()
+    migrate.check(db_url)

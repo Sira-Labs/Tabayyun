@@ -79,3 +79,37 @@ def test_cache_round_trip_pyarrow(tmp_path):
 def test_cache_rejects_unknown_scheme(tmp_path):
     with pytest.raises(ValueError, match="unsupported"):
         tc.Cache({"url": "gs://bucket"})
+
+
+def test_run_checks_multi():
+    tables = {sid: tc.synth(n=1440, seed=seed) for sid, seed in (("pt-a", 1), ("pt-b", 2), ("pt-c", 3))}
+    groups = [
+        {"id": "g-pt", "name": "PT-101", "kind": "redundant", "members": [{"series_id": "pt-a"}, {"series_id": "pt-b"}]},
+        {"id": "g-gone", "name": "Gone", "kind": "related", "members": [{"series_id": "pt-c"}, {"series_id": "pt-x"}]},
+    ]
+    out = tc.run_checks_multi(tables, {"pt-a": {"id": "pt-a", "unit": "bar"}}, groups, quality_col="quality")
+    assert set(out["reports"]) == {"pt-a", "pt-b", "pt-c"}
+    assert out["groups_skipped"] == [{"group_id": "g-gone", "reason": "members without data", "missing": ["pt-x"]}]
+    # Each report has the single-series shape and matches a single run of that series.
+    single = tc.run_checks(tables["pt-b"], {"id": "pt-b"}, quality_col="quality")
+    multi = out["reports"]["pt-b"]
+    assert multi["findings"] == single["findings"] and multi["score"] == single["score"]
+    assert multi["window"] == single["window"]
+    assert out["reports"]["pt-a"]["profile"]["expected_interval_ns"] == 60_000_000_000
+
+
+def test_run_checks_multi_window_and_errors():
+    batch = tc.synth(n=60)
+    start = batch.column("ts")[0].value
+    window = (start, start + 2 * 3600 * 10**9)
+    out = tc.run_checks_multi({"a": batch}, configs=[{"id": "tby.completeness"}], window=window, now_ns=window[1] - 1)
+    report = out["reports"]["a"]
+    assert report["window"] == {"start": window[0], "end": window[1]}
+    # One hour of data in a two-hour window: completeness is judged against the window.
+    assert {f["check_id"] for f in report["findings"]} == {"tby.completeness"}
+    with pytest.raises(ValueError, match="names series"):
+        tc.run_checks_multi({"a": batch}, {"a": {"id": "b"}})
+    with pytest.raises(ValueError, match="not before"):
+        tc.run_checks_multi({"a": batch}, window=(5, 5))
+    with pytest.raises(ValueError, match="invalid group"):
+        tc.run_checks_multi({"a": batch}, groups=[{"id": "g", "name": "G", "kind": "balance", "members": [{"series_id": "a", "role": "input"}]}])

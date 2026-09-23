@@ -8,6 +8,7 @@ import structlog
 
 from tabayyun.jobs import app, runtime
 from tabayyun.jobs.names import MAINTENANCE_QUEUE, REAP_STALE_RUNS_TASK, RUN_CHECKS_TASK, RUNS_QUEUE
+from tabayyun.services import execution
 from tabayyun.services import runs as runs_service
 
 log = structlog.get_logger()
@@ -15,8 +16,8 @@ log = structlog.get_logger()
 
 @app.task(queue=RUNS_QUEUE, name=RUN_CHECKS_TASK, retry=False)
 async def run_checks_job(run_id: str) -> None:
-    """Execute one queued run; a failure is recorded on the run, never retried."""
-    await runs_service.execute_run(runtime.session_factory(), uuid.UUID(run_id), runtime.run_cache())
+    """Execute one queued run (upload or dataset); a failure is recorded on the run, never retried."""
+    await execution.execute(runtime.session_factory(), uuid.UUID(run_id), runtime.run_cache())
 
 
 @app.periodic(cron="*/10 * * * *")

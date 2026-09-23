@@ -227,6 +227,22 @@ async def test_other_check_is_not_absorbed(ctx):
     assert outcome.new == 1
 
 
+async def test_cross_series_findings_merge_only_within_their_group(ctx):
+    """Findings of two groups sharing a series stay apart; the same group's finding merges (spec 008)."""
+
+    def cross(group_id: str) -> core.Finding:
+        evidence = {"group_id": group_id, "group_name": group_id.upper(), "members": ["a", "b"], "rho": 0.2}
+        return _finding(0, 60, check_id="tby.correlation_break", evidence=evidence)
+
+    await ctx.persist([cross("g1")])
+    _, outcome = await ctx.persist([cross("g2")])
+    assert (outcome.new, outcome.merged) == (1, 0)
+    _, outcome = await ctx.persist([cross("g1")])
+    assert (outcome.new, outcome.merged) == (0, 1)
+    rows = await ctx.findings()
+    assert sorted((r.evidence["group_id"], r.occurrences) for r in rows) == [("g1", 2), ("g2", 1)]
+
+
 async def test_metrics_rewritten_by_a_rerun(ctx):
     """Metric points are keyed by (series, check, name, ts); a rerun rewrites them."""
     metric = {

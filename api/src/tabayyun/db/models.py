@@ -48,6 +48,8 @@ SERIES_KINDS = ("measurement", "counter", "setpoint", "status")
 RUN_TRIGGERS = ("upload", "suite", "manual")
 RUN_STATUSES = ("queued", "running", "succeeded", "failed")
 FINDING_STATUSES = ("open", "acked", "muted", "resolved")
+GROUP_KINDS = ("related", "redundant", "balance")
+MEMBER_ROLES = ("member", "input", "output")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -153,11 +155,49 @@ class DatasetSeries(Base):
     __tablename__ = "dataset_series"
 
     dataset_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("datasets.id"), primary_key=True
+        UUID(as_uuid=True), ForeignKey("datasets.id", ondelete="CASCADE"), primary_key=True
     )
     series_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("series.id"), primary_key=True
     )
+
+
+class SeriesGroup(TenantMixin, Base):
+    """Series that belong together and how (spec 008): related, redundant or a balance."""
+
+    __tablename__ = "series_groups"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name"),
+        CheckConstraint(_in("kind", GROUP_KINDS), name="kind"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    params: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class SeriesGroupMember(Base):
+    """One member of a series group, in declaration order (`position`)."""
+
+    __tablename__ = "series_group_members"
+    __table_args__ = (
+        CheckConstraint(_in("role", MEMBER_ROLES), name="role"),
+        Index("ix_series_group_members_series_id", "series_id"),
+    )
+
+    group_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("series_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    series_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("series.id"), primary_key=True
+    )
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class Run(TenantMixin, Base):
@@ -169,7 +209,10 @@ class Run(TenantMixin, Base):
     )
 
     id: Mapped[uuid.UUID] = _uuid_pk()
-    dataset_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("datasets.id"))
+    # A deleted dataset keeps its past runs (spec 008).
+    dataset_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("datasets.id", ondelete="SET NULL")
+    )
     trigger: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="queued")
     window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

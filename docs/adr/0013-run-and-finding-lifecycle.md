@@ -77,3 +77,10 @@ into the whole-window finding and lose them.
   table can replace this if a finding's full run history is needed.
 - Follow-ups: auto-resolution with suites (sprint 10), `status_by` and audit events with
   authentication (spec 007), assignment and comments with the findings inbox (sprint 10).
+
+## Amendments
+- **2026-09-23, spec 008 (series groups).** A cross-series finding carries `group_id`,
+  `group_name` and `members` in its evidence. When the incoming finding has a `group_id`, a
+  candidate must also have the same `group_id`, in addition to the rules above. Two groups
+  sharing a series (a meter that is part of a redundant triple and of a balance) then keep
+  separate findings on that series, although their evidence shapes are equal.
