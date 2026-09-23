@@ -34,6 +34,8 @@ All notable changes to this project are documented here. The format follows
   moves, are reported per pair (spec 009, catalogue 22).
 - `tby.redundant_disagreement`: redundant sensors that disagree beyond a tolerance, naming the
   one that is off when three or more vote (spec 010, catalogue 23).
+- `tby.balance_residual`: a balance group whose residual leaves the expected loss band by more
+  than the meters' uncertainty, naming the meter whose share changed (spec 011, catalogue 24).
 - Release pipeline publishing `tabayyun-api` and `tabayyun-web` images to GHCR with SBOM and
   provenance; production compose bundle with Caddy.
 - Apache-2.0 licence (ADR-0012), contribution guide, security policy, code of conduct, issue

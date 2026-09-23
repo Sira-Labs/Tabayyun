@@ -43,7 +43,7 @@ Status column: ✅ implemented in `core/tabayyun-core/src/checks/`, ⬜ planned.
 | 21 | `tby.seasonality_break` | Periodic pattern lost or changed | plausibility | baseline (auto) | low | ⬜ |
 | 22 | `tby.correlation_break` | Related series stopped agreeing | consistency | series group (related, redundant) | high | ✅ |
 | 23 | `tby.redundant_disagreement` | Redundant sensors disagree | accuracy | series group (redundant), tolerance optional | high | ✅ |
-| 24 | `tby.balance_residual` | Energy/mass balance violated | consistency | balance group definition | high | ⬜ |
+| 24 | `tby.balance_residual` | Energy/mass balance violated | consistency | balance group definition | high | ✅ |
 | 25 | `energy.metering.register_reconciliation` | Interval sum ≠ register advance | consistency | register series, multiplier | high | ⬜ |
 | 26 | `energy.metering.usage_plausibility` | Zero runs, high/low vs history, reactive-without-active | plausibility | paired kvarh (optional) | medium | ⬜ |
 | 27 | `energy.pv.irradiance_limits` | Irradiance outside BSRN limits / component inconsistency | validity | lat/lon, timestamps in UTC; DNI/DHI optional | high | ⬜ |
@@ -347,11 +347,18 @@ Profiles are versioned and stored; findings link to the profile they used.
 
 ### 24. `tby.balance_residual` — Energy/mass balance violated
 - **Dim:** consistency. **Sev:** high.
-- **Algorithm:** for a balance group (inputs, outputs, expected loss band), residual
-  r = Σin − Σout; normalised residual > `k` σ or loss share outside [`loss_min`, `loss_max`].
-  Gross-error detection via measurement test to point at the offending series.
-- **Params:** `k` 3; nodal balance 1 % (AEMO); DSO loss band per network (CEER 2–23 %);
-  CGMES interchange 50/200 MW.
+- **Algorithm:** for a `balance` series group (inputs, outputs; spec 008) on one grid, bins
+  where every member has a value: residual r = Σin − Σout, flagged when r lies outside the
+  loss band [`loss_min` · Σin, `loss_max` · Σin] by more than k × σ_r, σ_r = sqrt(Σ σ_i²),
+  σ_i = max(u_i · |x_i|, resolution). Runs shorter than `min_duration` are dropped, the rest
+  merge into episodes. A single balance cannot isolate a gross error (every member's
+  measurement test equals |r| / σ_r), so the suspect comes from change over time: member shares
+  of throughput in the episode against the unflagged baseline, common mode removed by the
+  median relative change; a member explaining ≥ 80 % is named. Metrics
+  `residual_mean:<group>` and `loss_share_mean:<group>` per day.
+- **Params:** `k` 3, `uncertainty` 1 % (or per member), `loss_min` −1 %, `loss_max` 5 %,
+  `min_duration` 1 h, `grid` auto; group `params` override them. Nodal balance 1 % (AEMO); DSO
+  loss band per network (CEER 2–23 %); CGMES interchange 50/200 MW.
 - **Sources:** AEMO §10.3; CEER losses; ENTSO-E QoCDC; data-reconciliation literature.
 
 ---
