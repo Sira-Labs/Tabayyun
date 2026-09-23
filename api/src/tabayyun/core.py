@@ -5,6 +5,7 @@ Keeps all knowledge of the core's JSON shapes in one place so routers work with 
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -176,6 +177,48 @@ def run_checks(
         ingest_col=ingest_col,
     )
     return CheckReport.model_validate(raw)
+
+
+class GroupSkip(BaseModel):
+    """A series group the core did not run, and why."""
+
+    group_id: str
+    reason: str
+    missing: list[str]
+
+
+class MultiReport(BaseModel):
+    """The core's multi-series result: one report per series and the skipped groups."""
+
+    reports: dict[str, CheckReport]
+    groups_skipped: list[GroupSkip]
+
+
+def run_checks_multi(
+    tables: Mapping[str, pa.Table | pa.RecordBatch],
+    metas: Mapping[str, SeriesMetaIn],
+    groups: list[dict[str, Any]],
+    *,
+    window: tuple[int, int],
+    now_ns: int,
+    quality_col: str | None = None,
+    ingest_col: str | None = None,
+) -> MultiReport:
+    """Run single-series checks on every table and cross-series checks on `groups` (spec 008).
+
+    Keys of `tables` and `metas` are the series ids the reports and groups use; `window` is
+    the half-open `[start_ns, end_ns)` completeness and scores are measured against.
+    """
+    raw = tc.run_checks_multi(
+        dict(tables),
+        {sid: m.model_dump(exclude_none=True) for sid, m in metas.items()},
+        groups,
+        now_ns=now_ns,
+        window=window,
+        quality_col=quality_col,
+        ingest_col=ingest_col,
+    )
+    return MultiReport.model_validate(raw)
 
 
 def read_csv(

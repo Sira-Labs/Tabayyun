@@ -8,6 +8,7 @@ start or the run itself.
 from __future__ import annotations
 
 import threading
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -43,7 +44,13 @@ class CacheWrite:
 
 
 class CacheError(Exception):
-    """The store could not be opened or written; `str()` is one line for run stats."""
+    """The store could not be opened, read or written; `str()` is one line for run stats."""
+
+
+def _cache_error(exc: BaseException) -> CacheError:
+    """One-line CacheError from any error the core raised."""
+    lines = str(exc).strip().splitlines()
+    return CacheError((lines[0] if lines else type(exc).__name__)[:500])
 
 
 class RunCache:
@@ -96,11 +103,28 @@ class RunCache:
         # run succeeded and must never fail it: any ordinary error (a panic surfacing as
         # RuntimeError, a TypeError from a bad store config) becomes a CacheError.
         except Exception as exc:  # noqa: BLE001
-            lines = str(exc).strip().splitlines()
-            raise CacheError((lines[0] if lines else type(exc).__name__)[:500]) from exc
+            raise _cache_error(exc) from exc
         return CacheWrite(
             rows=int(report["rows"]),
             files=len(report["files"]),
             start_ns=int(report["start_ns"]),
             end_ns=int(report["end_ns"]),
         )
+
+    def read_series(
+        self, *, source_id: str, series_ids: Sequence[str], start_ns: int, end_ns: int
+    ) -> dict[str, pa.RecordBatch]:
+        """Raw-layer rows of series of one source over `[start_ns, end_ns)`; blocking.
+
+        Returns a batch (columns ts, value, quality and ingest_ts when every row has one) per
+        series that has rows; series without rows are absent.
+
+        Raises:
+            CacheError: the store cannot be opened or read, whatever the cause.
+        """
+        try:
+            batches = self._open().read(RAW_LAYER, source_id, list(series_ids), start_ns, end_ns)
+        # A dataset run cannot proceed without its data; the caller fails the run with this line.
+        except Exception as exc:  # noqa: BLE001
+            raise _cache_error(exc) from exc
+        return {sid: b for sid, b in batches.items() if b.num_rows > 0}

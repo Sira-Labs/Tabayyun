@@ -111,12 +111,12 @@ def parse_upload(
         raise UploadError(422, f"cannot parse CSV: {exc}") from exc
 
 
-def _now() -> datetime:
+def utc_now() -> datetime:
     """Current time, timezone-aware UTC."""
     return datetime.now(UTC)
 
 
-def _error_line(exc: BaseException) -> str:
+def error_line(exc: BaseException) -> str:
     """First line of an exception message, or its type name when the message is empty."""
     message = str(exc).strip().splitlines()
     return message[0] if message else type(exc).__name__
@@ -129,7 +129,7 @@ async def create_run(
     session: AsyncSession, *, data: bytes, filename: str, content_type: str | None, params: RunParams
 ) -> Run:
     """Insert the upload and the queued run in the caller's transaction."""
-    now = _now()
+    now = utc_now()
     run = Run(
         org_id=DEFAULT_ORG_ID,
         workspace_id=DEFAULT_WORKSPACE_ID,
@@ -214,6 +214,7 @@ def run_to_dict(run: Run) -> dict[str, Any]:
         duration_ms = int((run.finished_at - run.started_at).total_seconds() * 1000)
     return {
         "id": str(run.id),
+        "dataset_id": None if run.dataset_id is None else str(run.dataset_id),
         "trigger": run.trigger,
         "status": run.status,
         "window": window,
@@ -231,13 +232,13 @@ def run_to_dict(run: Run) -> dict[str, Any]:
 # Execution (worker path)
 
 
-async def _mark_failed(factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID, message: str) -> None:
+async def mark_failed(factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID, message: str) -> None:
     """Fail a queued or running run with `message` and drop its upload, in its own transaction."""
     async with factory() as session, session.begin():
         await session.execute(
             update(Run)
             .where(Run.id == run_id, Run.status.in_(("queued", "running")))
-            .values(status="failed", error=message[:1000], finished_at=_now())
+            .values(status="failed", error=message[:1000], finished_at=utc_now())
         )
         await session.execute(delete(Upload).where(Upload.run_id == run_id))
     log.error("run.failed", run_id=str(run_id), error=message)
@@ -257,7 +258,7 @@ async def execute_run(
             run_log.warning("run.skipped", status=None if run is None else run.status)
             return
         run.status = "running"
-        run.started_at = _now()
+        run.started_at = utc_now()
         upload = await session.get(Upload, run_id)
         payload = None if upload is None else (upload.data, RunParams.from_json(upload.params))
         # Stored metadata is read, not created: a run that fails leaves no series behind.
@@ -302,16 +303,16 @@ async def execute_run(
             ingest_col=params.ingest_col or None,
         )
     except RunFailureError as exc:
-        await _mark_failed(factory, run_id, str(exc))
+        await mark_failed(factory, run_id, str(exc))
         return
     except Exception as exc:  # noqa: BLE001  (any core error must land on the run, not the worker)
         run_log.exception("run.crashed")
-        await _mark_failed(factory, run_id, f"core error: {_error_line(exc)}")
+        await mark_failed(factory, run_id, f"core error: {error_line(exc)}")
         return
 
     try:
         async with factory() as session, session.begin():
-            finished_at = _now()
+            finished_at = utc_now()
             # Only a run still `running` completes: the reaper may have failed it meanwhile.
             # The persistence below is skipped (and rolled back) unless exactly one row changed.
             result = await session.execute(
@@ -369,11 +370,11 @@ async def execute_run(
             await session.execute(delete(Upload).where(Upload.run_id == run_id))
     except series_service.MetadataError as exc:
         # Rolled back: the series changed since the run started and no longer fits the upload.
-        await _mark_failed(factory, run_id, f"invalid series metadata: {exc}")
+        await mark_failed(factory, run_id, f"invalid series metadata: {exc}")
         return
     except SQLAlchemyError as exc:
         run_log.exception("run.persist_failed")
-        await _mark_failed(factory, run_id, f"persist error: {_error_line(exc)}")
+        await mark_failed(factory, run_id, f"persist error: {error_line(exc)}")
         return
     cache_info = (
         None
@@ -439,7 +440,7 @@ async def _cache_upload(
                     start_ns=written.start_ns,
                     end_ns=written.end_ns,
                     rows=written.rows,
-                    now=_now(),
+                    now=utc_now(),
                 )
             run = await session.get(Run, run_id, with_for_update=True)
             if run is not None:
@@ -456,12 +457,12 @@ async def reap_stale_runs(
     factory: async_sessionmaker[AsyncSession], *, stale_after: timedelta = STALE_AFTER
 ) -> int:
     """Mark runs `running` for longer than `stale_after` as failed with `worker lost`."""
-    cutoff = _now() - stale_after
+    cutoff = utc_now() - stale_after
     async with factory() as session, session.begin():
         result = await session.execute(
             update(Run)
             .where(Run.status == "running", Run.started_at < cutoff)
-            .values(status="failed", error=WORKER_LOST, finished_at=_now())
+            .values(status="failed", error=WORKER_LOST, finished_at=utc_now())
         )
         await session.execute(
             delete(Upload).where(

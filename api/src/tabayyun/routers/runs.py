@@ -1,24 +1,28 @@
-"""Runs API (spec 002): create a run from an upload, read one, list them.
+"""Runs API (spec 002): create a run from an upload or a dataset, read one, list them.
 
-`POST /api/runs` validates the form exactly like `/api/checks/run`, stores the raw bytes and
-answers 202 at once; the checks run in the worker (or inline with `TABAYYUN_INLINE_JOBS`).
+`POST /api/runs` takes either a multipart upload, validated exactly like `/api/checks/run`
+(the raw bytes are stored), or JSON `{"dataset_id", "now"?}` for a dataset run over cached
+data (spec 008). It answers 202 at once; the checks run in the worker (or inline with
+`TABAYYUN_INLINE_JOBS`).
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tabayyun import core
 from tabayyun.db import get_session
+from tabayyun.services import dataset_runs
 from tabayyun.services import runs as runs_service
 from tabayyun.services import series as series_service
 from tabayyun.services.runs import MAX_UPLOAD_BYTES, RunParams, UploadError
+from tabayyun.services.timeconv import ns_to_datetime, parse_time
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -35,6 +39,7 @@ class RunOut(BaseModel):
     """The `Run` response of spec 002."""
 
     id: str
+    dataset_id: str | None
     trigger: str
     status: str
     window: dict[str, int] | None
@@ -55,12 +60,62 @@ class RunList(BaseModel):
     next_cursor: str | None
 
 
+class DatasetRunCreate(BaseModel):
+    """JSON body of `POST /api/runs` for a dataset run; `now` is RFC 3339 or epoch ns."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dataset_id: uuid.UUID
+    now: str | int | None = None
+
+
+async def _create_dataset_run(
+    request: Request, background: BackgroundTasks, session: AsyncSession
+) -> RunCreated:
+    """Queue a run of a dataset over its window resolved at `now` (default: the current time)."""
+    try:
+        body = DatasetRunCreate.model_validate(await request.json())
+    except ValueError as exc:  # malformed JSON or a body that does not fit the model
+        detail = exc.errors() if isinstance(exc, ValidationError) else "body is not valid JSON"
+        raise HTTPException(status_code=422, detail=detail) from exc
+    try:
+        now = (
+            datetime.now(UTC)
+            if body.now is None
+            else ns_to_datetime(body.now)
+            if isinstance(body.now, int)
+            else parse_time(body.now)
+        )
+    except (ValueError, OverflowError) as exc:
+        raise HTTPException(
+            status_code=422, detail=[{"loc": ["body", "now"], "msg": str(exc), "type": "value_error"}]
+        ) from exc
+    try:
+        run = await dataset_runs.create_dataset_run(session, body.dataset_id, now=now)
+    except dataset_runs.DatasetNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="dataset not found") from exc
+    if request.app.state.settings.inline_jobs:
+        await session.commit()
+        background.add_task(
+            dataset_runs.execute_dataset_run,
+            request.app.state.session_factory,
+            run.id,
+            request.app.state.run_cache,
+        )
+    else:
+        await runs_service.enqueue_run(session, run.id)
+    return RunCreated(id=str(run.id), status=run.status, created_at=run.created_at)
+
+
 @router.post("", status_code=202, response_model=RunCreated)
 async def create_run(
     request: Request,
     background: BackgroundTasks,
     session: Annotated[AsyncSession, Depends(get_session)],
-    file: Annotated[UploadFile, File(description="CSV with a timestamp column and a value column")],
+    file: Annotated[
+        UploadFile | None,
+        File(description="CSV with a timestamp column and a value column (multipart uploads)"),
+    ] = None,
     series_id: Annotated[str, Form(min_length=1, max_length=256)] = "uploaded",
     unit: Annotated[str | None, Form(max_length=32)] = None,
     ts_col: Annotated[str, Form(max_length=128)] = "ts",
@@ -72,7 +127,13 @@ async def create_run(
     now_ns: Annotated[int | None, Form()] = None,
     ts_unit: Annotated[core.TsUnit, Form(description="Unit of epoch integer timestamps")] = "auto",
 ) -> RunCreated:
-    """Store the upload, create a queued run and enqueue it; 202 with the run id."""
+    """Store the upload (or, with a JSON body, the dataset run), queue the run; 202 with its id."""
+    if request.headers.get("content-type", "").split(";")[0].strip() == "application/json":
+        return await _create_dataset_run(request, background, session)
+    if file is None:
+        raise HTTPException(
+            status_code=422, detail=[{"loc": ["body", "file"], "msg": "Field required", "type": "missing"}]
+        )
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     params = RunParams(
         series_id=series_id,
