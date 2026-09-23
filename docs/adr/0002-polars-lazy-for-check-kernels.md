@@ -1,6 +1,6 @@
 # ADR-0002: Checks are Polars lazy plans, Arrow kernels only when necessary
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0015 (2026-09-23)
 - **Date:** 2026-09-21
 
 ## Context

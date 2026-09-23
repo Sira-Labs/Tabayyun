@@ -23,7 +23,7 @@ Decisions are recorded in `docs/adr/`. This document is the map. Research backin
 │   plugin host: Python checks in sandboxed worker pool (cgroups, no network)          │
 │                                                                                     │
 │   tabayyun_core  (Rust, PyO3 wheel, zero-copy Arrow)                                 │
-│     Polars lazy/streaming engine · check kernels · profiling · scoring ·             │
+│     check kernels over Arrow buffers (ADR-0015) · profiling · scoring ·              │
 │     downsampling (M4/MinMaxLTTB) · Parquet cache reader/writer · DataFusion SQL      │
 └───────────┬───────────────────────────────┬─────────────────────────────────────────┘
             │                               │
@@ -51,7 +51,7 @@ Decisions are recorded in `docs/adr/`. This document is the map. Research backin
 | `score` | Dimension and overall scores from findings; versioned by `method_version`. |
 | `repair` | Repair operations over `SeriesFrame`s: drop/mask, clamp, linear and seasonal interpolation, like-day estimation, Kalman smoothing, resample/align, offset/scale correction; each returns the new values plus a lineage frame. |
 | `downsample` | M4 and MinMaxLTTB for chart endpoints. |
-| `cache` | Parquet cache layout, writer (append-only, sorted row groups, zstd), reader (predicate push-down by tag and time). |
+| `cache` | Parquet cache on local disk or S3-compatible storage through `object_store`: layout, writer (append-only, sorted row groups, zstd), reader (pruning by series and time). Spec 006. |
 | `sql` | DataFusion session over the cache for explorer queries and SQL checks; read-only, statement timeout, row limit. |
 | `py` | PyO3 bindings. Accepts and returns Arrow C stream capsules; releases the GIL for compute; converts Rust errors into typed Python exceptions. |
 | `cli` | `tabayyun-core` binary for offline batch runs and benchmarks (no Python needed). |
@@ -97,7 +97,8 @@ in the IdP; enterprise SSO is a per-organisation OIDC/SAML connection.
 3. Connector writes new observations to the cache (append-only, idempotent by
    `(series, ts)`), and records coverage.
 4. Worker calls `core.run_checks(series_batches, configs, baselines)`; Rust runs each check
-   as a Polars lazy plan across series in parallel and returns findings and metrics as Arrow.
+   as a kernel over each series (cross-series checks over each series group) and returns
+   findings and metrics as Arrow (ADR-0015).
 5. Python persists findings (deduplicating against open findings with overlapping windows),
    metrics (hypertable), and updated scores.
 6. Alert rules are evaluated on the new findings; notifications are enqueued.
@@ -135,7 +136,7 @@ in the IdP; enterprise SSO is a per-organisation OIDC/SAML connection.
 
 | Shape | Contents | Use |
 |---|---|---|
-| `docker compose` bundle | api, worker(s), frontend (static in Caddy), Postgres+Timescale, Keycloak, optional MinIO | default, air-gapped tarball |
+| `docker compose` bundle | api, worker(s), frontend (static in Caddy), Postgres+Timescale, Keycloak, optional S3-compatible store (any; the dev bundle uses SeaweedFS since MinIO community builds ended in 2025) | default, air-gapped tarball |
 | Helm chart | same, with HPA for workers | Kubernetes customers |
 | `tabayyun-core` CLI | Rust binary | offline profiling, CI checks, benchmarks, edge pre-checks |
 
