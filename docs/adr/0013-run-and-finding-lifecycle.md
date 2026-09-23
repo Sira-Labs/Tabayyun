@@ -84,3 +84,7 @@ into the whole-window finding and lose them.
   candidate must also have the same `group_id`, in addition to the rules above. Two groups
   sharing a series (a meter that is part of a redundant triple and of a balance) then keep
   separate findings on that series, although their evidence shapes are equal.
+- **2026-09-23, spec 009 (pair checks).** A pair check (`tby.correlation_break`) reports each
+  pair of a group on the pair's first member and names the other in `partner`. When the
+  incoming finding has a `partner`, a candidate must also have the same `partner`, so the pairs
+  (a, b) and (a, c) of one group keep separate findings on a.
