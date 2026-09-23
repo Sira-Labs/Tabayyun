@@ -58,3 +58,24 @@ def test_latency_with_ingest_column():
 def test_bad_input_raises():
     with pytest.raises(ValueError):
         tc.run_checks(pa.table({"a": [1, 2]}), {"id": "x"})
+
+
+def test_cache_round_trip_pyarrow(tmp_path):
+    cache = tc.Cache({"url": str(tmp_path / "cache")})
+    batch = tc.synth(n=24 * 60)  # one day of minutes
+    report = cache.write("raw", "src", batch, {"id": "series-1"}, quality_col="quality")
+    assert report["rows"] == 24 * 60 and len(report["files"]) >= 1
+    ts = batch.column("ts")
+    start, end = ts[60].value, ts[120].value
+    got = cache.read("raw", "src", ["series-1", "missing"], start, end)
+    assert list(got) == ["series-1", "missing"]
+    part = got["series-1"]
+    assert isinstance(part, pa.RecordBatch) and part.num_rows == 60
+    assert part.column("ts")[0].value == start
+    assert part.column("value").to_pylist() == batch.column("value").slice(60, 60).to_pylist()
+    assert got["missing"].num_rows == 0
+
+
+def test_cache_rejects_unknown_scheme(tmp_path):
+    with pytest.raises(ValueError, match="unsupported"):
+        tc.Cache({"url": "gs://bucket"})
