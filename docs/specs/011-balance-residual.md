@@ -116,9 +116,10 @@ Recorded on 2026-09-23; both rule changes were approved with the plan, after a s
 - The run/episode building, the summary number format and the member display name moved from
   spec 010's check to `cross.rs` and are shared (behaviour unchanged).
 - Metrics carry the group (`residual_mean:<group_id>`, `loss_share_mean:<group_id>`), as in
-  spec 010, and sit on the first input. A `uncertainty` map naming a non-member, negative or
-  non-finite uncertainties, `loss_min` ≥ `loss_max`, a non-positive `k` and a zero `grid` are
-  `InvalidParams`.
+  spec 010, and sit on the first input. An `uncertainty` map in a group's params naming a
+  non-member, negative or non-finite uncertainties, `loss_min` ≥ `loss_max`, a non-positive `k`
+  and a zero `grid` are `InvalidParams`. A check-level map serves every balance group, so its
+  entries for other groups' series are ignored (an error there would stop the dataset run).
 
 ## Out of scope
 

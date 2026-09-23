@@ -114,14 +114,18 @@ fn round3(x: f64) -> f64 {
 }
 
 impl BalanceResidual {
-    /// Per-member relative uncertainty in declaration order, after validation.
+    /// Per-member relative uncertainty in declaration order, after validation. A map from the
+    /// group's own params must name members only; a check-level map serves every balance
+    /// group, so its entries for other groups' series are ignored here.
     fn member_uncertainty(&self, group: &SeriesGroup) -> std::result::Result<Vec<f64>, String> {
         let valid = |u: f64| u.is_finite() && u >= 0.0;
+        let from_group = group.params.get("uncertainty").is_some();
         match &self.uncertainty {
             Uncertainty::All(u) if valid(*u) => Ok(vec![*u; group.members.len()]),
             Uncertainty::All(_) => Err("uncertainty must be a non-negative number".into()),
             Uncertainty::PerMember(map) => {
-                if let Some(id) = map.keys().find(|id| !group.member_ids().any(|m| m == id.as_str())) {
+                let stranger = map.keys().find(|id| !group.member_ids().any(|m| m == id.as_str()));
+                if let (true, Some(id)) = (from_group, stranger) {
                     return Err(format!("uncertainty names {id}, which is not a member"));
                 }
                 if map.values().any(|u| !valid(*u)) {
@@ -566,6 +570,31 @@ mod tests {
         assert_eq!(run(&[&i], &[&o], serde_json::Value::Null).findings.len(), 1);
         let out = run(&[&i], &[&o], serde_json::json!({"uncertainty": {"out": 0.05}}));
         assert!(out.findings.is_empty(), "{:?}", out.findings);
+    }
+
+    #[test]
+    fn check_level_uncertainty_map_serves_every_group() {
+        // One map in the check config for two balances: entries for the other balance's series
+        // are ignored, not an error that would stop the whole dataset run.
+        let i = meter("in", 1, 100.0, |_| 1.0);
+        let o = meter("out", 2, 90.0, |_| 1.0);
+        let frames = [&i, &o];
+        let ctx = CheckContext::from_frame(&i);
+        let check = BalanceResidual {
+            uncertainty: Uncertainty::PerMember(BTreeMap::from([
+                ("out".to_string(), 0.05),
+                ("other-in".to_string(), 0.002),
+            ])),
+            ..BalanceResidual::default()
+        };
+        let out = check.run(&frames, &group(&[&i], &[&o], serde_json::Value::Null), &ctx).unwrap();
+        assert!(out.findings.is_empty(), "{:?}", out.findings);
+        // Invalid values in a check-level map are still rejected.
+        let bad = BalanceResidual {
+            uncertainty: Uncertainty::PerMember(BTreeMap::from([("other-in".to_string(), -1.0)])),
+            ..BalanceResidual::default()
+        };
+        assert!(bad.run(&frames, &group(&[&i], &[&o], serde_json::Value::Null), &ctx).is_err());
     }
 
     #[test]
