@@ -55,9 +55,13 @@ Entry points (links that build the URL):
   - Response:
     ```
     {bins: {from, to, width_px},
-     series: [{id, name, unit, physical_min, physical_max, ts: [..], values: [..], n_raw}]}
+     series: [{id, name, unit, physical_min, physical_max, ts: [..], values: [..], n_raw,
+               stats: {min, max, mean, sd, first: {ts, value}} | null}]}
     ```
   - `ts` values are ns strings. `n_raw` is the number of raw points in the window.
+  - `stats` is computed on the raw, usable (good or uncertain quality), finite samples in
+    `[from, to)`, before downsampling. `sd` is the population standard deviation. `first` is
+    the earliest such sample. `stats` is null when the window holds none.
   - It reuses S9-5's M4 kernel and cache reads, one call instead of eight.
 - `GET /api/series-groups/{id}/residual?from=&to=&width_px=`
   - For a `balance` group, or any group with exactly two members.
@@ -97,12 +101,21 @@ grid bin, plus Σin per bin for the band. It is pure, and uses the same `align` 
    - `overlay` forces one plot. `lanes` forces one lane per series.
 3. **Normalisation.** Any `norm` other than `raw` puts every series on one dimensionless axis
    labelled with the mode.
-   - `range`: (x − min) / (max − min). Min and max are the physical limits when both are
-     known, otherwise the visible window's.
-   - `z`: (x − mean) / sd over the visible window. The page states that the window defines it.
-   - `index`: 100 × x / x₀, where x₀ is the first finite value in the window. The mode is
-     unavailable, with the reason shown, for a series whose x₀ is 0 or whose sign changes in
-     the window.
+   - The client applies the mode to the downsampled points using the raw-window `stats` of
+     the chart response.
+   - Every mode is a positive affine map (a·x + b with a > 0), so normalising the M4 points
+     gives the same picture as M4 of the normalised raw samples.
+   - Normalised values therefore do not depend on the chart width, and a zoom recomputes them
+     from the new window's `stats`.
+   - `range`: (x − lo) / (hi − lo). `lo` and `hi` are the physical limits when both are known,
+     otherwise `stats.min` and `stats.max`. The mode is unavailable, with the reason shown,
+     when hi = lo.
+   - `z`: (x − `stats.mean`) / `stats.sd`. The page states that the visible window defines it.
+     The mode is unavailable when sd = 0.
+   - `index`: 100 × x / x₀, where x₀ = `stats.first.value`, the earliest usable raw sample in
+     the window. The mode is unavailable when x₀ ≤ 0 or `stats.min` < 0 < `stats.max`: the
+     series' sign changes, and a negative x₀ would flip the axis.
+   - A series whose `stats` is null keeps its "no data" legend entry in every mode.
    - The cursor readout always shows raw values with their units.
 4. **Downsampling.** One `compare/chart` call returns M4 points per series on identical bins.
    - The client outer-joins them (`uPlot.join`).
@@ -157,8 +170,10 @@ grid bin, plus Σin per bin for the band. It is pure, and uses the same `align` 
 - [ ] Opening a `tby.correlation_break` finding shows the pair.
 - [ ] Three units give stacked lanes that share cursor and zoom; two units give two axes on one
       plot.
-- [ ] `range`, `z` and `index` normalise as specified; `index` is refused with a reason for a
-      series starting at 0; the readout keeps raw values and units.
+- [ ] `range`, `z` and `index` normalise as specified, from the raw-window `stats` rather than
+      from the downsampled points. The result is identical at two chart widths. `index` is
+      refused with a reason for a series starting at 0 or changing sign. The readout keeps raw
+      values and units.
 - [ ] Every series colour reaches 3:1 against the light and dark chart backgrounds (unit test
       over the palette).
 - [ ] Series 5–8 are dashed.
@@ -175,13 +190,16 @@ grid bin, plus Σin per bin for the band. It is pure, and uses the same `align` 
   - `missing_member_reported`.
 - **API** (`api/tests/db/test_compare_api.py`):
   - `chart_bins_identical_for_all_series`;
+  - `chart_stats_from_raw_window` (mean, sd, min, max and first from raw usable samples,
+    independent of `width_px`);
   - `chart_rejects_count_and_unknown_ids`;
   - `residual_balance_band_and_episode`;
   - `residual_pair_no_band`;
   - `residual_missing_member`.
 - **Web** (Vitest, `web/src/__tests__/compare.*.test.ts`):
   - `axis_groups_by_unit` (1, 2 and 3 units);
-  - `normalise_modes` (range with and without limits, z, index refusal);
+  - `normalise_modes` (range with and without limits, z, index refusal on x₀ ≤ 0 and on a
+    sign change, sd = 0 and hi = lo refusals, identical output at two widths);
   - `palette_contrast_light_dark`;
   - `url_state_round_trip`;
   - `finding_selection_marks_suspect`;
