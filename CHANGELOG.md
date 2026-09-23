@@ -20,6 +20,9 @@ All notable changes to this project are documented here. The format follows
 - Series and sources API (`GET /api/sources`, `GET/PATCH /api/series`) with stored metadata
   applied to later uploads; `ts_unit` for epoch-integer timestamps with a plausibility check
   (ADR-0014).
+- Web app on persisted runs: runs list, upload form with physical limits and timestamp unit,
+  and a run report that polls until done, with score tiles, findings with evidence, skipped
+  checks and series metadata.
 - Release pipeline publishing `tabayyun-api` and `tabayyun-web` images to GHCR with SBOM and
   provenance; production compose bundle with Caddy.
 - Apache-2.0 licence (ADR-0012), contribution guide, security policy, code of conduct, issue
