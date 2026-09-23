@@ -122,8 +122,8 @@ and scores in Postgres; a worker executes it.
 | S6-6 | Docs: ADR-0013 run and finding lifecycle (statuses open/acked/resolved/muted, dedup rule) | S | ADR merged |
 
 Result: all six stories done as specs 001–005 (PRs #25–#29), with ADR-0013 and, from the
-live end-to-end check, ADR-0014 (epoch timestamp units). Spec 005's deployed round trip is
-checked after PR #29 merges.
+live end-to-end check, ADR-0014 (epoch timestamp units). Every spec was verified against the
+deployed stack after its merge; spec 005's round trip ran through the live web app.
 
 ## Sprint 7 — Parquet cache and cross-series checks
 
