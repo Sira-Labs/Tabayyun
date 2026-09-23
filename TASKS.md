@@ -130,7 +130,7 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
         `cargo audit`), independent of parquet's version.
       - Done 2026-09-23: CI runs the S3 tests against RustFS; a live two-month upload wrote
         2 objects and its coverage row.
-- [~] **008 Multi-series checks, series groups and dataset runs** — `docs/specs/008-multi-series-and-datasets.md` (S7-3, S7-8)
+- [x] **008 Multi-series checks, series groups and dataset runs** — `docs/specs/008-multi-series-and-datasets.md` (S7-3, S7-8)
       - `run_multi` takes each series' profile so a dataset run finds what an upload of the
         same data finds (the checks' adaptive thresholds depend on it).
       - Cross checks are injected (`run_multi_with`); the built-in list stays empty until
@@ -138,8 +138,7 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
       - Groups with a member outside the dataset are reported in `groups_skipped`, not dropped.
       - `POST /api/runs` JSON answers with the upload's `{id, status, created_at}` shape.
       - Cross-series findings merge only within their group (ADR-0013 amendment).
-      - Live dataset run verified after PR #32 (group run, data read from RustFS); stays `[~]`
-        until the live criterion's cross-series findings, which need 009–010.
+      - Live dataset run verified after PR #32; the cross-series finding after PR #33 (009).
 - [x] **009 `tby.correlation_break`** — `docs/specs/009-correlation-break.md` (S7-4)
       - Pair findings attach to the pair's first member with `partner`; metrics carry the
         partner in their name; dedup also matches `partner` (ADR-0013 amendment).

@@ -140,13 +140,13 @@ POST   /api/runs            JSON {dataset_id, now?}  → 202 {run_id, status: "q
 - [x] Group and dataset routes pass their validation tests (every 422 and 409 path above).
 - [x] A dataset run over two cached uploads produces per-series scores and findings, with
       `stats.missing` and `groups_skipped` filled correctly; rerunning does not double findings.
-- [ ] On the live system: two uploaded series, a group and a dataset produce a dataset run
+- [x] On the live system: two uploaded series, a group and a dataset produce a dataset run
       with cross-series findings (after specs 009–010 land). (Plumbing verified 2026-09-23
       after PR #32, release run 32, schema 0003: `live-008-a` and `live-008-b`, a redundant
       group and a three-day dataset gave a dataset run on the CapRover worker that read both
       series from RustFS and succeeded with the group in `stats.groups`, nothing skipped and
-      only the hour after the data in `stats.missing`; no findings on the clean data. The
-      cross-series findings wait for 009–010.)
+      only the hour after the data in `stats.missing`; no findings on the clean data. Cross-series
+      finding verified 2026-09-23 after PR #33, release run 33: see spec 009, "Live check".)
 
 ## Test cases
 
