@@ -13,6 +13,7 @@ use crate::checks::{CheckContext, CheckOutput};
 use crate::error::{Error, Result};
 use crate::finding::{Dimension, Severity};
 use crate::frame::SeriesFrame;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -111,6 +112,26 @@ impl SeriesGroup {
         m.insert("members".into(), self.member_ids().collect::<Vec<_>>().into());
         m
     }
+}
+
+/// A cross check's params with the group's `params` on top, key by key. Keys the check does
+/// not know (another check's params) are ignored; a value of the wrong type is
+/// `InvalidParams` naming the group.
+pub fn with_group_params<T: Serialize + DeserializeOwned>(
+    check: &T,
+    id: &str,
+    group: &SeriesGroup,
+) -> Result<T> {
+    let mut merged = serde_json::to_value(check)?;
+    if let (Some(base), Some(over)) = (merged.as_object_mut(), group.params.as_object()) {
+        for (k, v) in over {
+            if base.contains_key(k) {
+                base.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    serde_json::from_value(merged)
+        .map_err(|e| Error::InvalidParams { check: id.into(), reason: format!("group {}: {e}", group.id) })
 }
 
 /// A group the registry did not run, and why (feeds `stats.groups_skipped`).
