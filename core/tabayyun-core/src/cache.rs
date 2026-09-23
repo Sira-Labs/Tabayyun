@@ -101,6 +101,24 @@ fn cache_err(context: &str, e: impl std::fmt::Display) -> Error {
     Error::Cache(format!("{context}: {e}"))
 }
 
+/// A store error as one readable line: what failed, a hint for the common causes, and the
+/// innermost cause (object_store's own message nests it behind the request URL).
+fn store_err(context: &str, e: object_store::Error) -> Error {
+    use object_store::Error as E;
+    let hint = match &e {
+        E::PermissionDenied { .. } | E::Unauthenticated { .. } => {
+            "access denied (check the key and its bucket policy)"
+        }
+        E::NotFound { .. } => "not found (does the bucket exist?)",
+        _ => "store request failed",
+    };
+    let mut root: &dyn std::error::Error = &e;
+    while let Some(next) = root.source() {
+        root = next;
+    }
+    Error::Cache(format!("{context}: {hint}: {root}"))
+}
+
 fn invalid(field: &str, reason: impl Into<String>) -> Error {
     Error::InvalidParams { check: format!("cache.{field}"), reason: reason.into() }
 }
@@ -212,7 +230,7 @@ impl Cache {
                 store
                     .put(&Path::from(key.as_str()), PutPayload::from_bytes(body))
                     .await
-                    .map_err(|e| cache_err(&format!("put {key}"), e))?;
+                    .map_err(|e| store_err(&format!("put {key}"), e))?;
             }
             Ok::<_, Error>(())
         })?;
@@ -273,7 +291,7 @@ impl Cache {
                     .list(Some(&Path::from(prefix.as_str())))
                     .try_collect()
                     .await
-                    .map_err(|e| cache_err(&format!("list {prefix}"), e))?;
+                    .map_err(|e| store_err(&format!("list {prefix}"), e))?;
                 keys.extend(
                     listed.into_iter().map(|m| m.location.to_string()).filter(|k| k.ends_with(".parquet")),
                 );
@@ -285,10 +303,10 @@ impl Cache {
                         let body = store
                             .get(&Path::from(key.as_str()))
                             .await
-                            .map_err(|e| cache_err(&format!("get {key}"), e))?
+                            .map_err(|e| store_err(&format!("get {key}"), e))?
                             .bytes()
                             .await
-                            .map_err(|e| cache_err(&format!("get {key}"), e))?;
+                            .map_err(|e| store_err(&format!("get {key}"), e))?;
                         Ok::<_, Error>((key, body))
                     }
                 })
