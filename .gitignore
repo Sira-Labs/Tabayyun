@@ -44,3 +44,6 @@ data/raw/
 data/cache/
 *.parquet
 !tests/fixtures/**/*.parquet
+
+# Built by maturin (develop/build); never committed.
+core/tabayyun-py/python/tabayyun_core/*.so

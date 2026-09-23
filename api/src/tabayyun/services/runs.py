@@ -6,7 +6,9 @@ request's background task). The worker moves the run to `running`, executes the 
 persists the outcome in one transaction; any exception marks the run `failed` with a
 one-line message. The completion transaction persists the score row, the run statistics
 and, through `services.findings`, the metrics and deduplicated findings (spec 003); series
-metadata follows the precedence of `services.series` (spec 004).
+metadata follows the precedence of `services.series` (spec 004). After the run succeeded,
+the upload is written to the Parquet cache and its coverage recorded (spec 006); a cache
+failure is reported in `stats.cache` and never fails the run.
 """
 
 from __future__ import annotations
@@ -26,8 +28,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from tabayyun import core
 from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Run, Score, Upload
 from tabayyun.jobs.names import RUN_CHECKS_TASK, RUNS_QUEUE
+from tabayyun.services import coverage as coverage_service
 from tabayyun.services import findings as findings_service
 from tabayyun.services import series as series_service
+from tabayyun.services.cache import CacheError, RunCache
 from tabayyun.services.pagination import decode_keyset, encode_keyset
 from tabayyun.services.timeconv import datetime_to_ns, ns_to_datetime, ns_to_datetime_ceil
 
@@ -239,8 +243,13 @@ async def _mark_failed(factory: async_sessionmaker[AsyncSession], run_id: uuid.U
     log.error("run.failed", run_id=str(run_id), error=message)
 
 
-async def execute_run(factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID) -> None:
-    """Execute one queued run to a terminal state. Never raises; failures land on the run."""
+async def execute_run(
+    factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID, cache: RunCache | None = None
+) -> None:
+    """Execute one queued run to a terminal state. Never raises; failures land on the run.
+
+    With a `cache`, a succeeded upload run is also written to the Parquet cache (spec 006).
+    """
     run_log = log.bind(run_id=str(run_id))
     async with factory() as session, session.begin():
         run = await session.get(Run, run_id)
@@ -324,6 +333,7 @@ async def execute_run(factory: async_sessionmaker[AsyncSession], run_id: uuid.UU
             series = await series_service.upsert_upload_series(
                 session, params.series_id, overrides, now=finished_at
             )
+            cache_target = (series.id, series.source_id)
             session.add(
                 Score(
                     series_id=series.id,
@@ -365,13 +375,78 @@ async def execute_run(factory: async_sessionmaker[AsyncSession], run_id: uuid.UU
         run_log.exception("run.persist_failed")
         await _mark_failed(factory, run_id, f"persist error: {_error_line(exc)}")
         return
+    cache_info = (
+        None
+        if cache is None
+        else await _cache_upload(
+            factory,
+            run_id,
+            cache,
+            series_id=cache_target[0],
+            source_id=cache_target[1],
+            table=table,
+            params=params,
+        )
+    )
     run_log.info(
         "run.finished",
         n_findings=len(report.findings),
         n_findings_new=outcome.new,
         n_findings_merged=outcome.merged,
         n_samples=report.n_samples,
+        cached=None if cache_info is None else cache_info["written"],
     )
+
+
+async def _cache_upload(
+    factory: async_sessionmaker[AsyncSession],
+    run_id: uuid.UUID,
+    cache: RunCache,
+    *,
+    series_id: uuid.UUID,
+    source_id: uuid.UUID,
+    table: Any,
+    params: RunParams,
+) -> dict[str, Any]:
+    """Write a succeeded upload to the Parquet cache, record coverage and `stats.cache`.
+
+    Runs after the completion transaction so no network I/O happens while the series lock is
+    held; the run is already `succeeded` and stays so whatever happens here.
+    """
+    run_log = log.bind(run_id=str(run_id))
+    written = None
+    try:
+        written = await asyncio.to_thread(
+            cache.write_series,
+            source_id=str(source_id),
+            series_id=str(series_id),
+            table=table,
+            ts_col=params.ts_col,
+            value_col=params.value_col,
+            quality_col=params.quality_col or None,
+            ingest_col=params.ingest_col or None,
+        )
+        info: dict[str, Any] = {"written": True, "rows": written.rows, "files": written.files}
+    except CacheError as exc:
+        run_log.warning("cache.write_failed", error=str(exc))
+        info = {"written": False, "error": str(exc)}
+    try:
+        async with factory() as session, session.begin():
+            if written is not None and written.rows:
+                await coverage_service.record(
+                    session,
+                    series_id=series_id,
+                    start_ns=written.start_ns,
+                    end_ns=written.end_ns,
+                    rows=written.rows,
+                    now=_now(),
+                )
+            run = await session.get(Run, run_id, with_for_update=True)
+            if run is not None:
+                run.stats = {**(run.stats or {}), "cache": info}
+    except SQLAlchemyError:
+        run_log.exception("cache.record_failed")
+    return info
 
 
 # Maintenance and health

@@ -6,12 +6,15 @@
 //! - A [`Check`] is pure: it receives a frame plus a [`CheckContext`] and returns
 //!   [`Finding`]s with machine-readable evidence and optional metrics. No I/O.
 //! - [`score`] turns findings into per-dimension and overall scores.
+//! - [`cache`] stores raw observations as Parquet on local disk or S3 (spec 006); it is the
+//!   only module that does I/O.
 //! - [`synth`] generates deterministic synthetic series with injected faults for tests,
 //!   benchmarks and demos.
 //!
 //! Sprint-1 checks are sequential kernels over plain buffers. Polars lazy plans arrive with
 //! the baseline-profile checks (ADR-0002 allows kernels where a plan adds nothing).
 
+pub mod cache;
 pub mod checks;
 pub mod downsample;
 pub mod error;

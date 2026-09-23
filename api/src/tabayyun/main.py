@@ -16,6 +16,7 @@ from tabayyun import __version__
 from tabayyun.db import DB_OK, check_db, guard_schema, make_engine, make_session_factory
 from tabayyun.routers import checks, findings, runs, series, sources
 from tabayyun.services import runs as runs_service
+from tabayyun.services.cache import RunCache
 from tabayyun.settings import Settings, get_settings
 
 log = structlog.get_logger()
@@ -50,6 +51,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
+    # Inline jobs write the Parquet cache from the API process (spec 006); opened on first use.
+    app.state.run_cache = RunCache.from_settings(settings)
     app.state.schema_revision = None
 
     app.include_router(checks.router)

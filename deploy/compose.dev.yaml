@@ -1,4 +1,4 @@
-# Development infrastructure only: Postgres with TimescaleDB and Keycloak.
+# Development infrastructure only: Postgres with TimescaleDB, Keycloak and RustFS (S3).
 # The API and web run on the host (make api-dev / make web-dev). Production bundles add
 # api, worker and caddy services; see docs/architecture/03-system-architecture.md.
 services:
@@ -25,5 +25,17 @@ services:
       KC_DB: dev-file
     ports: ["8080:8080"]
 
+  # S3-compatible store for the Parquet cache (spec 006), same version as the live system.
+  # Create the bucket once: `make dev-bucket`. Dev credentials only.
+  rustfs:
+    image: rustfs/rustfs:1.0.0
+    environment:
+      RUSTFS_ACCESS_KEY: tabayyun-dev
+      RUSTFS_SECRET_KEY: tabayyun-dev-secret   # dev only
+    # Localhost only: the credentials below are committed dev values.
+    ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
+    volumes: ["rustfsdata:/data"]
+
 volumes:
   pgdata:
+  rustfsdata:

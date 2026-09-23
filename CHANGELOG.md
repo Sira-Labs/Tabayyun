@@ -23,9 +23,16 @@ All notable changes to this project are documented here. The format follows
 - Web app on persisted runs: runs list, upload form with physical limits and timestamp unit,
   and a run report that polls until done, with score tiles, findings with evidence, skipped
   checks and series metadata.
+- Parquet cache of raw observations on local disk or S3-compatible storage (RustFS): upload
+  runs write their series and record coverage; `tabayyun_core.Cache` and
+  `tabayyun cache write|read|bench` (spec 006).
 - Release pipeline publishing `tabayyun-api` and `tabayyun-web` images to GHCR with SBOM and
   provenance; production compose bundle with Caddy.
 - Apache-2.0 licence (ADR-0012), contribution guide, security policy, code of conduct, issue
   and pull request templates, Dependabot, CODEOWNERS and the `main` branch ruleset.
+
+### Changed
+- `TABAYYUN_CACHE_DIR` is now `TABAYYUN_CACHE_URL` (the old name is still accepted).
+- Checks are Rust kernels without Polars in the core (ADR-0015 supersedes ADR-0002).
 
 [Unreleased]: https://github.com/thedatadudech/Tabayyun/commits/main

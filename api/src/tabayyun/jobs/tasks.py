@@ -16,7 +16,7 @@ log = structlog.get_logger()
 @app.task(queue=RUNS_QUEUE, name=RUN_CHECKS_TASK, retry=False)
 async def run_checks_job(run_id: str) -> None:
     """Execute one queued run; a failure is recorded on the run, never retried."""
-    await runs_service.execute_run(runtime.session_factory(), uuid.UUID(run_id))
+    await runs_service.execute_run(runtime.session_factory(), uuid.UUID(run_id), runtime.run_cache())
 
 
 @app.periodic(cron="*/10 * * * *")

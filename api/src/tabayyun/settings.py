@@ -5,7 +5,7 @@ file; nothing here has a real default for a secret (see docs/frontend/02-securit
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,7 +34,19 @@ class Settings(BaseSettings):
         default=None,
         description="When set, pytest runs the database tests against this URL; otherwise they skip.",
     )
-    cache_dir: str = Field(default="./data/cache", description="Parquet cache root (raw + corrected layers).")
+    cache_url: str = Field(
+        default="./data/cache",
+        # TABAYYUN_CACHE_DIR is the pre-spec-006 name, still set by older deployments.
+        validation_alias=AliasChoices("TABAYYUN_CACHE_URL", "TABAYYUN_CACHE_DIR", "cache_url"),
+        description="Parquet cache root: a local path, file:// or s3://bucket[/prefix] (spec 006).",
+    )
+    s3_endpoint: str | None = Field(default=None, description="S3 endpoint URL; unset means AWS.")
+    s3_region: str = "us-east-1"
+    s3_access_key_id: str | None = None
+    s3_secret_access_key: SecretStr | None = None
+    s3_allow_http: bool = Field(
+        default=False, description="Allow a plain-http S3 endpoint (internal network only)."
+    )
     oidc_issuer: str | None = Field(default=None, description="OIDC issuer URL of the identity provider.")
     oidc_client_id: str | None = None
     oidc_client_secret: SecretStr | None = None
@@ -55,6 +67,10 @@ class Settings(BaseSettings):
             problems.append("TABAYYUN_DATABASE_URL")
         if self.oidc_client_secret and _is_placeholder(self.oidc_client_secret.get_secret_value()):
             problems.append("TABAYYUN_OIDC_CLIENT_SECRET")
+        if self.s3_secret_access_key and _is_placeholder(self.s3_secret_access_key.get_secret_value()):
+            problems.append("TABAYYUN_S3_SECRET_ACCESS_KEY")
+        if self.cache_url.startswith("s3://") and not (self.s3_access_key_id and self.s3_secret_access_key):
+            problems.append("TABAYYUN_S3_ACCESS_KEY_ID/TABAYYUN_S3_SECRET_ACCESS_KEY")
         if problems:
             raise RuntimeError(f"refusing to start in prod: missing or placeholder settings {problems}")
 

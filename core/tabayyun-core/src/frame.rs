@@ -256,19 +256,26 @@ impl SeriesFrame {
         }
     }
 
-    /// Standard three-column batch: `ts: Timestamp(ns, UTC)`, `value: Float64`, `quality: UInt8`.
+    /// Standard batch: `ts: Timestamp(ns, UTC)`, `value: Float64`, `quality: UInt8`, plus
+    /// `ingest_ts: Timestamp(ns, UTC)` when the frame carries ingest times.
     pub fn to_record_batch(&self) -> Result<RecordBatch> {
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("ts", DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into())), false),
+        let ts_type = DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into()));
+        let mut fields = vec![
+            Field::new("ts", ts_type.clone(), false),
             Field::new("value", DataType::Float64, true),
             Field::new("quality", DataType::UInt8, false),
-        ]));
+        ];
         let ts = TimestampNanosecondArray::from(self.ts.clone()).with_timezone("UTC");
         let values = Float64Array::from(
             self.values.iter().map(|v| if v.is_nan() { None } else { Some(*v) }).collect::<Vec<_>>(),
         );
         let quality = UInt8Array::from(self.quality.iter().map(|q| q.as_u8()).collect::<Vec<_>>());
-        Ok(RecordBatch::try_new(schema, vec![Arc::new(ts), Arc::new(values), Arc::new(quality)])?)
+        let mut columns: Vec<ArrayRef> = vec![Arc::new(ts), Arc::new(values), Arc::new(quality)];
+        if let Some(ingest) = &self.ingest_ts {
+            fields.push(Field::new("ingest_ts", ts_type, false));
+            columns.push(Arc::new(TimestampNanosecondArray::from(ingest.clone()).with_timezone("UTC")));
+        }
+        Ok(RecordBatch::try_new(Arc::new(Schema::new(fields)), columns)?)
     }
 }
 

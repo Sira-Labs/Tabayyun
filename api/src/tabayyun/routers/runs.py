@@ -119,7 +119,9 @@ async def create_run(
         # Background tasks may run before the session dependency commits; commit here so the
         # inline worker sees the run. The dependency's exit then finds nothing left to commit.
         await session.commit()
-        background.add_task(runs_service.execute_run, request.app.state.session_factory, run.id)
+        background.add_task(
+            runs_service.execute_run, request.app.state.session_factory, run.id, request.app.state.run_cache
+        )
     else:
         await runs_service.enqueue_run(session, run.id)
     return RunCreated(id=str(run.id), status=run.status, created_at=run.created_at)

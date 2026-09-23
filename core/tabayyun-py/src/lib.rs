@@ -8,6 +8,7 @@ use arrow::compute::concat_batches;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3_arrow::{PyRecordBatch, PyRecordBatchReader};
+use tabayyun_core::cache::{Cache, StoreConfig};
 use tabayyun_core::downsample::m4;
 use tabayyun_core::synth::{generate, inject, Rng, SynthSpec};
 use tabayyun_core::{CheckConfig, CheckContext, Profile, Registry, Scorer, SeriesFrame, SeriesMeta, Window};
@@ -168,6 +169,67 @@ fn synth<'py>(
     PyRecordBatch::new(batch).into_pyarrow(py)
 }
 
+/// Parquet cache on local disk or S3 (spec 006). One instance per process is enough; it owns
+/// the store client and a small runtime, and every call releases the GIL.
+#[pyclass(name = "Cache", frozen)]
+struct PyCache {
+    inner: Cache,
+}
+
+#[pymethods]
+impl PyCache {
+    /// Open a store from a JSON `StoreConfig` (`url`, `s3_endpoint`, `s3_region`,
+    /// `s3_access_key_id`, `s3_secret_access_key`, `s3_allow_http`).
+    #[new]
+    fn new(py: Python<'_>, store_json: &str) -> PyResult<Self> {
+        let cfg: StoreConfig = serde_json::from_str(store_json).map_err(err)?;
+        let inner = py.detach(move || Cache::open(&cfg)).map_err(err)?;
+        Ok(PyCache { inner })
+    }
+
+    /// Write one series; returns the JSON `WriteReport` (files, rows, start_ns, end_ns).
+    #[pyo3(signature = (layer, source_id, data, meta_json, ts_col="ts", value_col="value", quality_col=None, ingest_col=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn write(
+        &self,
+        py: Python<'_>,
+        layer: &str,
+        source_id: &str,
+        data: &Bound<'_, PyAny>,
+        meta_json: &str,
+        ts_col: &str,
+        value_col: &str,
+        quality_col: Option<&str>,
+        ingest_col: Option<&str>,
+    ) -> PyResult<String> {
+        let frame = frame_from_py(data, meta_json, ts_col, value_col, quality_col, ingest_col)?;
+        let report = py.detach(|| self.inner.write(layer, source_id, &frame)).map_err(err)?;
+        serde_json::to_string(&report).map_err(err)
+    }
+
+    /// Read series over `[start_ns, end_ns)`; returns `(series_id, pyarrow.RecordBatch)` pairs in
+    /// request order (columns ts, value, quality and ingest_ts when every row has one).
+    fn read<'py>(
+        &self,
+        py: Python<'py>,
+        layer: &str,
+        source_id: &str,
+        series_ids: Vec<String>,
+        start_ns: i64,
+        end_ns: i64,
+    ) -> PyResult<Vec<(String, Bound<'py, PyAny>)>> {
+        let ids: Vec<&str> = series_ids.iter().map(String::as_str).collect();
+        let frames = py.detach(|| self.inner.read(layer, source_id, &ids, start_ns, end_ns)).map_err(err)?;
+        frames
+            .into_iter()
+            .map(|f| {
+                let batch = f.to_record_batch().map_err(err)?;
+                Ok((f.meta.id.clone(), PyRecordBatch::new(batch).into_pyarrow(py)?))
+            })
+            .collect()
+    }
+}
+
 #[pyfunction]
 fn builtin_checks() -> Vec<String> {
     Registry::builtin_ids().iter().map(|s| s.to_string()).collect()
@@ -180,6 +242,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(downsample_m4, m)?)?;
     m.add_function(wrap_pyfunction!(synth, m)?)?;
     m.add_function(wrap_pyfunction!(builtin_checks, m)?)?;
+    m.add_class::<PyCache>()?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

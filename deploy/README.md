@@ -64,8 +64,19 @@ zstd -d < tabayyun-images.tar.zst | docker load
 
 ## Local development
 
-`deploy/compose.dev.yaml` starts only Postgres+TimescaleDB and Keycloak; run the API and web
-on the host (`make db-upgrade` once, then `make api-dev`, `make web-dev`).
+`deploy/compose.dev.yaml` starts only Postgres+TimescaleDB, Keycloak and RustFS (S3 on
+`localhost:9000`); run the API and web on the host (`make db-upgrade` once, then
+`make api-dev`, `make web-dev`). The Parquet cache defaults to `./data/cache`; to use RustFS,
+run `make dev-bucket` once and set the S3 lines in `api/.env` (see `api/.env.example`).
+
+## Parquet cache
+
+Successful upload runs are written to the Parquet cache (spec 006), configured by
+`TABAYYUN_CACHE_URL`: a directory (the compose bundle mounts the `cache` volume at
+`/data/cache` for api and worker) or `s3://bucket[/prefix]` with `TABAYYUN_S3_ENDPOINT`,
+`TABAYYUN_S3_ACCESS_KEY_ID`, `TABAYYUN_S3_SECRET_ACCESS_KEY` and, for an internal plain-http
+endpoint, `TABAYYUN_S3_ALLOW_HTTP=true`. The cache holds only copies of source data and can
+be rebuilt; CapRover setup with RustFS is in `caprover.md` section 3a.
 
 ## Worker
 

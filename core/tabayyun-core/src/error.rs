@@ -14,6 +14,8 @@ pub enum Error {
     Arrow(#[from] arrow::error::ArrowError),
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("cache error: {0}")]
+    Cache(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
