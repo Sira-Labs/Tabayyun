@@ -51,7 +51,7 @@ API client (`web/src/api.ts`): `createRun(form)`, `getRun(id)`, `listRuns(cursor
 ## Acceptance criteria
 
 - [ ] Upload → report round trip works against the deployed API with a worker, and with
-      `INLINE_JOBS=true` locally. (Local half verified 2026-09-23 in Chromium: upload, report,
+      `TABAYYUN_INLINE_JOBS=true` locally. (Local half verified 2026-09-23 in Chromium: upload, report,
       reload, failed run, no console errors. The deployed half is checked after merge.)
 - [x] Reloading `/runs/:id` shows the same report from persisted data.
 - [x] A failed run shows its error text; the console shows no unhandled promise rejection.
@@ -77,8 +77,15 @@ Manual: the two browsers the project supports (Chromium, Safari) at 375 px and 1
 - "Link to the series" is a series panel (name, external id, unit, physical limits, open
   findings, runs) from `GET /api/series/{id}`: the series page arrives in sprint 9. The panel
   also shows that form limits reached the series metadata.
-- Score tiles come from the run's row in `GET /api/series/{id}/scores` (per dimension); the
-  run itself carries only the overall score.
+- Score tiles come from the run's row in `GET /api/series/{id}/scores?run_id=` (a new
+  optional filter on that endpoint, so the row is found however many runs followed); the run
+  itself carries only the overall score, used when the row is missing.
+- The report follows `next_cursor` over the findings list (up to 50 pages of 500), so a run
+  with more findings than one page shows them all.
+- Error bodies that are not JSON (a proxy's plain-text answer) are shown as text; HTML error
+  pages fall back to the status line.
+- The runs list hides Duration and Findings below 640 px; Status, Series, Started and Score
+  stay.
 - The form gains the epoch timestamp unit select (spec 004, ADR-0014).
 - The findings list is one `<ul>` whose rows are buttons laid out as a grid from 640 px and
   stacked below, instead of a table plus a separate card list; one DOM for both widths.
@@ -88,9 +95,9 @@ Manual: the two browsers the project supports (Chromium, Safari) at 375 px and 1
 - Lighthouse accessibility: 100 on `/runs/:id`, `/runs` and `/runs/new` (Chromium 1194,
   desktop). Screenshots are in `docs/assets/screenshots/`.
 - Vitest runs with `TZ=Asia/Riyadh` so the offset suffix is covered; jsdom ignores files set
-  by user-event for `required`, so the form tests submit the form directly. Extra suite
+  by user-event for `required`, so the form tests submit the form directly. Extra suites
   `RunReport.test.tsx` covers sorting, expandable evidence, skipped checks, the series panel
-  and the failed state.
+  and the failed state; `api.test.ts` covers error text and paging.
 
 ## Out of scope
 
