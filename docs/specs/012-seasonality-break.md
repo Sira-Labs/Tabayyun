@@ -43,6 +43,7 @@ Check params:
 | `drop` | 0.5 | flag when strength < (1 − drop) × reference |
 | `candidates` | `["1d", "7d", "365d"]` | periods considered |
 | `segment` | auto | max(4 × period, 7d) |
+| `ref_segments` | 4 | leading segments that form the reference when no baseline profile exists |
 
 Evidence: `period_ns`, `period_ref_ns`, `strength`, `strength_ref`, `reason`
 (`weaker` or `period_changed`), `n_segments`. Metrics per segment: `seasonal_strength`.
@@ -56,9 +57,11 @@ Evidence: `period_ns`, `period_ref_ns`, `strength`, `strength_ref`, `reason`
    classical decomposition on the regularised series: trend = centred moving average of
    length `period`, seasonal = mean detrended value per phase, remainder R;
    F_S = max(0, 1 − Var(R) / Var(S + R)). NaN bins are skipped in every mean and variance.
-3. The check computes strength and period per segment. Reference = the run's baseline
-   profile when present (`ctx.profile`), else the median of the segment strengths and the
-   modal segment period (with fewer than 4 segments the check skips with `too few periods`).
+3. The check computes strength and period per segment. A segment never takes part in its
+   own reference (same rule as spec 009): reference = the run's baseline profile when
+   present (`ctx.profile`), else the median strength and modal period of the first
+   `ref_segments` (default 4) segments, and only later segments are judged. With too few
+   reference segments or none after them the check skips with `insufficient baseline`.
 4. When the reference strength is below `min_strength`, no findings (metrics only).
 5. A segment is broken when its strength < (1 − `drop`) × reference, or its dominant period
    differs from the reference while its own strength ≥ `min_strength` (`period_changed`).

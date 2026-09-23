@@ -32,7 +32,7 @@ feeder F3's meter explains the gap, before the losses report goes out.
 the share).
 
 Evidence: `group_id`, `group_name`, `members`, `inputs`, `outputs`, `suspect`,
-`residual_mean`, `z_max`, `loss_share_mean`, `loss_min`, `loss_max`, `reason`
+`residual_mean`, `z_max`, `loss_share_mean`, `loss_min`, `loss_max`, `contributions`, `reason`
 (`sigma`, `loss_band` or `both`), `duration_ns`, `n_points`.
 Metrics per bin summary (per day): `residual_mean`, `loss_share_mean`.
 
@@ -43,10 +43,17 @@ Metrics per bin summary (per day): `residual_mean`, `loss_share_mean`.
 3. Runs shorter than `min_duration` are ignored; nearby runs merge into episodes.
 4. Suspect: a single balance equation cannot isolate a gross error statistically (every
    member's measurement test equals \|r\| / σ_r), so the suspect comes from change over
-   time. For each member, its share of throughput in the episode is compared with its share
-   in the unflagged bins of the window; the member whose share change explains at least
-   80 % of the residual change is the suspect. Otherwise `suspect = null`. The finding
-   attaches to the suspect, or the first input.
+   time, as an exact decomposition of the residual share:
+   - per bin, throughput T = (Σin + Σout) / 2, member share q_i = x_i / T, sign s_i = +1 for
+     inputs and −1 for outputs, residual share ρ = r / T = Σ s_i q_i;
+   - baseline B = the unflagged complete bins of the window, episode E = the episode's
+     complete bins; means over bins are plain arithmetic means;
+   - Δρ = mean_E(ρ) − mean_B(ρ), and member contributions c_i = s_i (mean_E(q_i) − mean_B(q_i)),
+     which sum exactly to Δρ;
+   - the suspect is the member with the largest c_i / Δρ, if that ratio is ≥ 0.8;
+   - `suspect = null` when B is empty, when \|Δρ\| < 1e-9, or when no ratio reaches 0.8.
+   The finding attaches to the suspect, or to the first input when there is none; evidence
+   adds `contributions` (`{series_id: c_i / Δρ}`, rounded to 3 digits).
 5. Summary example: "Balance SS-North does not close for 5 h: outputs exceed inputs by
    3.1 % (band −1 % to 5 %), feeder F3 explains most of it".
 

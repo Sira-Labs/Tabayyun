@@ -105,9 +105,16 @@ flags or the same environment variables.
    than one file, the row from the file with the larger `write_ns` wins (re-uploads correct
    the cache without rewriting files). Each requested series is returned, empty when absent.
 4. Store errors (network, permissions, missing bucket) surface as `Error::Cache(message)`
-   with the object key; nothing is partially visible because each object is one PUT.
+   with the object key. Each object is one PUT, so no object is ever half written, but a
+   write that spans months is *not* atomic: if a later month's PUT fails, the earlier
+   months' objects stay visible. The cache listing is therefore never evidence of coverage;
+   only `coverage` rows are, and a row is recorded only after every PUT of the write
+   succeeded (step 5). Orphaned objects from a failed write are harmless: a retry writes the
+   same rows again with a larger `write_ns`, and last-write-wins makes the duplicates
+   invisible. Compaction (S13-5) removes them.
 5. After an upload run succeeds (spec 002 flow), the worker writes the parsed series to the
-   cache under the `Uploads` source and adds a `coverage` row in the completion transaction.
+   cache under the `Uploads` source and, once the whole write succeeded, adds a `coverage`
+   row in a short transaction after the completion transaction.
    A cache failure does not fail the run: the run succeeds, `stats.cache` is
    `{"written": false, "error": "..."}` and the worker logs `cache.write_failed`; on success
    `stats.cache` is `{"written": true, "rows": n, "files": k}`.
@@ -125,9 +132,9 @@ flags or the same environment variables.
       newer values; untouched timestamps keep the old ones.
 - [x] Reads prune: a read of one series for one month opens only that bucket and month
       (asserted through the read statistics, see Implementation edits).
-- [ ] The same round trip passes against an S3 endpoint in CI (RustFS service container,
-      pinned to the live version, test enabled by `TABAYYUN_TEST_S3_URL`). (Passes locally
-      against RustFS 1.0.0; ticked when CI is green.)
+- [x] The same round trip passes against an S3 endpoint in CI (RustFS service container,
+      pinned to the live version, test enabled by `TABAYYUN_TEST_S3_URL`). (CI run 85 on
+      94643e9: rust core and python api jobs green against RustFS 1.0.0.)
 - [x] `tabayyun cache bench --rows 10000000` writes and reads 10 M rows; the numbers are
       recorded in this spec (Benchmarks).
 - [ ] An upload run on the live system writes its series to the RustFS bucket and a
@@ -186,6 +193,10 @@ batch series per request cycle or write concurrently.
 
 ## Implementation edits
 
+- Reads keep the listed `Path`s instead of re-parsing their string form: `Path::from` would
+  percent-encode an already encoded key again, so ids with `#`, `%`, spaces or non-ASCII
+  (allowed as path segments) could not be read back. Found in review; covered by a test on
+  both stores.
 - Pruning is asserted through `Cache::read_with_stats` (`prefixes_listed`, `files_read`,
   `row_groups_read`, `row_groups_skipped`) instead of a counting store wrapper: the numbers
   are also useful in logs, and a wrapper would re-implement the whole `ObjectStore` trait.

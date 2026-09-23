@@ -26,6 +26,7 @@ severity high. Params (group `params` override check params):
 | `delta` | 0.3 | flag when \|ρ − ρ_ref\| exceeds this |
 | `min_ref` | 0.5 | below this \|ρ_ref\| the pair is not related enough to judge |
 | `min_points` | 24 | aligned points a segment needs |
+| `ref_segments` | 7 | leading segments that form the reference when no stored baseline exists |
 | `max_lag` | 6 | lags searched, in grid steps |
 | `grid` | auto | alignment grid (spec 008) |
 
@@ -39,10 +40,14 @@ Metrics per pair and segment: `rho`, `lag_steps`.
 
 1. Align the pair (spec 008). Split into segments of `segment` length; segments with fewer
    than `min_points` complete bins are skipped.
-2. Spearman ρ per segment (average ranks for ties). Reference ρ_ref = median of the segment
-   ρs, or the baseline value when a stored group profile exists (not yet: sprint 10). With
-   fewer than 4 usable segments there is no reference and the pair is reported in
-   `skipped` with `too few segments`.
+2. Spearman ρ per segment (average ranks for ties). A segment never takes part in its own
+   reference. Reference ρ_ref = the stored group profile's value when one exists (sprint 10);
+   otherwise the median ρ of the first `ref_segments` usable segments of the window, and only
+   the segments after them are judged. With fewer than 4 usable reference segments, or no
+   segment after them, the pair is reported in `skipped` with `insufficient baseline` and
+   emits metrics only. (The first `ref_segments` of a window are therefore assumed healthy;
+   a break that starts at the very beginning of a window is found once a stored baseline
+   exists.)
 3. When \|ρ_ref\| < `min_ref`, the pair emits only metrics (it is not a related pair in this
    window).
 4. A segment is broken when \|ρ − ρ_ref\| > `delta` or sign(ρ) ≠ sign(ρ_ref) with \|ρ\| > 0.2.

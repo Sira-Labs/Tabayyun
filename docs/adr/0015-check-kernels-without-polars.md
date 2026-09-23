@@ -1,4 +1,4 @@
-# ADR-0015: Checks are Rust kernels over Arrow buffers; no Polars in the core
+# ADR-0015: Checks are Rust kernels over SeriesFrame buffers; no Polars in the core
 
 - **Status:** Accepted (supersedes ADR-0002)
 - **Date:** 2026-09-23
@@ -26,8 +26,8 @@ Observations from sprints 1–6:
   PyCapsule interface (tested in `core/tabayyun-py`).
 
 ## Decision
-Checks, profiling, scoring and alignment are Rust kernels over `SeriesFrame` buffers. The core
-uses `arrow` 59 and `parquet` 59 (with `object_store` for the cache) and no Polars. Polars
+Checks, profiling, scoring and alignment are Rust kernels over `SeriesFrame` buffers (plain
+`Vec`s); Arrow is used only at the boundary. The core uses `arrow` 59 and `parquet` 59 (with `object_store` for the cache) and no Polars. Polars
 stays a supported *input* at the Python boundary.
 
 Out-of-core execution (100k series × one year that does not fit in memory) is decided at the

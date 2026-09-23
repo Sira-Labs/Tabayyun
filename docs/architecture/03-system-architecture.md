@@ -23,7 +23,7 @@ Decisions are recorded in `docs/adr/`. This document is the map. Research backin
 │   plugin host: Python checks in sandboxed worker pool (cgroups, no network)          │
 │                                                                                     │
 │   tabayyun_core  (Rust, PyO3 wheel, zero-copy Arrow)                                 │
-│     check kernels over Arrow buffers (ADR-0015) · profiling · scoring ·              │
+│     check kernels over SeriesFrame buffers (ADR-0015) · profiling · scoring ·        │
 │     downsampling (M4/MinMaxLTTB) · Parquet cache reader/writer · DataFusion SQL      │
 └───────────┬───────────────────────────────┬─────────────────────────────────────────┘
             │                               │
@@ -45,9 +45,9 @@ Decisions are recorded in `docs/adr/`. This document is the map. Research backin
 
 | Module | Responsibility |
 |---|---|
-| `frame` | `SeriesFrame` type (Arrow record batch with ts/value/quality + metadata); validation; timezone normalisation. |
+| `frame` | `SeriesFrame` type: `Vec`-backed ts (ns, UTC), values, quality and optional ingest times plus metadata; conversion from and to Arrow record batches at the boundary; sorting and de-duplication. |
 | `profile` | Per-series profile: sampling interval (mode of IAT), value stats (robust), unique-value count, resolution, quality-flag mix, seasonality (augurs), autocorrelation. Profiles are the *baseline* for adaptive thresholds. |
-| `checks` | One module per check; each implements `Check::plan(LazyFrame, params) -> LazyFrame` and `Check::findings(frame) -> Vec<Finding>`. Registry maps `check_id` to implementation. |
+| `checks` | One module per check; each implements `Check::run(&SeriesFrame, &CheckContext) -> CheckOutput` (findings, metrics, skips) as a pure kernel (ADR-0015); cross-series checks implement `CrossCheck` over a series group (spec 008). Registry maps `check_id` to implementation. |
 | `score` | Dimension and overall scores from findings; versioned by `method_version`. |
 | `repair` | Repair operations over `SeriesFrame`s: drop/mask, clamp, linear and seasonal interpolation, like-day estimation, Kalman smoothing, resample/align, offset/scale correction; each returns the new values plus a lineage frame. |
 | `downsample` | M4 and MinMaxLTTB for chart endpoints. |

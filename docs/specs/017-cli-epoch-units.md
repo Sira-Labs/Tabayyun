@@ -26,8 +26,10 @@ CI or upload it in the browser.
 ## Behaviour
 
 1. A timestamp column whose cells are all integers is epoch; `auto` takes the unit from the
-   median absolute value with the ADR-0014 thresholds (1e11 → s, 1e14 → ms, 1e17 → us,
-   else ns). Mixed text and integers is an error naming the first offending row.
+   median absolute value m with the ADR-0014 thresholds as half-open ranges, exactly as the
+   API's `infer_epoch_unit`: m < 1e11 → s; 1e11 ≤ m < 1e14 → ms; 1e14 ≤ m < 1e17 → us;
+   m ≥ 1e17 → ns. The shared test table includes each boundary value. Mixed text and
+   integers is an error naming the first offending row.
 2. Every converted instant must fall in `[1971-01-01, 2200-01-01)`; otherwise exit code 2 with
    the row, the value and the unit read, and a hint to pass `--ts-unit`.
 3. Text timestamps parse as today; `ts_unit` is `text`.

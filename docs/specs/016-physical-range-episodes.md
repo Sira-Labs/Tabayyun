@@ -42,7 +42,8 @@ has `n_episodes`, `count`, `share`, `min_observed`, `max_observed`, `limit_min`,
 
 ## Acceptance criteria
 
-- [ ] 34 excursions within two hours → one finding with `n_excursions = 34`.
+- [ ] 34 excursions, each starting less than `cluster_gap` after the previous one ends (1-min
+      data, gaps of 3 min) → one finding with `n_excursions = 34`.
 - [ ] Two excursions a day apart → two findings.
 - [ ] 50 separated episodes → one low-severity summary finding.
 - [ ] Existing physical_range tests updated and passing; catalogue entry updated.

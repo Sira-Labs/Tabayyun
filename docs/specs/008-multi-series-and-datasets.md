@@ -50,7 +50,11 @@ impl Registry {
     pub fn run_multi(configs: &[CheckConfig], frames: &[SeriesFrame], groups: &[SeriesGroup],
                      ctx: &CheckContext) -> Result<MultiOutput>;
 }
-pub struct MultiOutput { pub per_series: BTreeMap<String, CheckOutput> }  // cross findings land here too
+pub struct MultiOutput {
+    pub per_series: BTreeMap<String, CheckOutput>,     // cross findings land here too
+    pub groups_skipped: Vec<GroupSkip>,                // feeds stats.groups_skipped
+}
+pub struct GroupSkip { pub group_id: String, pub reason: String, pub missing: Vec<String> }
 ```
 
 Cross-series findings name one series in `series_id`: the suspect when the check can tell
