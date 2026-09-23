@@ -208,6 +208,7 @@ Goal: real historians feed Tabayyun and a series has a home page.
 | S9-4 | Web: sources list and detail (health, last fetch, metadata import), series catalogue with search and filters (source, unit, score, kind) | S | pages backed by the APIs |
 | S9-5 | Web: series detail with uPlot chart, M4 downsampled endpoint, findings as shaded windows, quality rug, baseline band; profile and metadata side panel; keyboard range inputs | M | 1M-point series renders under 500 ms after the first load |
 | S9-6 | CSV/Parquet file source that watches a directory (air-gapped sites) | C | files dropped in a folder appear as series |
+| S9-7 | Web: compare view (spec 018): 2–8 series on one chart with unit-grouped axes or synced lanes, normalisation, residual lane for balances and pairs, cross-series findings with the suspect marked, table view; opened from a group, dataset, finding or series | S | a balance finding opens its members and residual lane with the suspect marked; 8 × 1M points render under 1.5 s |
 
 ## Sprint 10 — suites, triage, alerts, overview
 
