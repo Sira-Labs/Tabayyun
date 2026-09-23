@@ -2,7 +2,8 @@
 //!
 //! For every pair of a `related` or `redundant` group the pair is aligned (spec 008) and cut
 //! into UTC segments. Per segment the check computes Spearman's ρ over complete bins and the
-//! lag (in grid steps) that maximises the cross-correlation. The first `ref_segments` usable
+//! lag (in grid steps) that maximises the cross-correlation of first differences, signed by
+//! the pair's direction. The first `ref_segments` usable
 //! segments form the reference and only later segments are judged, so a segment never takes
 //! part in its own reference. Consecutive broken segments form one episode and one finding
 //! (ADR-0011); lag episodes are separate findings with their own evidence shape.
@@ -106,9 +107,16 @@ pub(crate) fn spearman(x: &[f64], y: &[f64]) -> Option<f64> {
     pearson(&average_ranks(x), &average_ranks(y))
 }
 
-/// The lag in `[-max_lag, max_lag]` maximising corr(x[t], y[t + lag]) over pairwise-complete
-/// bins, with that correlation; lags with fewer than `min_pairs` pairs are not considered.
-fn best_lag(x: &[f64], y: &[f64], max_lag: usize, min_pairs: usize) -> Option<(i64, f64)> {
+/// First differences; a step touching a NaN bin is NaN.
+fn diff(xs: &[f64]) -> Vec<f64> {
+    xs.windows(2).map(|w| w[1] - w[0]).collect()
+}
+
+/// The lag in `[-max_lag, max_lag]` maximising `sign` × corr(x[t], y[t + lag]) over
+/// pairwise-complete bins, with that signed strength; lags with fewer than `min_pairs` pairs
+/// are not considered. `sign` is the pair's direction, so a negatively related pair's lag is
+/// the one where it is most negatively correlated.
+fn best_lag(x: &[f64], y: &[f64], sign: f64, max_lag: usize, min_pairs: usize) -> Option<(i64, f64)> {
     let n = x.len() as i64;
     let mut best: Option<(i64, f64)> = None;
     for lag in -(max_lag as i64)..=(max_lag as i64) {
@@ -123,7 +131,7 @@ fn best_lag(x: &[f64], y: &[f64], max_lag: usize, min_pairs: usize) -> Option<(i
         if xs.len() < min_pairs.max(3) {
             continue;
         }
-        if let Some(r) = pearson(&xs, &ys) {
+        if let Some(r) = pearson(&xs, &ys).map(|r| sign * r) {
             // Ties go to the smaller |lag|, so a flat correlation profile reads as no lag.
             let better = match best {
                 None => true,
@@ -149,6 +157,15 @@ struct Segment {
 
 fn median(xs: &[f64]) -> f64 {
     median_mad(xs).map_or(f64::NAN, |(m, _)| m)
+}
+
+/// How the partner moves relative to the first series at `lag` grid steps.
+fn timing(lag: i64, grid_ns: i64) -> String {
+    match lag.signum() {
+        1 => format!("lags by {}", format_duration(lag * grid_ns)),
+        -1 => format!("leads by {}", format_duration(-lag * grid_ns)),
+        _ => "moves in step".into(),
+    }
 }
 
 fn name(f: &SeriesFrame) -> &str {
@@ -194,7 +211,10 @@ impl CorrelationBreak {
                 let xs: Vec<f64> = complete.iter().map(|&i| x[i]).collect();
                 let ys: Vec<f64> = complete.iter().map(|&i| y[i]).collect();
                 if let Some(rho) = spearman(&xs, &ys) {
-                    let lag = best_lag(&x[s..e], &y[s..e], self.max_lag, self.min_points / 2);
+                    // On first differences: levels of slowly trending series correlate at
+                    // every lag, which flattens the profile the lag is read from.
+                    let (dx, dy) = (diff(&x[s..e]), diff(&y[s..e]));
+                    let lag = best_lag(&dx, &dy, rho.signum(), self.max_lag, self.min_points / 2);
                     let window = Window::new(
                         aligned.ts[complete[0]],
                         aligned.ts[complete[complete.len() - 1]] + aligned.grid_ns,
@@ -331,10 +351,17 @@ impl CorrelationBreak {
         // Lag: judged only where the correlation held and the best cross-correlation is
         // itself strong, so a decoupled segment's random lag is not reported as a second finding.
         let ref_lags: Vec<f64> = reference.iter().filter_map(|s| s.lag).map(|(l, _)| l as f64).collect();
-        if ref_lags.len() < MIN_REFERENCE_SEGMENTS {
+        // A reference lag that wanders by more than the tolerance is no reference: the pair's
+        // cross-correlation has no sharp peak, and any "moved" lag would be noise.
+        let Some((lag_median, lag_mad)) =
+            median_mad(&ref_lags).filter(|_| ref_lags.len() >= MIN_REFERENCE_SEGMENTS)
+        else {
+            return;
+        };
+        if lag_mad > LAG_TOLERANCE as f64 {
             return;
         }
-        let lag_ref = median(&ref_lags).round() as i64;
+        let lag_ref = lag_median.round() as i64;
         let lag_flagged: Vec<(usize, Window, (&Segment, i64))> = judged
             .iter()
             .filter(|s| !broken(s))
@@ -345,12 +372,12 @@ impl CorrelationBreak {
         for (w, items) in episodes(lag_flagged) {
             let &(_, lag) = items.iter().max_by_key(|(_, l)| (l - lag_ref).abs()).unwrap();
             let summary = format!(
-                "{} lags {} by {} for {} (usually {})",
+                "{} {} relative to {} for {} (usually {})",
                 name(b),
+                timing(lag, grid_ns),
                 name(a),
-                format_duration(lag * grid_ns),
                 format_duration(w.duration()),
-                format_duration(lag_ref * grid_ns)
+                timing(lag_ref, grid_ns)
             );
             let evidence = base(serde_json::json!({
                 "lag_steps": lag, "lag_ref_steps": lag_ref, "grid_ns": grid_ns, "n_segments": items.len(),
@@ -488,7 +515,22 @@ mod tests {
         );
         assert_eq!(f.evidence["grid_ns"], STEP);
         assert_eq!((f.window.start, f.window.end), (day(11), day(12)));
-        assert!(f.summary.starts_with("PT-B lags PT-A by 45m for 1d"), "{}", f.summary);
+        assert_eq!(f.summary, "PT-B lags by 45m relative to PT-A for 1d (usually moves in step)");
+    }
+
+    #[test]
+    fn negatively_related_pair_lag() {
+        // y mirrors the driver (ρ ≈ −1); on day 11 it mirrors it three steps late.
+        let n = DAYS * PER_DAY;
+        let d = driver(n, 7);
+        let mut rng = Rng::new(5);
+        let a = frame("pt-a", d.clone());
+        let y =
+            (0..n).map(|i| if i / PER_DAY == 11 { -d[i - 3] } else { -d[i] } + 0.05 * rng.normal()).collect();
+        let out = run(&[&a, &frame("pt-b", y)], serde_json::Value::Null);
+        assert_eq!(out.findings.len(), 1, "{:?}", out.findings);
+        let ev = &out.findings[0].evidence;
+        assert_eq!((ev["lag_steps"].as_i64(), ev["lag_ref_steps"].as_i64()), (Some(3), Some(0)));
     }
 
     #[test]
