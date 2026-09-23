@@ -131,7 +131,7 @@ impl Registry {
 
     /// Built-in cross-series check ids in catalogue order.
     pub fn cross_builtin_ids() -> &'static [&'static str] {
-        &[checks::correlation_break::ID]
+        &[checks::correlation_break::ID, checks::redundant_disagreement::ID]
     }
 
     /// Instantiate a cross-series check from its id and parameters.
@@ -149,6 +149,9 @@ impl Registry {
         }
         match id {
             checks::correlation_break::ID => parse::<checks::correlation_break::CorrelationBreak>(id, params),
+            checks::redundant_disagreement::ID => {
+                parse::<checks::redundant_disagreement::RedundantDisagreement>(id, params)
+            }
             other => Err(Error::UnknownCheck(other.to_string())),
         }
     }

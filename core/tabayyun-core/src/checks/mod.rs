@@ -18,6 +18,7 @@ pub mod operational_range;
 pub mod physical_range;
 pub mod quality_flags;
 pub mod rate_of_change;
+pub mod redundant_disagreement;
 pub mod resolution_loss;
 pub mod sampling_regularity;
 pub mod scale_shift;
