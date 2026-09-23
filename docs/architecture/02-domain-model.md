@@ -2,19 +2,37 @@
 
 The vocabulary used across core, API, UI and docs. Names are deliberately boring.
 
-```
-Organisation ─┬─ Workspace ─┬─ Source ─── Series (tag) ─── Observation
-              │             ├─ Dataset (a named set of Series + a time range policy)
-              │             ├─ CheckSuite ─── CheckConfig ─── (references a Check definition)
-              │             ├─ Run ─── Finding ─── Evidence
-              │             ├─ Score (per Series / Dataset / Workspace, per dimension)
-              │             ├─ AlertRule ─── Notification
-              │             ├─ RepairFlow ─── RepairStep
-              │             ├─ Correction ─── CorrectedRange (per Series, versioned, with lineage)
-              │             ├─ PublishTarget (where corrected series are delivered)
-              │             └─ Share (grant on any resource above)
-              ├─ Member (User × Role)
-              └─ AuditEvent
+```mermaid
+erDiagram
+    ORGANISATION ||--o{ WORKSPACE : has
+    ORGANISATION ||--o{ MEMBER : "has (user x role)"
+    ORGANISATION ||--o{ AUDIT_EVENT : records
+    WORKSPACE ||--o{ SOURCE : connects
+    SOURCE ||--o{ SERIES : provides
+    SERIES ||--o{ OBSERVATION : "cached as"
+    WORKSPACE ||--o{ SERIES_GROUP : defines
+    SERIES_GROUP }o--o{ SERIES : "related, redundant or balance"
+    WORKSPACE ||--o{ DATASET : defines
+    DATASET }o--o{ SERIES : "selects, with a window policy"
+    WORKSPACE ||--o{ CHECK_SUITE : schedules
+    CHECK_SUITE }o--|| DATASET : "runs over"
+    CHECK_SUITE ||--o{ CHECK_CONFIG : contains
+    CHECK_CONFIG }o--|| CHECK : configures
+    WORKSPACE ||--o{ RUN : runs
+    RUN }o--o| DATASET : covers
+    RUN ||--o{ FINDING : "first or last seen in"
+    SERIES ||--o{ FINDING : has
+    FINDING ||--|| EVIDENCE : carries
+    SERIES ||--o{ SCORE : "per run and dimension"
+    WORKSPACE ||--o{ ALERT_RULE : has
+    ALERT_RULE ||--o{ NOTIFICATION : sends
+    WORKSPACE ||--o{ REPAIR_FLOW : has
+    REPAIR_FLOW ||--o{ REPAIR_STEP : "ordered steps"
+    SERIES ||--o{ CORRECTION : "corrected layer versions"
+    CORRECTION ||--o{ CORRECTED_RANGE : lineage
+    CORRECTED_RANGE }o--o| FINDING : "motivated by"
+    WORKSPACE ||--o{ PUBLISH_TARGET : has
+    WORKSPACE ||--o{ SHARE : "grants on any resource"
 ```
 
 ## Entities
@@ -26,6 +44,7 @@ Organisation ─┬─ Workspace ─┬─ Source ─── Series (tag) ──�
 | **Source** | A connector instance to an external system. | type (pi_web_api, opc_ua, parquet, csv, sql, mqtt...), credentials_ref (secret store key), poll_policy, health |
 | **Series** | One time series ("tag", "point", "channel"). | source_id, external_id, name, unit, dtype, expected_interval, physical_min/max, operational_min/max, asset_path, kind (measurement, setpoint, counter, status), quality_semantics |
 | **Observation** | A (timestamp, value, quality) triple. Never stored long-term by Tabayyun except as a cache. | ts, value, quality_flag |
+| **SeriesGroup** | Series that belong together, and how: `related` (usually move together), `redundant` (measure the same quantity) or `balance` (inputs and outputs that should close). Cross-series checks run per group (spec 008). | name, kind, members (series_id, role: member / input / output), params |
 | **Dataset** | Named group of Series with a time-range and resampling policy used by a check suite. | series selection (explicit or query), window policy |
 | **Check** | A *definition* shipped by Tabayyun or a plugin: id, category, dimension, parameters schema, evidence schema, default thresholds, docs. | id (`tby.stale_data`), version, dimension, severity_default |
 | **CheckConfig** | A Check bound to a Dataset/Series with concrete parameters. | check_id, params, severity, enabled |

@@ -50,6 +50,46 @@ budget stops and review rounds are part of the calendar. Late December runs at h
 capacity whichever sprint falls there. At the end of each sprint: fill in its row, recompute
 the forecast from the last three sprints, and update the milestones table.
 
+```mermaid
+gantt
+    title Sprints: actuals and forecast (bars end at the early end of each window, 2026-09-23)
+    dateFormat YYYY-MM-DD
+    axisFormat %d %b
+    todayMarker off
+
+    section Done
+    S1–S4 core, checks, wheel, deploy        :done, s4, 2026-09-21, 1d
+    S5 landing and planning                  :done, s5, 2026-09-21, 2026-09-22
+    S6 persistence and jobs                  :done, s6, 2026-09-22, 2026-09-23
+
+    section R1 core, release 0.1
+    S7 cache and cross-series checks         :active, s7, 2026-09-23, 2026-09-26
+    S8 login, tenants, RBAC                  :s8, 2026-09-26, 2026-09-29
+    S9 connectors, series screen             :s9, 2026-09-29, 2026-10-01
+    S10 suites, triage, alerts, overview     :s10, 2026-10-01, 2026-10-03
+    S11 corrections v1                       :s11, 2026-10-03, 2026-10-06
+    S12 sharing, energy pack                 :s12, 2026-10-06, 2026-10-08
+    S13 hardening, release 0.1               :s13, 2026-10-08, 2026-10-10
+    R1 feature-complete                      :milestone, r1, 2026-10-10, 0d
+
+    section R2 domain depth
+    S14 metering pack, RepairFlows           :s14, 2026-10-10, 2026-10-13
+    S15 PV and wind packs                    :s15, 2026-10-13, 2026-10-15
+    S16 oil and gas pack 1                   :s16, 2026-10-15, 2026-10-17
+    S17 oil and gas pack 2                   :s17, 2026-10-17, 2026-10-20
+    S18 grid pack, write-back, corpus        :s18, 2026-10-20, 2026-10-22
+    R2 domain depth                          :milestone, r2, 2026-10-22, 0d
+
+    section R3 platform, release 1.0
+    S19 enterprise identity                  :s19, 2026-10-22, 2026-10-24
+    S20 fleet baselines, scale               :s20, 2026-10-24, 2026-10-27
+    S21 connectors, mobile                   :s21, 2026-10-27, 2026-10-29
+    S22 compliance, release 1.0              :s22, 2026-10-29, 2026-10-31
+    R3 release 1.0                           :milestone, r3, 2026-10-31, 0d
+```
+
+The chart is the table below drawn on a calendar; when a sprint ends, update both.
+
 | Sprint | Topic | Originally planned | Actual / forecast end | PRs |
 |---|---|---|---|---|
 | 1 | workspace, first eight checks, CLI | before the plan | done 21 Sep | #1, #2 |
