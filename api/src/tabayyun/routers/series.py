@@ -281,10 +281,17 @@ async def list_scores(
     series_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    run_id: str | None = None,
 ) -> ScoreList:
-    """Score rows newest first."""
+    """Score rows newest first; `run_id` selects the rows one run wrote."""
     parsed = await _series_id_or_404(session, series_id)
-    rows = await findings_service.list_scores(session, parsed, limit=limit)
+    parsed_run: uuid.UUID | None = None
+    if run_id is not None:
+        try:
+            parsed_run = uuid.UUID(run_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="run_id is not a UUID") from exc
+    rows = await findings_service.list_scores(session, parsed, limit=limit, run_id=parsed_run)
     return ScoreList(
         items=[
             ScoreOut(
