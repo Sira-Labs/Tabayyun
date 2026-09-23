@@ -41,7 +41,7 @@ jobs:
       - name: Create the S3 test bucket
         env: { AWS_ACCESS_KEY_ID: tabayyun-ci, AWS_SECRET_ACCESS_KEY: tabayyun-ci-secret, AWS_DEFAULT_REGION: us-east-1 }
         run: |
-          for i in $(seq 1 30); do curl -s -o /dev/null http://localhost:9000/ && break; sleep 1; done
+          for i in $(seq 1 60); do curl -sf -o /dev/null http://localhost:9000/health/ready && break; [ "$i" = 60 ] && { echo 'RustFS not ready after 60 s'; exit 1; }; sleep 1; done
           aws --endpoint-url http://localhost:9000 s3 mb s3://tabayyun-test
       - run: cargo test
       - run: cargo run -q --bin tabayyun -- synth --out /tmp/f.csv --faults gap,flatline,nans
@@ -109,7 +109,7 @@ jobs:
       - name: Create the S3 test bucket
         env: { AWS_ACCESS_KEY_ID: tabayyun-ci, AWS_SECRET_ACCESS_KEY: tabayyun-ci-secret, AWS_DEFAULT_REGION: us-east-1 }
         run: |
-          for i in $(seq 1 30); do curl -s -o /dev/null http://localhost:9000/ && break; sleep 1; done
+          for i in $(seq 1 60); do curl -sf -o /dev/null http://localhost:9000/health/ready && break; [ "$i" = 60 ] && { echo 'RustFS not ready after 60 s'; exit 1; }; sleep 1; done
           aws --endpoint-url http://localhost:9000 s3 mb s3://tabayyun-test
       - run: uv run pytest -q
       # Models and migrations must agree; the tests leave the schema at head.
