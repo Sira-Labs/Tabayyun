@@ -17,6 +17,9 @@ All notable changes to this project are documented here. The format follows
 - Stored findings, metrics and scores per run, with findings deduplicated across runs and a
   status lifecycle (`GET/PATCH /api/findings`, `GET /api/series/{id}/metrics|scores`,
   ADR-0013).
+- Series and sources API (`GET /api/sources`, `GET/PATCH /api/series`) with stored metadata
+  applied to later uploads; `ts_unit` for epoch-integer timestamps with a plausibility check
+  (ADR-0014).
 - Release pipeline publishing `tabayyun-api` and `tabayyun-web` images to GHCR with SBOM and
   provenance; production compose bundle with Caddy.
 - Apache-2.0 licence (ADR-0012), contribution guide, security policy, code of conduct, issue

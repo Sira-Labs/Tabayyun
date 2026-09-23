@@ -18,6 +18,7 @@ router = APIRouter(prefix="/api/checks", tags=["checks"])
 
 @router.get("")
 async def list_checks() -> list[str]:
+    """Ids of the built-in checks."""
     return core.builtin_checks()
 
 
@@ -33,7 +34,9 @@ async def run_checks(
     physical_min: Annotated[float | None, Form()] = None,
     physical_max: Annotated[float | None, Form()] = None,
     now_ns: Annotated[int | None, Form()] = None,
+    ts_unit: Annotated[core.TsUnit, Form(description="Unit of epoch integer timestamps")] = "auto",
 ) -> core.CheckReport:
+    """Run the built-in checks on an uploaded CSV without storing anything."""
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     try:
         table = parse_upload(
@@ -42,7 +45,8 @@ async def run_checks(
             value_col=value_col,
             quality_col=quality_col or None,
             ingest_col=ingest_col or None,
-        )
+            ts_unit=ts_unit,
+        ).table
     except UploadError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     meta = core.SeriesMetaIn(

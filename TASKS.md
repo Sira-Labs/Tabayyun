@@ -87,8 +87,18 @@ story ids there (`S6-1`) map to specs here.
       - Stored windows round the start down and the end up to the microsecond.
       - `run_id` filters on first or last run; ns and cursor helpers moved to
         `services/timeconv.py` and `services/pagination.py` (runs reuse them).
-- [ ] **004 Series and sources from uploads** — `docs/specs/004-series-and-sources.md`
+- [x] **004 Series and sources from uploads** — `docs/specs/004-series-and-sources.md`
       `Uploads` source, series upsert, metadata precedence, `PATCH /api/series/{id}`.
+      - Added `ts_unit` for epoch-integer timestamps (ADR-0014): declared or inferred with
+        the CLI's thresholds, instants outside 1971–2199 are a 422, runs record the unit.
+        Found by the production end-to-end check of spec 003.
+      - The worker reads stored metadata before the core and upserts the series only on
+        success; form limits are validated against the stored series at request time too.
+      - PATCH validates the merged metadata and blames the field the request sent.
+      - Operational limits are stored, not sent to the core (it learns the band).
+      - `open_findings` = open + acked, matching the default findings list.
+      - Follow-ups: CLI per-column inference and range check; `ts_unit` select in the web
+        form with spec 005.
 - [ ] **005 Runs list and report in the web app** — `docs/specs/005-runs-web.md`
       `/runs`, `/runs/new` (with physical limits), `/runs/:id` with polling and evidence.
 

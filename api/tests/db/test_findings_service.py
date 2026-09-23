@@ -12,7 +12,7 @@ from tabayyun import core
 from tabayyun.db import make_engine, make_session_factory
 from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Finding, Metric, Run
 from tabayyun.services import findings as findings_service
-from tabayyun.services import runs as runs_service
+from tabayyun.services import series as series_service
 from tabayyun.services.timeconv import datetime_to_ns
 from tabayyun.settings import Settings
 
@@ -113,7 +113,7 @@ async def ctx(db_url, fresh_schema):
     engine = make_engine(Settings(env="test", database_url=db_url))
     factory = make_session_factory(engine)
     async with factory() as session, session.begin():
-        series = await runs_service._resolve_series(session, "demo")
+        series = await series_service.upsert_upload_series(session, "demo", {}, now=datetime.now(UTC))
     yield Ctx(factory, series.id)
     await engine.dispose()
 

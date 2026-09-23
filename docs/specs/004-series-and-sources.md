@@ -58,23 +58,51 @@ JSON object ≤ 8 KiB.
 
 ## Acceptance criteria
 
-- [ ] Uploading `series_id=demo` twice creates one series row with two runs.
-- [ ] `PATCH` setting `physical_max = 100` followed by an upload without `physical_max` runs
+- [x] Uploading `series_id=demo` twice creates one series row with two runs.
+- [x] `PATCH` setting `physical_max = 100` followed by an upload without `physical_max` runs
       `tby.physical_range` with 100 (visible in the run's findings or metrics).
-- [ ] An upload passing `physical_max = 90` runs with 90 and the stored value becomes 90.
-- [ ] Invalid combinations (`physical_min ≥ physical_max`, operational band outside physical)
+- [x] An upload passing `physical_max = 90` runs with 90 and the stored value becomes 90.
+- [x] Invalid combinations (`physical_min ≥ physical_max`, operational band outside physical)
       are 422 naming the field.
-- [ ] `GET /api/series/{id}` shows the latest score and the open findings count after a run.
-- [ ] `GET /api/series?q=` matches on name and external id, paginated.
+- [x] `GET /api/series/{id}` shows the latest score and the open findings count after a run.
+- [x] `GET /api/series?q=` matches on name and external id, paginated.
+- [x] Epoch-integer timestamps are read in the declared `ts_unit` or the inferred one; a unit
+      that yields dates outside 1971–2199 is a 422 with a hint (added, ADR-0014).
 
 ## Test cases
 
-Unit (`api/tests/test_series_api.py`, database fixture, inline jobs):
+Unit (`api/tests/db/test_series_api.py`, database fixture, inline jobs):
 - `test_upload_creates_source_and_series_once`.
 - `test_patch_partial_update_and_validation` (parametrised over the invalid combinations).
 - `test_stored_metadata_used_on_next_run`, `test_form_overrides_and_persists`.
 - `test_series_summary_has_latest_score_and_open_findings`.
-- `test_series_search_and_pagination`.
+- `test_series_search_and_pagination`; added `test_patch_partial_update` and
+  `test_epoch_seconds_upload_records_the_unit`.
+
+Unit (`api/tests/test_ts_unit.py`, no database): inference for each unit, declared units too
+small and too large, pre-1971 integers, text timestamps, thresholds pinned to the CLI source,
+and the stateless endpoint.
+
+## Implementation edits
+
+- Added the `ts_unit` upload field (`auto|s|ms|us|ns`) on `POST /api/runs` and
+  `POST /api/checks/run`, recorded as `stats.ts_unit` on runs. Reason: a production check
+  uploaded epoch seconds, the API read them as nanoseconds and reported a 19,705-day gap.
+  Decision and alternatives in ADR-0014.
+- Precedence covers the fields the upload form carries (`unit`, `physical_min`,
+  `physical_max`); the core receives name, unit, kind, interval, physical limits, resolution
+  and non-negativity. The operational band is stored and validated but not sent to the core,
+  whose `tby.operational_range` learns its band from the baseline.
+- The worker reads the stored series before the core runs and creates or updates it only in
+  the completion transaction, so a failed run leaves no series behind. Form limits that
+  contradict the stored series are a 422 at request time and fail the run if the series
+  changed in between.
+- Validation runs on the merged metadata (stored values plus the PATCH), and the 422 names
+  the field the request sent. Explicit `null` clears a nullable field; `name`, `kind` and
+  `metadata` cannot be null.
+- `open_findings` counts `open` and `acked` findings, matching the default findings list.
+  `GET /api/sources` also returns `n_series`; `GET /api/series/{id}` also returns `n_runs`.
+- The upload-source helpers moved from `services/runs.py` to `services/series.py`.
 
 ## Out of scope
 
