@@ -128,6 +128,12 @@ async def test_other_422_paths(client, ids):
     assert (await post(members=many))[2] == "needs 2 to 32 members, has 33"
     status, field, msg = await post(members=pair, params={"blob": "x" * 9000})
     assert (status, field) == (422, "params") and "8192 bytes" in msg
+    # Measured as UTF-8: 3,000 Arabic letters are 6 KB, not the 18 KB of `\uXXXX` escapes.
+    r = await client.post(
+        "/api/series-groups",
+        json={"name": "ar", "kind": "related", "members": pair, "params": {"note": "ت" * 3000}},
+    )
+    assert r.status_code == 201, r.text
     # Schema-level rules come from the request model.
     assert (await post(members=pair, params=[1]))[:2] == (422, "params")
     assert (await post(members=pair, kind="other"))[:2] == (422, "kind")

@@ -10,7 +10,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from tabayyun.main import create_app
-from tabayyun.services import execution
+from tabayyun.services import dataset_runs, execution
 from tabayyun.services.timeconv import datetime_to_ns
 from tabayyun.settings import Settings
 
@@ -198,3 +198,14 @@ async def test_worker_dispatches_dataset_runs(db_url, fresh_schema, tmp_path):
     await queued.state.engine.dispose()
     assert run["status"] == "succeeded", run
     assert run["stats"]["n_samples"] == 24 and run["trigger"] == "manual"
+
+
+async def test_planning_error_fails_the_run(client, setup, monkeypatch):
+    """An unexpected error while planning fails the run instead of leaving it queued."""
+
+    async def broken(session, run):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(dataset_runs, "_plan", broken)
+    run = await _run(client, setup["dataset"])
+    assert (run["status"], run["error"]) == ("failed", "plan error: boom")

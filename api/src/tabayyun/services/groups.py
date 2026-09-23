@@ -88,8 +88,8 @@ def validate_members(kind: str, members: Sequence[MemberIn]) -> None:
 
 
 def validate_params(params: dict[str, Any]) -> None:
-    """Group params are a JSON object of at most 8 KiB."""
-    if len(json.dumps(params, separators=(",", ":")).encode()) > MAX_PARAMS_BYTES:
+    """Group params are a JSON object of at most 8 KiB, measured as compact UTF-8 JSON."""
+    if len(json.dumps(params, separators=(",", ":"), ensure_ascii=False).encode()) > MAX_PARAMS_BYTES:
         raise GroupError("params", f"must be at most {MAX_PARAMS_BYTES} bytes as JSON")
 
 

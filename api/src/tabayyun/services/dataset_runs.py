@@ -208,19 +208,26 @@ async def execute_dataset_run(
 ) -> None:
     """Execute one queued dataset run to a terminal state. Never raises; failures land on the run."""
     run_log = log.bind(run_id=str(run_id))
-    async with factory() as session, session.begin():
-        run = await session.get(Run, run_id)
-        if run is None or run.status != "queued":
-            run_log.warning("run.skipped", status=None if run is None else run.status)
-            return
-        run.status = "running"
-        run.started_at = runs_service.utc_now()
-        plan: Plan | None = None
-        metadata_error: str | None = None
-        try:
-            plan = await _plan(session, run)
-        except series_service.MetadataError as exc:
-            metadata_error = str(exc)
+    plan: Plan | None = None
+    metadata_error: str | None = None
+    try:
+        async with factory() as session, session.begin():
+            run = await session.get(Run, run_id)
+            if run is None or run.status != "queued":
+                run_log.warning("run.skipped", status=None if run is None else run.status)
+                return
+            run.status = "running"
+            run.started_at = runs_service.utc_now()
+            try:
+                plan = await _plan(session, run)
+            except series_service.MetadataError as exc:
+                metadata_error = str(exc)
+    # Any other planning error rolls the claim back and leaves the run queued, where neither a
+    # retry nor the stale-run reaper would reach it: fail it from `queued` instead.
+    except Exception as exc:  # noqa: BLE001
+        run_log.exception("run.plan_failed")
+        await runs_service.mark_failed(factory, run_id, f"plan error: {runs_service.error_line(exc)}")
+        return
     run_log.info("run.started", kind="dataset")
 
     try:
