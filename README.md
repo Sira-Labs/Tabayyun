@@ -28,10 +28,13 @@ untrustworthy, routes findings to the people who can fix them, and lets them cor
 with full lineage and deliver the corrected series downstream. First target vertical:
 **energy** (PV, wind, grid, metering, storage).
 
-Status: **R1, sprint 6 next** (weekly sprints, `docs/roadmap/sprints.md`). The Rust core runs
-20 of the 30 catalogue checks with findings aggregated into episodes, ships as a Python
-wheel, the API and web app run the checks on an uploaded CSV, the release pipeline publishes
-images to GHCR and deploys them to CapRover, and a pilot instance is live. Work follows written
+Status: **R1, sprint 7 next** (scope sprints with a rolling forecast,
+`docs/roadmap/sprints.md`). The Rust core runs 20 of the 30 catalogue checks with findings
+aggregated into episodes and ships as a Python wheel. An uploaded CSV becomes a run that a
+worker executes; findings (deduplicated across runs), metrics, scores and series metadata
+are persisted in Postgres, and the web app lists runs and shows each report. The release
+pipeline publishes images to GHCR and deploys them to CapRover, where a pilot instance is
+live. Work follows written
 specs in `docs/specs/` with the backlog in `TASKS.md`.
 
 ## Why the name

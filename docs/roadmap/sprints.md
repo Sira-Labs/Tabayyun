@@ -1,19 +1,24 @@
-# Sprint plan — weekly sprints, Sunday to Saturday
+# Sprint plan — scope sprints with a rolling forecast
 
-*Planned 2026-09-21. Sprints are one week because the build budget resets every Saturday.
-A sprint's stories are ordered by priority: when the budget reaches ~90 % the remaining
-stories roll into the next sprint unchanged, nothing is squeezed in. One branch per sprint
-(`sprint/NN-topic`), one PR, CodeRabbit review, merge by the owner, release from `main`
-deploys to CapRover.*
+*Planned 2026-09-21 as weekly sprints; re-baselined 2026-09-23. Sprints 1–6 took three
+days (21–23 Sep), so the weekly calendar described the budget cycle rather than the work.
+A sprint is now a unit of scope: it starts when the previous sprint's last PR is merged,
+its stories are ordered by priority, and its dates are recorded when it happens. Dates for
+the sprints ahead are a forecast, recomputed at the end of every sprint (see
+[Actuals and forecast](#actuals-and-forecast)). One branch per sprint (`sprint/NN-topic`),
+one PR per spec, CodeRabbit review, merge by the owner, release from `main` deploys to
+CapRover.*
 
-The weekly plan supersedes the earlier duration estimates in `roadmap.md` (12, 8–10 and
-8–12 weeks): R1 keeps its length, R2 and R3 are compressed to five and four sprints because
-the checks, connectors and screens they need are built on the R1 foundation.
+The build budget still resets every Saturday. When it reaches ~90 % the remaining stories
+roll into the next budget week unchanged; nothing is squeezed in. The forecast absorbs these
+stops, so a budget stop moves dates, not scope.
 
-Sizing rule of thumb from sprints 1–4: one sprint fits roughly *one* of the following:
-six checks with tests, or one vertical slice through API + web + persistence, or one
-connector with its screens. Research notes are cheap and go last in a sprint if budget
-remains. Priorities: **M** must (sprint fails without it), **S** should, **C** could.
+Sizing from sprints 1–6: one session implements one spec (one story, sometimes two) with
+tests, review fixes and a live check. Six checks with tests fit one sprint, and so does one
+vertical slice through persistence, API and web. Sprint 6 (five specs) took about 20 hours
+of wall-clock time from the first spec merge to the last PR going green. Research notes are cheap
+and go last in a sprint if budget remains. Priorities: **M** must (sprint fails without it),
+**S** should, **C** could.
 
 Every story gets a spec in `docs/specs/` (copy `000-template.md`) before implementation;
 sprint 6 stories map to specs 001–005. `TASKS.md` tracks the specs and session decisions.
@@ -24,13 +29,72 @@ for user-facing stories, a screenshot or curl transcript in the PR.
 
 ## Milestones
 
-| Milestone | Sprints | Exit criteria |
-|---|---|---|
-| **R1 core, release 0.1** | 5–13 (until 21 Nov 2026) | 30 checks; persisted runs, findings, scores; PI Web API and OPC UA connectors; Google login, workspace RBAC; overview, series detail, findings inbox; alerts; corrections with lineage and a corrected layer; share links; pilot install on Hetzner; ≥95 % of injected faults detected at ≤2 % false positives per check |
-| **R2 domain depth** | 14–18 (until 26 Dec 2026) | metering, PV, wind, grid, oil and gas packs; RepairFlows with regulatory estimation; write-back; public benchmark corpus |
-| **R3 platform, release 1.0** | 19–22 (until 23 Jan 2027) | enterprise SSO and SCIM, API tokens, embeds, fleet baselines, multi-node workers, more connectors, SOC 2 pack, licensing |
+| Milestone | Sprints | Original plan | Forecast (2026-09-23) | Exit criteria |
+|---|---|---|---|---|
+| **R1 core, release 0.1** | 5–13 | 21 Nov 2026 | feature-complete 10–18 Oct; release when the pilot install is validated | 30 checks; persisted runs, findings, scores; PI Web API and OPC UA connectors; Google login, workspace RBAC; overview, series detail, findings inbox; alerts; corrections with lineage and a corrected layer; share links; pilot install on Hetzner; ≥95 % of injected faults detected at ≤2 % false positives per check |
+| **R2 domain depth** | 14–18 | 26 Dec 2026 | 22 Oct – 5 Nov | metering, PV, wind, grid, oil and gas packs; RepairFlows with regulatory estimation; write-back; public benchmark corpus |
+| **R3 platform, release 1.0** | 19–22 | 23 Jan 2027 | 31 Oct – 19 Nov | enterprise SSO and SCIM, API tokens, embeds, fleet baselines, multi-node workers, more connectors, SOC 2 pack, licensing |
 
-## Sprint 5 — 20 to 26 Sep 2026 (this week, ~10 % budget left)
+A forecast window is software scope only. Items that wait on people or third parties (the
+pilot site, an external pen test, test tenants, store accounts) do not compress with it;
+they are listed under [Owner and external dependencies](#owner-and-external-dependencies)
+with the sprint that needs them.
+
+## Actuals and forecast
+
+Actual dates are UTC merge dates. Measured pace so far: about one sprint per working day.
+The forecast deliberately plans at **2–3 sprints per week** (3.5 to 2.3 days each), a third
+to a half of the measured pace, because sprints 7–13 carry more research, third-party
+software (Keycloak, PI Web API, OPC UA) and performance work than sprints 1–6, and because
+budget stops and review rounds are part of the calendar. Late December runs at half
+capacity whichever sprint falls there. At the end of each sprint: fill in its row, recompute
+the forecast from the last three sprints, and update the milestones table.
+
+| Sprint | Topic | Originally planned | Actual / forecast end | PRs |
+|---|---|---|---|---|
+| 1 | workspace, first eight checks, CLI | before the plan | done 21 Sep | #1, #2 |
+| 2 | profile, six checks, M4, PyO3 wheel, upload page | before the plan | done 21 Sep | #3 |
+| 3 | drift checks, scoring v2, release pipeline | before the plan | done 21 Sep | #4 |
+| 4 | CapRover deploy, research 05, historian timestamps | before the plan | done 21 Sep | #6 |
+| 5 | landing and planning | 20–26 Sep | done 22 Sep (S5-3 with the owner) | #5, #7, #15, #16, #22–#24 |
+| 6 | persistence and jobs | 27 Sep – 3 Oct | done 23 Sep | #25–#29 |
+| 7 | Parquet cache and cross-series checks | 4–10 Oct | 26–28 Sep | |
+| 8 | login, tenants and RBAC | 11–17 Oct | 29 Sep – 1 Oct | |
+| 9 | connectors and the series screen | 18–24 Oct | 1–4 Oct | |
+| 10 | suites, triage, alerts, overview | 25–31 Oct | 3–8 Oct | |
+| 11 | corrections v1 | 1–7 Nov | 6–12 Oct | |
+| 12 | sharing and the energy pack | 8–14 Nov | 8–15 Oct | |
+| 13 | hardening and release 0.1 | 15–21 Nov | 10–18 Oct | |
+| 14 | metering pack and RepairFlows | 22–28 Nov | 13–22 Oct | |
+| 15 | PV and wind packs | 29 Nov – 5 Dec | 15–26 Oct | |
+| 16 | oil and gas pack 1 | 6–12 Dec | 17–29 Oct | |
+| 17 | oil and gas pack 2 | 13–19 Dec | 20 Oct – 1 Nov | |
+| 18 | grid pack, write-back, benchmark corpus | 20–26 Dec | 22 Oct – 5 Nov | |
+| 19 | enterprise identity | 27 Dec – 2 Jan | 24 Oct – 9 Nov | |
+| 20 | fleet baselines and scale | 3–9 Jan | 27 Oct – 12 Nov | |
+| 21 | connectors and mobile | 10–16 Jan | 29 Oct – 15 Nov | |
+| 22 | compliance and release 1.0 | 17–23 Jan | 31 Oct – 19 Nov | |
+
+## Owner and external dependencies
+
+At the measured pace the owner's actions, not the build, become the critical path. Each item
+is needed before the named sprint starts; the date is the early end of the previous sprint's
+forecast window.
+
+| Needed by | Item | Owner action |
+|---|---|---|
+| now | S5-3 | confirm the api app's session secret is generated; delete merged branches |
+| S8 (~26 Sep) | Google login | Google Cloud OAuth client (web), redirect URI on the live domain; client id and secret as CapRover env vars |
+| S8 (~26 Sep) | Keycloak | CapRover app for Keycloak with its own database, admin credentials as env vars, and an app token secret for the release workflow |
+| S8 (~26 Sep) | email | SMTP account and credentials (invitations in S8-4, alerts in S10-5) |
+| S9 (~29 Sep) | PI Web API | optional: read access to a PI Web API test server; without it the connector is tested against recorded fixtures only |
+| S13 (~8 Oct) | pilot | pilot site, contact and install date; an 8-core server for the performance run |
+| S13 (~8 Oct) | pen test | decide self-assessment only, or book an external tester (not on the forecast's calendar) |
+| S19 (~22 Oct) | enterprise SSO | Entra ID test tenant (and Okta, for SCIM preview testing) |
+| S21 (~27 Oct) | mobile | Apple and Google developer accounts, push credentials |
+| S22 (~29 Oct) | licensing | custody of the licence signing key |
+
+## Sprint 5 — landing and planning (done 21–22 Sep 2026)
 
 Goal: land what is open, plan, no new feature work.
 
@@ -41,7 +105,9 @@ Goal: land what is open, plan, no new feature work.
 | S5-3 | CapRover: confirm real session secret and db password in the api app, delete the sprint/04 and fix branches | M | owner confirms |
 | S5-4 | Upload page exposes `physical_min` / `physical_max` (two inputs, passed as form fields) | C | range checks run from the browser |
 
-## Sprint 6 — 27 Sep to 3 Oct — persistence and jobs
+Result: S5-1, S5-2 and S5-4 done; S5-3 waits on the owner.
+
+## Sprint 6 — persistence and jobs (done 22–23 Sep 2026)
 
 Goal: a run leaves a trace. Every upload becomes a `Run` with persisted findings, metrics
 and scores in Postgres; a worker executes it.
@@ -55,7 +121,11 @@ and scores in Postgres; a worker executes it.
 | S6-5 | Web: runs list, run report page (score tiles, findings table, evidence expand) reading persisted data | S | page works after a browser refresh |
 | S6-6 | Docs: ADR-0013 run and finding lifecycle (statuses open/acked/resolved/muted, dedup rule) | S | ADR merged |
 
-## Sprint 7 — 4 to 10 Oct — Parquet cache and cross-series checks
+Result: all six stories done as specs 001–005 (PRs #25–#29), with ADR-0013 and, from the
+live end-to-end check, ADR-0014 (epoch timestamp units). Spec 005's deployed round trip is
+checked after PR #29 merges.
+
+## Sprint 7 — Parquet cache and cross-series checks
 
 Goal: data is cached once and checks can see more than one series.
 
@@ -69,8 +139,10 @@ Goal: data is cached once and checks can see more than one series.
 | S7-6 | Check 24 `tby.balance_residual` (balance group definition, propagated uncertainty, suspect member) | S | synthetic inlet/outlet tests |
 | S7-7 | Check 21 `tby.seasonality_break` (daily/weekly strength vs profile) | S | OPSD load positive, wind negative |
 | S7-8 | Datasets API: explicit series selection and query selection, window policy; related-series suggestion job (correlation over cache) | C | dataset feeds a run |
+| S7-9 | `tby.physical_range` aggregates excursions into episodes (ADR-0011), as spikes do (follow-up from spec 005) | C | a limit inside the normal range yields one finding per episode, not one per excursion |
+| S7-10 | CLI: per-column epoch `ts_unit` inference and the 1971–2199 range check (ADR-0014 parity with the API) | C | CLI and API read the same epoch file to the same instants |
 
-## Sprint 8 — 11 to 17 Oct — login, tenants and RBAC
+## Sprint 8 — login, tenants and RBAC
 
 Goal: a user logs in with Google, lands in a workspace, and sees only what they may.
 
@@ -83,7 +155,7 @@ Goal: a user logs in with Google, lands in a workspace, and sees only what they 
 | S8-5 | Web: login route, org and workspace picker, session refresh, admin panel v1 (workspaces, members, roles, teams, invitations, audit log viewer) | S | all admin actions possible from the browser |
 | S8-6 | Security baseline pass 1: headers, cookie flags, rate limit on auth routes, dependency audit in CI | S | checklist items ticked in `02-security-baseline.md` |
 
-## Sprint 9 — 18 to 24 Oct — connectors and the series screen
+## Sprint 9 — connectors and the series screen
 
 Goal: real historians feed Tabayyun and a series has a home page.
 
@@ -96,7 +168,7 @@ Goal: real historians feed Tabayyun and a series has a home page.
 | S9-5 | Web: series detail with uPlot chart, M4 downsampled endpoint, findings as shaded windows, quality rug, baseline band; profile and metadata side panel; keyboard range inputs | M | 1M-point series renders under 500 ms after the first load |
 | S9-6 | CSV/Parquet file source that watches a directory (air-gapped sites) | C | files dropped in a folder appear as series |
 
-## Sprint 10 — 25 to 31 Oct — suites, triage, alerts, overview
+## Sprint 10 — suites, triage, alerts, overview
 
 Goal: quality is monitored continuously, not run by hand.
 
@@ -109,7 +181,7 @@ Goal: quality is monitored continuously, not run by hand.
 | S10-5 | Alerts: rules on findings and scores, channels email and webhook, throttling, delivery job | M | an alert email arrives for a critical finding |
 | S10-6 | Overview: score tiles per dimension with 30-day sparklines, worst 5 % series, findings by severity over time, connector health strip; filters in URL | S | overview loads in under 1 s for 10k series |
 
-## Sprint 11 — 1 to 7 Nov — corrections v1
+## Sprint 11 — corrections v1
 
 Goal: a user fixes a window and sees the corrected layer re-scored, with lineage
 (ADR-0010).
@@ -123,7 +195,7 @@ Goal: a user fixes a window and sees the corrected layer re-scored, with lineage
 | S11-5 | Publish targets: Parquet export and SQL table; `publish_correction` job | S | corrected series lands in a Parquet file |
 | S11-6 | Audit and feedback: accepted/rejected corrections logged, threshold-suggestion job skeleton | C | job produces a suggestion row |
 
-## Sprint 12 — 8 to 14 Nov — sharing and the energy pack
+## Sprint 12 — sharing and the energy pack
 
 Goal: results can be shared safely; the catalogue reaches 30 of 30.
 
@@ -136,7 +208,7 @@ Goal: results can be shared safely; the catalogue reaches 30 of 30.
 | S12-5 | Checks 29 and 30: `energy.pv.clipping`, `energy.wind.power_curve_outlier` | S | synthetic tests; Kelmarsh sample |
 | S12-6 | Mobile layouts and PWA manifest, install prompt, offline shell | C | Lighthouse PWA pass |
 
-## Sprint 13 — 15 to 21 Nov — hardening and release 0.1
+## Sprint 13 — hardening and release 0.1
 
 Goal: a pilot site can install and trust it.
 
@@ -150,7 +222,7 @@ Goal: a pilot site can install and trust it.
 | S13-6 | Detection benchmark: synthetic corpus run, ≥95 % detection at ≤2 % false positives per check, published table | M | table in docs |
 | S13-7 | Release 0.1: tag, changelog, GHCR images, pilot install on Hetzner validated end to end | M | `v0.1.0` tag, release notes |
 
-## Sprint 14 — 22 to 28 Nov — metering pack and RepairFlows
+## Sprint 14 — metering pack and RepairFlows
 
 | ID | Story | Prio | Done when |
 |---|---|---|---|
@@ -160,7 +232,7 @@ Goal: a pilot site can install and trust it.
 | S14-4 | RepairFlows: scheduled block pipelines (filter → impute → align → publish) with approval policies, run after suite | M | a flow repairs gaps nightly |
 | S14-5 | `impute.seasonal`, `impute.kalman` in the Rust repair module | S | unit tests recover an injected gap within 5 % RMSE on a daily-cycle series |
 
-## Sprint 15 — 29 Nov to 5 Dec — PV and wind packs
+## Sprint 15 — PV and wind packs
 
 | ID | Story | Prio | Done when |
 |---|---|---|---|
@@ -168,7 +240,7 @@ Goal: a pilot site can install and trust it.
 | S15-2 | Wind: IEC 61400-12-1 filtering presets, icing signature, implausible min/max/std, event-log correlation | M | Kelmarsh/Penmanshiel tests |
 | S15-3 | Physics-aware imputation for PV (clear-sky scaled) and wind (power-curve) | S | imputed day within 10 % of the withheld PVDAQ actual |
 
-## Sprint 16 — 6 to 12 Dec — oil and gas pack 1 (research 05)
+## Sprint 16 — oil and gas pack 1 (research 05)
 
 | ID | Story | Prio | Done when |
 |---|---|---|---|
@@ -178,7 +250,7 @@ Goal: a pilot site can install and trust it.
 | S16-4 | Quality-code sub-findings for OPC `Good_LocalOverride`, `Good_Clamped`, `Uncertain_*` | S | asyncua fixture with overridden node yields a `quality_flags` sub-finding |
 | S16-5 | Choke-vs-flow consistency rule; P/T consistency pairs as `correlation_break` presets | C | 3W instance with choke open and zero gas-lift flow is flagged |
 
-## Sprint 17 — 13 to 19 Dec — oil and gas pack 2
+## Sprint 17 — oil and gas pack 2
 
 | ID | Story | Prio | Done when |
 |---|---|---|---|
@@ -188,7 +260,7 @@ Goal: a pilot site can install and trust it.
 | S17-4 | Meter-factor drift from proving history; alarm-rate, chattering and stale KPIs on event series (EEMUA 191 / ISA-18.2) | S | proving series with 0.06 % repeatability flagged; alarm flood (>10 in 10 min) detected on a synthetic event log |
 | S17-5 | Timestamp skew across RTUs before balance checks | C | a 30 s skew between inlet and outlet is reported and no phantom imbalance results |
 
-## Sprint 18 — 20 to 26 Dec — grid pack, write-back, benchmark corpus (holiday week, half capacity)
+## Sprint 18 — grid pack, write-back, benchmark corpus
 
 | ID | Story | Prio | Done when |
 |---|---|---|---|
@@ -197,7 +269,7 @@ Goal: a pilot site can install and trust it.
 | S18-3 | Threshold suggestions from false-positive feedback | S | three false-positive marks on one check produce a suggestion the editor can accept |
 | S18-4 | Public labelled benchmark corpus (synthetic + PVDAQ, Kelmarsh/Penmanshiel, OPSD, Elia, 3W) under CC-BY with expected findings | C | repository published |
 
-## Sprint 19 — 27 Dec to 2 Jan 2027 — enterprise identity
+## Sprint 19 — enterprise identity
 
 | ID | Story | Prio | Done when |
 |---|---|---|---|
@@ -206,7 +278,7 @@ Goal: a pilot site can install and trust it.
 | S19-3 | Embeds with signed JWT and locked scope | S | embedded series chart renders on an external page and rejects a tampered JWT |
 | S19-4 | SCIM provisioning after Entra/Okta preview testing | C | user created and deprovisioned from an Entra test tenant |
 
-## Sprint 20 — 3 to 9 Jan — fleet baselines and scale
+## Sprint 20 — fleet baselines and scale
 
 | ID | Story | Prio | Done when |
 |---|---|---|---|
@@ -214,7 +286,7 @@ Goal: a pilot site can install and trust it.
 | S20-2 | Operating-mode segmentation (running, idle, maintenance) feeding all adaptive checks | M | profiles and findings are computed per mode; idle periods raise no operational-range findings |
 | S20-3 | Multi-node workers, queue partitioning, Arrow Flight service option | S | two worker nodes share a queue without duplicate runs; Flight endpoint streams a series |
 
-## Sprint 21 — 10 to 16 Jan — connectors and mobile
+## Sprint 21 — connectors and mobile
 
 | ID | Story | Prio | Done when |
 |---|---|---|---|
@@ -222,7 +294,7 @@ Goal: a pilot site can install and trust it.
 | S21-2 | Capacitor mobile wrapper with push notifications for alerts | S | Android and iOS builds receive a push for a critical finding |
 | S21-3 | Explorer: DataFusion SQL over the cache, read-only with timeouts | C | a write statement is rejected; a 10 s query is cancelled |
 
-## Sprint 22 — 17 to 23 Jan — compliance and release 1.0
+## Sprint 22 — compliance and release 1.0
 
 | ID | Story | Prio | Done when |
 |---|---|---|---|
@@ -232,9 +304,12 @@ Goal: a pilot site can install and trust it.
 
 ## Working agreement
 
-- Sunday: branch `sprint/NN-topic` from `main`, stories in priority order, must-haves first.
+- A sprint starts when the previous sprint's last PR is merged: branch `sprint/NN-topic`
+  from `main`, write the sprint's specs, then stories in priority order, must-haves first.
 - Every push runs CI; every PR gets `@coderabbitai full review`; findings are fixed before
   the owner merges. Merges deploy to CapRover automatically.
 - Budget check at ~70 % and ~90 %: at 70 % stop starting new stories that need research; at
   90 % stop, push, write the progress-log entry, and roll the rest forward.
 - Rolled-over stories keep their ID and move to the top of the next sprint.
+- Sprint end: fill in the sprint's row under "Actuals and forecast", add a roadmap progress-log
+  entry, recompute the forecast, and flag any owner dependency the next sprint needs.

@@ -2,8 +2,8 @@
 
 Status legend: `[ ]` open, `[~]` in progress, `[x]` done. One spec per session; mark it here
 and add one line per non-obvious decision below the entry (these are the session notes the
-next session reads). Sprint dates and priorities live in `docs/roadmap/sprints.md`; the
-story ids there (`S6-1`) map to specs here.
+next session reads). Sprint priorities, actual dates and the forecast live in
+`docs/roadmap/sprints.md`; the story ids there (`S6-1`) map to specs here.
 
 ## Sprints 1–5 (done before specs existed)
 
@@ -19,7 +19,7 @@ story ids there (`S6-1`) map to specs here.
       - Sprint 5 lesson: a Dependabot Node major bump removed Corepack from the web image;
         Node majors are now ignored by Dependabot and taken by hand on the LTS line.
 
-## Sprint 5 — landing and planning (20 – 26 Sep 2026)
+## Sprint 5 — landing and planning (done 21 – 22 Sep 2026)
 
 - [x] S5-1 web image copies `pnpm-workspace.yaml`, doc corrections (PR #16, with the Node 22
       pin).
@@ -31,7 +31,7 @@ story ids there (`S6-1`) map to specs here.
         because the API already accepts the fields; spec 005 keeps them when the form moves.
       - Empty inputs are dropped before submit: FastAPI parses `physical_min=""` as a 422.
 
-## Sprint 6 — persistence and jobs (27 Sep – 3 Oct 2026)
+## Sprint 6 — persistence and jobs (22 – 23 Sep 2026, planned 27 Sep – 3 Oct)
 
 - [x] **001 Persistence schema and migrations** — `docs/specs/001-persistence-schema.md`
       SQLAlchemy 2 async models, Alembic, hypertables with the Apache-2-only switch, seed
@@ -111,25 +111,31 @@ story ids there (`S6-1`) map to specs here.
         limit set inside the normal range gave 34 findings in the local check. ADR-0011's
         episode rule should apply to it as it does to spikes.
 
-## Sprint 7 — Parquet cache and cross-series checks (4 – 10 Oct)
+## Sprint 7 — Parquet cache and cross-series checks (next; forecast end 26 – 28 Sep)
 
-Specs to write at sprint start (stories S7-1 … S7-8 in `docs/roadmap/sprints.md`; 007 is
-taken by the RLS spec that specs 001–004 already reference):
+Specs to write at sprint start (stories S7-1 … S7-10 in `docs/roadmap/sprints.md`; 007 is
+taken by the RLS spec that specs 001–004 already reference; the two could-haves S7-9 and
+S7-10 are the follow-ups recorded under 004 and 005):
 - [ ] 006 Parquet cache and coverage
 - [ ] 008 Multi-series core API and datasets
 - [ ] 009 `tby.correlation_break`
 - [ ] 010 `tby.redundant_disagreement`
 - [ ] 011 `tby.balance_residual`
 - [ ] 012 `tby.seasonality_break`
+- [ ] 016 `tby.physical_range` episodes (S7-9, could)
+- [ ] 017 CLI epoch `ts_unit` parity (S7-10, could)
 
-## Sprint 8 — login, tenants and RBAC (11 – 17 Oct)
+## Sprint 8 — login, tenants and RBAC (forecast end 29 Sep – 1 Oct)
 
 - [ ] 007 Row-level security, memberships and roles (ADR-0007)
 - [ ] 013 Keycloak realm and OIDC BFF
 - [ ] 014 Tenant APIs and admin panel v1
 - [ ] 015 Security baseline pass 1
 
+Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, SMTP):
+`docs/roadmap/sprints.md`, "Owner and external dependencies".
+
 ## Later sprints
 
-Stories S9-1 onwards in `docs/roadmap/sprints.md` become specs 016+ when their sprint
+Stories S9-1 onwards in `docs/roadmap/sprints.md` become specs 018+ when their sprint
 starts; the plan is the backlog until then.
