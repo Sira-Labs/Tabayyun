@@ -109,6 +109,8 @@ fn store_err(context: &str, e: object_store::Error) -> Error {
         E::PermissionDenied { .. } | E::Unauthenticated { .. } => {
             "access denied (check the key and its bucket policy)"
         }
+        // A write or listing finds no bucket; a read of a listed object finds it gone.
+        E::NotFound { .. } if context.starts_with("get") => "object not found",
         E::NotFound { .. } => "not found (does the bucket exist?)",
         _ => "store request failed",
     };
@@ -292,16 +294,19 @@ impl Cache {
                     .try_collect()
                     .await
                     .map_err(|e| store_err(&format!("list {prefix}"), e))?;
+                // Keep the listed `Path`s: they are already encoded, and `Path::from` on their
+                // string form would percent-encode reserved characters (`#`, `%`, ...) twice.
                 keys.extend(
-                    listed.into_iter().map(|m| m.location.to_string()).filter(|k| k.ends_with(".parquet")),
+                    listed.into_iter().map(|m| m.location).filter(|p| p.as_ref().ends_with(".parquet")),
                 );
             }
             futures::stream::iter(keys)
-                .map(|key| {
+                .map(|path| {
                     let store = store.clone();
                     async move {
+                        let key = path.to_string();
                         let body = store
-                            .get(&Path::from(key.as_str()))
+                            .get(&path)
                             .await
                             .map_err(|e| store_err(&format!("get {key}"), e))?
                             .bytes()
@@ -739,6 +744,17 @@ mod tests {
     }
 
     #[test]
+    fn reserved_characters_in_ids_round_trip() {
+        // `Path::from` percent-encodes `#`, `%`, spaces and non-ASCII; the listed paths are
+        // already encoded, so a read must use them as they are, not encode them again.
+        let (_dir, cache) = temp_store();
+        let f = hourly("tag #1 %Ä", jan15(), 24, 0.0);
+        cache.write("raw", "plant#1", &f).unwrap();
+        let got = cache.read("raw", "plant#1", &["tag #1 %Ä"], jan15(), jan15() + DAY).unwrap();
+        assert_eq!(got[0].len(), 24);
+    }
+
+    #[test]
     fn write_ns_parsing_and_monotonic() {
         assert_eq!(write_ns_of("raw/src/0a/2026/01/part-0000000000000000042-00ff.parquet"), 42);
         assert_eq!(write_ns_of("garbage"), 0);
@@ -768,10 +784,10 @@ mod tests {
         };
         let cache = Cache::open(&cfg).unwrap();
         let a = hourly("s3-a", jan15(), 24 * 40, 0.0);
-        let r = cache.write("raw", "src", &a).unwrap();
+        let r = cache.write("raw", "plant #1", &a).unwrap();
         assert_eq!(r.files.len(), 2);
-        cache.write("raw", "src", &hourly("s3-a", jan15() + 5 * HOUR, 2, 500.0)).unwrap();
-        let f = &cache.read("raw", "src", &["s3-a"], jan15(), jan15() + DAY).unwrap()[0];
+        cache.write("raw", "plant #1", &hourly("s3-a", jan15() + 5 * HOUR, 2, 500.0)).unwrap();
+        let f = &cache.read("raw", "plant #1", &["s3-a"], jan15(), jan15() + DAY).unwrap()[0];
         assert_eq!(f.len(), 24);
         assert_eq!((f.values[4], f.values[5], f.values[6], f.values[7]), (4.0, 500.0, 501.0, 7.0));
         // Hours 5 and 6 come from the newer write (its first sample is marked uncertain).
