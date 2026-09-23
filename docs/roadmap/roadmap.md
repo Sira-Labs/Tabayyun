@@ -2,15 +2,15 @@
 
 Effort assumes AI-assisted development. "Solo" = one senior engineer full time.
 
-## R0 — Research and design (done, this branch)
+## R0 — Research and design (done 21 Sep 2026)
 
 - Research reports 01–04, product vision, domain model, check specification, first-30
   catalogue, system architecture, authz/sharing design, frontend design, security baseline,
   ADRs 0001–0009.
 
-Weekly sprint breakdown with stories and dates: `docs/roadmap/sprints.md`.
+Sprint breakdown with stories, actual dates and the forecast: `docs/roadmap/sprints.md`.
 
-## R1 — Running core (sprints 1–13, weekly; see `sprints.md`)
+## R1 — Running core (sprints 1–13; forecast in `sprints.md`)
 
 Progress log:
 - **2026-09-21** sprint 1: Rust workspace, frame/profile/score/synth, checks 1, 2, 4, 5, 7,
@@ -33,11 +33,21 @@ Progress log:
   licence and governance docs (ADR-0012, PR #7), Node 22 pin after a Dependabot Node 25
   bump broke the web image, weekly sprint plan (`sprints.md`), spec-driven workflow with
   specs 001–005 and `TASKS.md`, physical limits on the upload page.
+- **2026-09-22 – 23** sprint 6 (planned for 27 Sep – 3 Oct): Postgres schema with Alembic and
+  Timescale hypertables (spec 001), runs API with a Procrastinate worker as a fourth CapRover
+  app (002), findings persisted with overlap deduplication and a lifecycle (003, ADR-0013),
+  series and sources from uploads with metadata precedence and epoch timestamp units (004,
+  ADR-0014, found by the live end-to-end check), web runs list, upload form and run report
+  on persisted runs with Vitest in CI (005). Sprints 1–6 took three days, so the sprint plan
+  was re-baselined from weekly sprints to scope sprints with a rolling forecast.
 
 Goal: a self-hosted install that ingests from Parquet/CSV, PI Web API and OPC UA, runs the
 30 checks on a schedule, scores series, shows findings in a dashboard, lets a user correct a
 selected window with lineage and see the corrected layer re-scored, and lets a user log in
 with Google.
+
+The table below is the original R0 breakdown by layer. Sequencing, stories and dates now
+live in `sprints.md`; the "Week" column is kept only as the design-time estimate.
 
 | Week | Rust core | Python API / workers | Frontend | Platform |
 |---|---|---|---|---|
@@ -52,7 +62,7 @@ Exit criteria: ≥95 % of injected faults in the synthetic corpus detected with 
 positives per check; 100k series profiled in under one hour on 8 cores; all security
 baseline items checked; one pilot installation running.
 
-## R2 — Energy and oil-and-gas depth (sprints 14–18)
+## R2 — Energy and oil-and-gas depth (sprints 14–18; forecast in `sprints.md`)
 
 - Metering pack: VEE rule set (UBP/AEMO/Elexon presets), estimation methods with substitution
   types, DST interval-count rules, estimated-share reporting.
@@ -76,7 +86,7 @@ baseline items checked; one pilot installation running.
 - Public labelled benchmark corpus of DQ faults (synthetic + open datasets: PVDAQ,
   Kelmarsh/Penmanshiel, OPSD, Elia, Petrobras 3W) published under CC-BY.
 
-## R3 — Platform (sprints 19–22)
+## R3 — Platform (sprints 19–22; forecast in `sprints.md`)
 
 - Enterprise SSO per org (OIDC/SAML), SCIM (after IdP preview testing), API tokens.
 - Fleet baselines (template-level thresholds), operating-mode segmentation.
@@ -84,21 +94,24 @@ baseline items checked; one pilot installation running.
 - Multi-node workers, Arrow Flight service option, ClickHouse/Cognite/SiteWise connectors.
 - SOC 2 readiness pack; offline licensing.
 
-## Repository layout (to be created in R1)
+## Repository layout
+
+As of sprint 6. Directories marked *planned* arrive with the sprint in brackets.
 
 ```
 Tabayyun/
 ├── core/                    # Rust workspace
-│   ├── tabayyun-core/       # library: frame, profile, checks, score, downsample, cache, sql
+│   ├── tabayyun-core/       # library: frame, profile, checks, score, downsample, synth
+│   │                        #   (cache [S7], repair [S11] planned)
 │   ├── tabayyun-py/         # PyO3 bindings → wheel `tabayyun_core`
-│   ├── tabayyun-cli/        # offline CLI and benchmarks
-│   └── tabayyun-synth/      # synthetic data generators (shared fixtures)
-├── api/                     # Python: FastAPI app, workers, connectors, plugins
-│   ├── src/tabayyun/
-│   └── tests/
-├── web/                     # Vite + React SPA
-├── deploy/                  # compose, helm, caddy, keycloak realm export, air-gap scripts
-├── checks/                  # check manifests (check.yaml) and docs per check
-├── docs/                    # this documentation
-└── tests/fixtures/          # golden Parquet fixtures and expected results
+│   └── tabayyun-cli/        # `tabayyun` binary: offline checks, CSV/Parquet in, JSON out
+├── api/                     # Python: FastAPI app and the Procrastinate worker (one image)
+│   ├── src/tabayyun/        # routers, services, db (models, packaged migrations), jobs
+│   └── tests/               # unit tests; tests/db/ runs against Postgres
+├── web/                     # Vite + React 19 + TanStack SPA, Vitest tests in src/__tests__/
+├── deploy/                  # compose bundles, Caddyfile, CapRover definitions, deploy README
+│                            #   (Keycloak realm [S8], Helm and air-gap scripts [S13] planned)
+├── docs/                    # research, architecture, ADRs, checks, specs, roadmap, assets
+├── TASKS.md                 # spec backlog and session notes
+└── (planned) checks/        # check manifests for plugin checks [S13]
 ```

@@ -50,9 +50,14 @@ API client (`web/src/api.ts`): `createRun(form)`, `getRun(id)`, `listRuns(cursor
 
 ## Acceptance criteria
 
-- [ ] Upload → report round trip works against the deployed API with a worker, and with
+- [x] Upload → report round trip works against the deployed API with a worker, and with
       `TABAYYUN_INLINE_JOBS=true` locally. (Local half verified 2026-09-23 in Chromium: upload, report,
-      reload, failed run, no console errors. The deployed half is checked after merge.)
+      reload, failed run, no console errors. Deployed half verified 2026-09-23 after PR #29
+      (release run 29): an hourly ISO CSV uploaded as `e2e-web` from `/runs/new` reached
+      `succeeded` on the CapRover worker; the report showed 3 findings (the injected gap,
+      spike and limit breach) and 8 score tiles, survived a reload, the series panel showed
+      the form's limits 0 to 200, and the console stayed clean. The findings were resolved
+      with the reason "test upload".)
 - [x] Reloading `/runs/:id` shows the same report from persisted data.
 - [x] A failed run shows its error text; the console shows no unhandled promise rejection.
 - [x] `physical_min`/`physical_max` entered in the form appear in the run's series metadata.
