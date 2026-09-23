@@ -84,7 +84,7 @@ forecast window.
 | Needed by | Item | Owner action |
 |---|---|---|
 | now | S5-3 | confirm the api app's session secret is generated; delete merged branches |
-| S7 (now) | cache bucket | MinIO bucket `tabayyun-cache` and an access key limited to it; worker env `TABAYYUN_CACHE_URL`, `TABAYYUN_S3_*` (spec 006) |
+| S7 (now) | cache bucket | done 23 Sep: bucket `tabayyun-cache`, a key limited to it, worker env set; round trip verified from the worker over `http://srv-captain--minio:9000` |
 | S8 (~26 Sep) | Google login | Google Cloud OAuth client (web) with redirect URI `https://miftachun.apps.data-and-ai-dude.ch/realms/tabayyun/broker/google/endpoint` (Keycloak brokers Google); id and secret go to Keycloak's Google provider via env at realm import |
 | S8 (~26 Sep) | Keycloak | done 23 Sep: `miftachun.apps.data-and-ai-dude.ch` (one realm per product; `tabayyun` realm imported in S8-1); owner still to replace the bootstrap admin and enable OTP |
 | S8 (~26 Sep) | email | SMTP account and credentials (invitations in S8-4, alerts in S10-5) |

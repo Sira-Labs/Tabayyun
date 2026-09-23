@@ -149,10 +149,18 @@ API (`api/tests`): `test_missing_ranges.py`; `tests/db/test_runs_cache.py`
 ## Deployment
 
 - Live: the worker gets `TABAYYUN_CACHE_URL=s3://tabayyun-cache`, the internal MinIO endpoint
-  (`http://srv-captain--<minio-app>:9000`, with `TABAYYUN_S3_ALLOW_HTTP=true`) and a
-  dedicated access key whose policy allows only that bucket. The owner creates the bucket and
-  the key; `deploy/README.md` lists the steps. The api does not need the cache until the chart
+  `http://srv-captain--minio:9000` with `TABAYYUN_S3_ALLOW_HTTP=true`, and a dedicated access
+  key whose policy allows only that bucket. The owner creates the bucket and the key;
+  `deploy/README.md` lists the steps. The api does not need the cache until the chart
   endpoints (sprint 9).
+- Verified 2026-09-23 before implementation: from inside the worker container, pyarrow wrote,
+  listed, read and deleted a Parquet object in `tabayyun-cache` over the internal endpoint.
+  The live MinIO predates 2025, so AWS-SDK clients with the 2025 default of streamed
+  checksums (pyarrow, boto3, `aws s3`) fail uploads with `411 MissingContentLength` unless
+  run with `AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED` and
+  `AWS_RESPONSE_CHECKSUM_VALIDATION=WHEN_REQUIRED`. The core's `object_store` client sends
+  plain `Content-Length` uploads; the S3 test in this spec uploads with the same client
+  settings the worker uses, and the live acceptance run confirms it against this MinIO.
 - Dev: `deploy/compose.dev.yaml` gains a SeaweedFS service with S3 on port 8333; CI adds the
   same image as a service for the S3 test.
 - Note on MinIO: community builds and images ended in October 2025 and the repository was
