@@ -243,6 +243,28 @@ async def test_cross_series_findings_merge_only_within_their_group(ctx):
     assert sorted((r.evidence["group_id"], r.occurrences) for r in rows) == [("g1", 2), ("g2", 1)]
 
 
+async def test_pair_findings_merge_only_with_the_same_partner(ctx):
+    """In one group, findings of the pairs (demo, b) and (demo, c) stay apart (spec 009)."""
+
+    def pair(partner: str) -> core.Finding:
+        evidence = {
+            "group_id": "g",
+            "group_name": "G",
+            "members": ["demo", "b", "c"],
+            "partner": partner,
+            "rho": 0.1,
+        }
+        return _finding(0, 60, check_id="tby.correlation_break", evidence=evidence)
+
+    await ctx.persist([pair("b")])
+    _, outcome = await ctx.persist([pair("c")])
+    assert (outcome.new, outcome.merged) == (1, 0)
+    _, outcome = await ctx.persist([pair("b"), pair("c")])
+    assert (outcome.new, outcome.merged) == (0, 2)
+    rows = await ctx.findings()
+    assert sorted((r.evidence["partner"], r.occurrences) for r in rows) == [("b", 2), ("c", 2)]
+
+
 async def test_metrics_rewritten_by_a_rerun(ctx):
     """Metric points are keyed by (series, check, name, ts); a rerun rewrites them."""
     metric = {

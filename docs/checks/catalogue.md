@@ -41,7 +41,7 @@ Status column: ✅ implemented in `core/tabayyun-core/src/checks/`, ⬜ planned.
 | 19 | `tby.distribution_drift` | Distribution changed vs reference | plausibility | baseline (auto) | medium | ✅ |
 | 20 | `tby.changepoint` | Abrupt regime change | plausibility | — | medium | ✅ |
 | 21 | `tby.seasonality_break` | Periodic pattern lost or changed | plausibility | baseline (auto) | low | ⬜ |
-| 22 | `tby.correlation_break` | Related series stopped agreeing | consistency | related series | high | ⬜ |
+| 22 | `tby.correlation_break` | Related series stopped agreeing | consistency | series group (related, redundant) | high | ✅ |
 | 23 | `tby.redundant_disagreement` | Redundant sensors disagree | accuracy | redundant series, tolerance | high | ⬜ |
 | 24 | `tby.balance_residual` | Energy/mass balance violated | consistency | balance group definition | high | ⬜ |
 | 25 | `energy.metering.register_reconciliation` | Interval sum ≠ register advance | consistency | register series, multiplier | high | ⬜ |
@@ -317,10 +317,16 @@ Profiles are versioned and stored; findings link to the profile they used.
 
 ### 22. `tby.correlation_break` — Related series stopped agreeing
 - **Dim:** consistency. **Sev:** high.
-- **Algorithm:** rolling Spearman ρ between the series and each configured related series
-  (auto-suggested from baseline |ρ| > 0.8 within the same asset); finding if
-  |ρ_now − ρ_ref| > `delta` or sign flips. Lag drift: cross-correlation lag shifts by > 1 sample.
-- **Params:** `delta` 0.3; window 1 day.
+- **Algorithm:** for every pair of a `related` or `redundant` series group (spec 008), Spearman ρ
+  per UTC segment over the aligned complete bins; the reference is the median ρ of the first
+  `ref_segments` usable segments, which are not judged themselves. A segment breaks when
+  |ρ − ρ_ref| > `delta` or the sign flips with |ρ| > 0.2; consecutive broken segments form one
+  finding. Lag drift: the lag maximising the sign-matched cross-correlation of first
+  differences moves by more than one grid step from a stable reference lag. Findings attach
+  to the pair's first member (`partner` names the other); metrics `rho:<partner>`,
+  `lag_steps:<partner>`. Auto-suggesting related pairs is S10-2.
+- **Params:** `segment` 1d, `delta` 0.3, `min_ref` 0.5, `min_points` 24, `ref_segments` 7,
+  `max_lag` 6 steps, `grid` auto; group `params` override them.
 - **Sources:** Timeseer broken correlations; Li 2022.
 
 ### 23. `tby.redundant_disagreement` — Redundant sensors disagree

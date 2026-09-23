@@ -64,20 +64,73 @@ Metrics per pair and segment: `rho`, `lag_steps`.
 
 ## Acceptance criteria
 
-- [ ] Synthetic pair correlated at ρ≈0.9 with one decoupled day → exactly one finding over
+- [x] Synthetic pair correlated at ρ≈0.9 with one decoupled day → exactly one finding over
       that day.
-- [ ] Sign flip over two days → one finding with negative `rho`.
-- [ ] A 3-step lag appearing for a day → one lag finding, no correlation finding.
-- [ ] Independent pair → no findings, metrics only.
-- [ ] Too little data → `skipped` with the reason, no findings.
-- [ ] Measured on a Petrobras 3W instance (P-PDG vs T-PDG): result and interpretation
-      recorded in this spec (not a CI test; the dataset is not in the repository).
-- [ ] Catalogue row 22 marked ✅ with the final params.
+- [x] Sign flip over two days → one finding with negative `rho`.
+- [x] A 3-step lag appearing for a day → one lag finding, no correlation finding.
+- [x] Independent pair → no findings, metrics only.
+- [x] Too little data → `skipped` with the reason, no findings.
+- [x] Measured on a Petrobras 3W instance (P-PDG vs T-PDG): result and interpretation
+      recorded in this spec (not a CI test; the dataset is not in the repository). See
+      "Measurement".
+- [x] Catalogue row 22 marked ✅ with the final params.
 
 ## Test cases
 
 Unit (`checks::correlation_break::tests`): `decoupled_day`, `sign_flip`, `lag_shift`,
-`independent_pair_is_silent`, `too_few_segments_skips`, `ties_rank_correctly`.
+`negatively_related_pair_lag`, `independent_pair_is_silent`, `too_few_segments_skips`,
+`ties_rank_correctly`, `every_pair_of_a_triple_is_judged_and_named`,
+`bad_group_params_are_invalid_params`, `registry_runs_it_on_redundant_groups`. API:
+`test_pair_findings_merge_only_with_the_same_partner`.
+
+## Measurement (Petrobras 3W, 2026-09-23)
+
+3W instances last hours, not weeks, so the run used `segment` 30m, `grid` 1m (mean per
+minute of the 1 Hz data), `min_points` 24 and `ref_segments` 7 (a 3.5 h reference), via
+`tabayyun check-multi <file> --ts-col timestamp --value-cols P-PDG,T-PDG`. The 3W files are
+brotli-compressed Parquet, which the CLI's reader does not decode; they were rewritten with
+zstd first.
+
+| Instance | Class | Result |
+|---|---|---|
+| WELL-00001, three instances | 0, 1, 7 | P-PDG and T-PDG are constant 0 (dead gauges): no usable segment, `insufficient baseline`; the flatline check covers these |
+| WELL-00015_20170620122925 | 5 (rapid productivity loss) | 14 segments, ρ_ref 0.22 < `min_ref`: not a related pair here, metrics only |
+| WELL-00019_20141117190526 | 8 (hydrate in production line), 3.6 days | 175 segments, ρ_ref −0.94, lag 0 throughout; one finding, 2014-11-17 22:30–23:00, ρ −0.40 |
+
+Interpretation: on WELL-00019 the downhole pressure and temperature move in lockstep with
+ρ ≈ −1 for three days, including the labelled hydrate transient (class 108 from
+2014-11-18 07:27) and steady state; a hydrate downstream of the wellhead does not decouple the
+downhole pair, so this check is not the detector for class 8. The one finding lies in the
+labelled normal period: ρ really weakened for half an hour, but no labelled event explains it.
+One of the seven reference segments already had ρ −0.48, so at 30-minute segments normal
+operation occasionally dips this far; a stored baseline (sprint 10) with a spread-based
+threshold would judge it more tightly than a fixed `delta`.
+
+The first measurement also found two lag bugs, fixed before this record: the lag search
+maximised the signed correlation, which for a negatively related pair picks the least negative
+lag (random lags, four false lag findings on WELL-00019), and raw levels of slowly trending
+series correlate at every lag, which flattens the profile. See "Implementation edits".
+
+## Implementation edits
+
+Recorded on 2026-09-23; approved with the plan.
+
+- A finding attaches to the pair member that comes first in the group, not the group's first
+  member (which need not be in the pair); `partner` names the other. Metrics are named
+  `rho:<partner>` and `lag_steps:<partner>`, because metric points are keyed by
+  (series, check, name, ts) and the pairs of one series would overwrite each other.
+- Dedup: a finding with a `partner` merges only into a finding with the same `partner`
+  (second ADR-0013 amendment), so the pairs (a, b) and (a, c) of one group stay apart.
+- Lag is read from first differences, maximising the correlation times the segment's sign of
+  ρ. It is judged only in segments whose correlation held and whose best sign-matched
+  cross-correlation is at least `min_ref`, and only when the reference lags are stable (MAD
+  ≤ 1 step); otherwise a decoupled day would also report a random lag, and a pair without a
+  sharp cross-correlation peak would report noise.
+- Group `params` override the check's params key by key; keys the check does not know (other
+  checks' params) are ignored, a wrong type is `InvalidParams`, and so are a zero `segment` or
+  `grid` and a `max_lag` above 240 steps.
+- The `insufficient baseline` skip names the pair and the number of usable segments.
+  Segments are UTC-aligned (`ts / segment`), so a skipped day separates episodes.
 
 ## Out of scope
 

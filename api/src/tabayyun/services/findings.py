@@ -10,7 +10,8 @@ not created by the same run, and overlaps the incoming window. Among several can
 one with the largest overlap ratio (intersection over union) wins. `muted` and `resolved`
 findings never absorb: a problem re-reported after resolution is a new finding. A
 cross-series finding (evidence with `group_id`, spec 008) merges only into a finding of the
-same group, so two groups sharing a series never merge their findings (ADR-0013 amendment).
+same group, so two groups sharing a series never merge their findings; one naming a `partner`
+(a pair check, spec 009) merges only into a finding of the same pair (ADR-0013 amendments).
 """
 
 from __future__ import annotations
@@ -150,11 +151,12 @@ async def _best_candidate(
         .with_for_update()
     )
     shape = _shape(incoming.evidence)
-    group = incoming.evidence.get("group_id")
+    # Evidence values that identify a cross-series finding's subject (ADR-0013 amendments).
+    identity = {k: incoming.evidence[k] for k in ("group_id", "partner") if k in incoming.evidence}
     candidates = [
         f
         for f in (await session.execute(stmt)).scalars()
-        if _shape(f.evidence) == shape and (group is None or f.evidence.get("group_id") == group)
+        if _shape(f.evidence) == shape and all(f.evidence.get(k) == v for k, v in identity.items())
     ]
     if not candidates:
         return None
