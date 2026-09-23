@@ -198,9 +198,11 @@ batch series per request cycle or write concurrently.
   external id, so dataset runs (spec 008) read by the ids they already hold.
 - A second upload whose range starts at the same instant widens the existing coverage row
   (`ON CONFLICT` on the primary key) instead of failing.
-- `object_store` is pinned at 0.13, the version `parquet` 59 resolves (one copy in the tree);
-  `with_client_options` replaces the whole option set, so `allow_http` is set on the client
-  options, a bug found by the RustFS test.
+- `object_store` 0.14.2: the cache fetches objects and parses the bytes itself, so it does not
+  use `parquet`'s own `object_store` integration and is not tied to its version. 0.13 was tried
+  first and failed `cargo audit` in CI (its `quick-xml` 0.39 has RUSTSEC-2026-0194/0195; 0.14.1+
+  uses 0.41). `with_client_options` replaces the whole option set, so `allow_http` is set on
+  the client options, a bug found by the RustFS test.
 - Store errors are summarised as `<what>: <hint>: <root cause>` (for example
   `access denied (check the key and its bucket policy)`, `Connection refused`), because that
   line is what an operator reads in `stats.cache.error`; `deploy/caprover.md` lists them.

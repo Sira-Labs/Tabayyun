@@ -126,7 +126,8 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
         same day; the bucket was still empty).
       - The cache write runs after the completion transaction (no network I/O under the
         series lock); coverage and `stats.cache` follow in a short transaction.
-      - Cache keys are series and source UUIDs; object_store pinned at parquet's 0.13.
+      - Cache keys are series and source UUIDs; object_store 0.14.2 (0.13's quick-xml failed
+        `cargo audit`), independent of parquet's version.
       - Stays `[~]` until CI's RustFS job and the live upload run confirm it.
 - [ ] **008 Multi-series checks, series groups and dataset runs** — `docs/specs/008-multi-series-and-datasets.md` (S7-3, S7-8)
 - [ ] **009 `tby.correlation_break`** — `docs/specs/009-correlation-break.md` (S7-4)

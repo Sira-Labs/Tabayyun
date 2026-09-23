@@ -42,8 +42,9 @@ kernels, DataFusion (already planned for the SQL explorer) and Polars.
 | DataFusion for checks | Streaming, SQL surface | Same objections as in ADR-0002: rolling and per-series logic is clumsy | Kept for SQL checks and the explorer only |
 
 ## Consequences
-- One Arrow version set (`arrow`, `parquet`, `pyo3-arrow`, and `object_store` at the version
-  `parquet` resolves) is bumped together, as `CLAUDE.md` already requires for Arrow.
+- One Arrow version set (`arrow`, `parquet`, `pyo3-arrow`) is bumped together, as `CLAUDE.md`
+  already requires for Arrow. `object_store` (spec 006) is independent: the cache parses
+  fetched bytes and does not use `parquet`'s `object_store` integration.
 - Kernels keep the ADR-0002 rule that checks are pure: the new `cache` module does I/O and
   lives outside `checks`.
 - The architecture document's "Polars lazy/streaming engine" line is replaced by this ADR's
