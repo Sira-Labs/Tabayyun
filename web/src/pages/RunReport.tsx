@@ -13,10 +13,12 @@ const PROGRESS_TEXT: Record<string, string> = {
   running: "Running the checks…",
 };
 
+/** Most severe first, then earliest window. */
 function byImportance(a: Finding, b: Finding): number {
   return (severityRank[a.severity] ?? 9) - (severityRank[b.severity] ?? 9) || a.window.start - b.window.start;
 }
 
+/** One finding: a button row that expands its evidence panel. */
 function FindingRow({ finding }: { finding: Finding }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
@@ -60,6 +62,7 @@ function FindingRow({ finding }: { finding: Finding }) {
   );
 }
 
+/** The run's findings, sorted, each expandable. */
 function Findings({ run }: { run: Run }) {
   const findings = useQuery({ queryKey: ["run-findings", run.id], queryFn: () => api.listRunFindings(run.id) });
   if (findings.isPending) return <p>Loading findings…</p>;
@@ -94,6 +97,7 @@ function Findings({ run }: { run: Run }) {
   );
 }
 
+/** Overall and per-dimension score tiles from the run's score row. */
 function Scores({ run }: { run: Run }) {
   const seriesId = run.series[0]?.id;
   const scores = useQuery({
@@ -116,6 +120,7 @@ function Scores({ run }: { run: Run }) {
   );
 }
 
+/** The series' stored metadata (unit, limits, counts). */
 function SeriesPanel({ seriesId }: { seriesId: string }) {
   const series = useQuery({ queryKey: ["series", seriesId], queryFn: () => api.getSeries(seriesId) });
   if (!series.data) return null;
@@ -145,6 +150,7 @@ function SeriesPanel({ seriesId }: { seriesId: string }) {
   );
 }
 
+/** Run title, status and timing, window, samples and finding counts. */
 function Header({ run }: { run: Run }) {
   const stats = run.stats;
   return (

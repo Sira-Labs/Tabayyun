@@ -5,6 +5,7 @@ import { json, makeRun, renderApp, stubFetch } from "./helpers";
 
 // jsdom does not count files set by user-event toward a file input's `required` constraint,
 // so the tests submit the form directly; real browsers validate it before submitting.
+/** Submit the form, bypassing jsdom's file `required` check. */
 function submit() {
   fireEvent.submit(screen.getByRole("button", { name: "Start run" }).closest("form")!);
 }

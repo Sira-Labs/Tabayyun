@@ -15,6 +15,7 @@ export function RunForm() {
     onSuccess: (run) => navigate({ to: "/runs/$runId", params: { runId: run.id } }),
   });
 
+  /** Drop empty optional fields, then post the form. */
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);

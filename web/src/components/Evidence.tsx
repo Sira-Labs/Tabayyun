@@ -11,10 +11,12 @@ const MIN_INSTANT_NS = 1e17;
 const MAX_INSTANT_NS = 1e19;
 const TIME_KEY = /(^|_)(ts|start|end|at|time|newest|oldest|first|last)$/;
 
+/** A time-like key holding a plausible ns-since-epoch value. */
 function isInstant(key: string, v: number): boolean {
   return TIME_KEY.test(key) && Number.isInteger(v) && v >= MIN_INSTANT_NS && v < MAX_INSTANT_NS;
 }
 
+/** One scalar evidence value as text, by key and type. */
 function formatScalar(key: string, v: unknown): string {
   if (v === null || v === undefined) return "—";
   if (typeof v === "boolean") return v ? "yes" : "no";
@@ -26,14 +28,17 @@ function formatScalar(key: string, v: unknown): string {
   return String(v);
 }
 
+/** Evidence key as a label (`gap_start` → `gap start`). */
 function label(key: string): string {
   return key.replace(/_/g, " ");
 }
 
+/** Not an object or array. */
 function isScalar(v: unknown): boolean {
   return v === null || typeof v !== "object";
 }
 
+/** One evidence value: scalar, inline list, nested list or nested object. */
 function Value({ name, value }: { name: string; value: unknown }) {
   if (Array.isArray(value)) {
     if (value.length === 0) return <span className="text-slate-500">none</span>;

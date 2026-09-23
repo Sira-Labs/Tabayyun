@@ -1,5 +1,6 @@
 const NS_PER_MS = 1_000_000;
 
+/** Zero-padded absolute integer part. */
 function pad(n: number, width = 2): string {
   return String(Math.trunc(Math.abs(n))).padStart(width, "0");
 }

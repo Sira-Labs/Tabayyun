@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { useRunPolling } from "../hooks/useRunPolling";
 import { makeRun, stubFetch } from "./helpers";
 
+/** Query client provider for the hook under test. */
 function wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;

@@ -4,6 +4,7 @@ import { RunForm } from "./pages/RunForm";
 import { RunReport } from "./pages/RunReport";
 import { RunsList } from "./pages/RunsList";
 
+/** Fallback for unknown paths. */
 function NotFound() {
   return <p>Page not found.</p>;
 }

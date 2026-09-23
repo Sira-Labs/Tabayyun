@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { Finding } from "../types";
 import { makeRun, renderApp, stubFetch } from "./helpers";
 
+/** A stored completeness finding one hour long. */
 function finding(id: string, severity: Finding["severity"], start: number, summary: string): Finding {
   return {
     id,

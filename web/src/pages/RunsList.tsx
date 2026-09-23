@@ -6,6 +6,7 @@ import { TERMINAL_STATUSES } from "../hooks/useRunPolling";
 import { formatDuration, formatLocalTime } from "../format";
 import type { Run } from "../types";
 
+/** Run duration as text, or a dash while it has none. */
 function duration(run: Run): string {
   return run.duration_ms === null ? "—" : formatDuration(run.duration_ms * 1_000_000);
 }

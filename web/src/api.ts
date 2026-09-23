@@ -4,6 +4,7 @@ import type { Finding, Page, Run, RunCreated, ScoreRow, Series } from "./types";
 
 const HEADERS = { Accept: "application/json", "X-Tabayyun-Request": "1" };
 
+/** A non-2xx answer; `message` is the server's detail when it sent one. */
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -29,6 +30,7 @@ export function detailText(detail: unknown): string | null {
   return null;
 }
 
+/** Fetch JSON with the CSRF header; throws ApiError with the server's detail. */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(path, { credentials: "same-origin", ...init, headers: { ...HEADERS, ...init.headers } });
   if (!res.ok) {
@@ -43,10 +45,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** GET a JSON resource. */
 export function apiGet<T>(path: string): Promise<T> {
   return request<T>(path);
 }
 
+/** Send a JSON body with an unsafe method. */
 export function apiSend<T>(method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
   return request<T>(path, {
     method,
@@ -55,6 +59,7 @@ export function apiSend<T>(method: "POST" | "PUT" | "PATCH" | "DELETE", path: st
   });
 }
 
+/** Query string from the defined parameters, with a leading `?` or empty. */
 function query(params: Record<string, string | number | undefined>): string {
   const q = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) if (value !== undefined) q.set(key, String(value));

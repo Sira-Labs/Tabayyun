@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { makeRun, renderApp, stubFetch } from "./helpers";
 
+/** Run number `n` of a list page. */
 function run(n: number) {
   return makeRun({ id: `00000000-0000-0000-0000-00000000000${n}`, series: [{ id: "s", external_id: `series-${n}`, score: 90 + n }] });
 }
