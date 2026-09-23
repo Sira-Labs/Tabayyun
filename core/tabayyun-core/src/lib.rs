@@ -8,6 +8,7 @@
 //! - A [`cross::CrossCheck`] runs on the members of a [`cross::SeriesGroup`], put on one
 //!   grid by [`align`]; [`Registry::run_multi`] runs both kinds over several series (spec 008).
 //! - [`score`] turns findings into per-dimension and overall scores.
+//! - [`seasonal`] detects a series' dominant period and seasonal strength (spec 012).
 //! - [`cache`] stores raw observations as Parquet on local disk or S3 (spec 006); it is the
 //!   only module that does I/O.
 //! - [`synth`] generates deterministic synthetic series with injected faults for tests,
@@ -28,6 +29,7 @@ pub mod profile;
 pub mod quality;
 pub mod registry;
 pub mod score;
+pub mod seasonal;
 pub mod synth;
 pub mod time;
 

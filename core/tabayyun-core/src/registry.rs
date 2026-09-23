@@ -57,6 +57,7 @@ impl Registry {
             checks::level_drift::ID,
             checks::distribution_drift::ID,
             checks::changepoint::ID,
+            checks::seasonality_break::ID,
         ]
     }
 
@@ -102,6 +103,7 @@ impl Registry {
                 parse::<checks::distribution_drift::DistributionDrift>(id, params)
             }
             checks::changepoint::ID => parse::<checks::changepoint::Changepoint>(id, params),
+            checks::seasonality_break::ID => parse::<checks::seasonality_break::SeasonalityBreak>(id, params),
             other => Err(Error::UnknownCheck(other.to_string())),
         }
     }

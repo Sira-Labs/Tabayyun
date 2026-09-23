@@ -1,7 +1,7 @@
 //! Baseline profile: robust per-series statistics used as adaptive thresholds.
 //!
-//! Sprint 1 computes only what the structural checks need; the full profile (seasonality,
-//! autocorrelation, noise, quantiles of rate of change) arrives with the drift checks.
+//! Structural statistics, robust noise and value quantiles, and the dominant period with its
+//! seasonal strength (`seasonal`, spec 012).
 
 use crate::frame::{modal_interval, SeriesFrame};
 use serde::{Deserialize, Serialize};
@@ -42,6 +42,10 @@ pub struct Profile {
     pub quality_uncertain: f64,
     pub quality_bad: f64,
     pub quality_estimated: f64,
+    /// Shortest candidate period (1 d, 7 d, 365 d) with a rhythm, ns (spec 012).
+    pub dominant_period_ns: Option<i64>,
+    /// Hyndman's seasonal strength F_S (0–1) at `dominant_period_ns`.
+    pub seasonal_strength: Option<f64>,
 }
 
 impl Profile {
@@ -96,6 +100,11 @@ impl Profile {
             rates.sort_by(|a, b| a.partial_cmp(b).unwrap());
             p.rate_p999 = Some(quantile_f64(&rates, 0.999));
             p.noise_mad = robust_sigma_of_diffs(&mut diffs);
+        }
+        if let Some((period, strength)) = crate::seasonal::detect(&f, &crate::seasonal::DEFAULT_CANDIDATES_NS)
+        {
+            p.dominant_period_ns = Some(period);
+            p.seasonal_strength = Some(strength);
         }
         let total = n as f64;
         for q in &f.quality {

@@ -40,7 +40,7 @@ Status column: ✅ implemented in `core/tabayyun-core/src/checks/`, ⬜ planned.
 | 18 | `tby.level_drift` | Slow bias / trend in the level | accuracy | baseline (auto) | medium | ✅ |
 | 19 | `tby.distribution_drift` | Distribution changed vs reference | plausibility | baseline (auto) | medium | ✅ |
 | 20 | `tby.changepoint` | Abrupt regime change | plausibility | — | medium | ✅ |
-| 21 | `tby.seasonality_break` | Periodic pattern lost or changed | plausibility | baseline (auto) | low | ⬜ |
+| 21 | `tby.seasonality_break` | Periodic pattern lost or changed | plausibility | — | low | ✅ |
 | 22 | `tby.correlation_break` | Related series stopped agreeing | consistency | series group (related, redundant) | high | ✅ |
 | 23 | `tby.redundant_disagreement` | Redundant sensors disagree | accuracy | series group (redundant), tolerance optional | high | ✅ |
 | 24 | `tby.balance_residual` | Energy/mass balance violated | consistency | balance group definition | high | ✅ |
@@ -65,7 +65,7 @@ critical findings):
 | `resolution` | smallest non-zero |Δ| over the window, and distinct-value count |
 | `rate_p999` | 99.9th percentile of |Δvalue/Δt| |
 | `noise_mad` | MAD of first differences |
-| `dominant_period, seasonal_strength` | augurs seasonality detection + MSTL |
+| `dominant_period, seasonal_strength` | shortest candidate with a detrended ACF ≥ 0.3; Hyndman's F_S (spec 012) |
 | `acf1` | lag-1 autocorrelation |
 | `quality_mix` | share of good/uncertain/bad/estimated |
 | `constant_fraction` | fraction of samples in runs longer than 10 samples |
@@ -311,9 +311,17 @@ Profiles are versioned and stored; findings link to the profile they used.
 
 ### 21. `tby.seasonality_break` — Periodic pattern lost
 - **Dim:** plausibility. **Sev:** low.
-- **Algorithm:** if baseline `seasonal_strength` > 0.6, compute strength and dominant
-  period on the window; finding if strength drops by > 50 % or period changes.
-- **Sources:** STL/MSTL (augurs); ydata-profiling seasonality alerts.
+- **Algorithm:** regularise (expected interval, at least 1 h) and cut into epoch-anchored
+  segments of max(4 × period, 7 d). Per segment, the dominant period is the shortest candidate
+  (1 d, 7 d, 365 d) whose autocorrelation after removing the moving-average trend is ≥ 0.3,
+  and strength is Hyndman's F_S from a classical decomposition. Reference = the first 4
+  segments (period they agree on, median strength); if it is ≥ 0.6, later segments are
+  flagged when their strength drops by > 50 % (`weaker`) or another strong period appears
+  (`period_changed`). Consecutive broken segments form one finding; metric
+  `seasonal_strength` per segment. Spec 012.
+- **Sources:** Hyndman & Athanasopoulos, FPP3 §4.3 (feature F_S); classical decomposition;
+  ydata-profiling seasonality alerts. OPSD DE load (silent over normal weeks, a planted flat
+  week found) and DE wind (not seasonal, silent).
 
 ### 22. `tby.correlation_break` — Related series stopped agreeing
 - **Dim:** consistency. **Sev:** high.

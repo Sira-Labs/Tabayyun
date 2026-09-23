@@ -157,7 +157,14 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
       - Suspect changed: common mode of all shares removed before attributing (the spec's rule
         gave the opposite side half the blame); needs a true median, not `median_mad`'s rank.
       - Episode building and summary formatting now shared in `cross.rs` with spec 010.
-- [ ] **012 Seasonality in the profile, `tby.seasonality_break`** — `docs/specs/012-seasonality-break.md` (S7-7)
+- [x] **012 Seasonality in the profile, `tby.seasonality_break`** — `docs/specs/012-seasonality-break.md` (S7-7)
+      - ACF after removing the moving-average trend (raw ACF read random walks and wind as daily).
+      - Shortest significant candidate, not the highest ACF (harmonics tie); load reads daily.
+      - Reference always from the leading segments: the run's profile is its own data.
+      - OPSD DE load/wind/solar 2015–2020: silent; a planted flat load week is the one finding.
+      - Grid capped at 500 000 bins with checked span arithmetic (a stray far timestamp).
+        Follow-up: `frame::modal_interval` (`0 − i64::MIN`) and `Profile::compute`'s
+        `3 × interval` gap cut still overflow on timestamps near the i64 limits.
 - [ ] **016 `tby.physical_range` episodes** — `docs/specs/016-physical-range-episodes.md` (S7-9, could)
 - [ ] **017 CLI epoch units match the API** — `docs/specs/017-cli-epoch-units.md` (S7-10, could)
 

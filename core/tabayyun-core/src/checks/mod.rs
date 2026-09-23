@@ -23,6 +23,7 @@ pub mod redundant_disagreement;
 pub mod resolution_loss;
 pub mod sampling_regularity;
 pub mod scale_shift;
+pub mod seasonality_break;
 pub mod spikes;
 pub mod staleness;
 pub mod timestamp_integrity;

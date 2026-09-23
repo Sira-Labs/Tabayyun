@@ -91,6 +91,18 @@ Unit (`checks::balance_residual::tests`): `closing_balance_is_silent`,
 `idle_members_floor_uncertainty_at_resolution`, `bad_params_are_invalid`,
 `registry_runs_it_on_balance_groups_only`; `cross::tests::episodes_drop_short_runs_then_merge`.
 
+## Live check (2026-09-23, after PR #36, release run 36)
+
+Four hourly series over 7 days (`live-011-in` 100 MW and feeders `live-011-f1`/`-f2`/`-f3` at
+40/30/27 MW: a shared daily load curve, 0.2 % meter noise, a 3 % loss; `-f3` reads 30 % low on
+2024-02-05 from 08:00 to 14:00 UTC), a `balance` group (one input, three outputs, default
+params) and a fixed 7-day dataset gave a dataset run on the CapRover worker with exactly one
+`tby.balance_residual` finding, on `live-011-f3`, window 2024-02-05 08:00–14:00, "Balance
+live-011 substation … does not close for 6h: inputs exceed outputs by 11 % (band -1 % to 5 %);
+live-011-f3 explains most of it", `reason` `above_band`, `z_max` 5.5, contribution of f3 1.01
+(the others within ±0.01). The other six findings were `tby.level_drift` (4) and `tby.spikes`
+(2) on the synthetic load; all seven were resolved as "test upload".
+
 ## Implementation edits
 
 Recorded on 2026-09-23; both rule changes were approved with the plan, after a simulation
