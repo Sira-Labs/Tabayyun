@@ -140,7 +140,13 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
       - Cross-series findings merge only within their group (ADR-0013 amendment).
       - Live dataset run verified after PR #32 (group run, data read from RustFS); stays `[~]`
         until the live criterion's cross-series findings, which need 009–010.
-- [ ] **009 `tby.correlation_break`** — `docs/specs/009-correlation-break.md` (S7-4)
+- [x] **009 `tby.correlation_break`** — `docs/specs/009-correlation-break.md` (S7-4)
+      - Pair findings attach to the pair's first member with `partner`; metrics carry the
+        partner in their name; dedup also matches `partner` (ADR-0013 amendment).
+      - Lag is read from first differences with the pair's sign, and judged only where the
+        correlation held and the reference lag is stable (both found on 3W WELL-00019).
+      - 3W: dead PDG gauges on WELL-00001 skip; WELL-00019 (hydrate) keeps ρ ≈ −1 through the
+        event, one short unexplained dip flagged. Follow-up: the CLI cannot read brotli Parquet.
 - [ ] **010 `tby.redundant_disagreement`** — `docs/specs/010-redundant-disagreement.md` (S7-5)
 - [ ] **011 `tby.balance_residual`** — `docs/specs/011-balance-residual.md` (S7-6)
 - [ ] **012 Seasonality in the profile, `tby.seasonality_break`** — `docs/specs/012-seasonality-break.md` (S7-7)
