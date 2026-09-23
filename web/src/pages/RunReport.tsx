@@ -108,16 +108,32 @@ function Scores({ run }: { run: Run }) {
   const row = scores.data?.items.find((s) => s.run_id === run.id);
   // run.series[].score is stored on the run at completion, so it is this run's overall score.
   const overall = row?.overall ?? run.series[0]?.score;
-  if (overall === undefined) return null;
+  if (overall === undefined && !scores.isError) return null;
   return (
-    <section aria-label="Scores" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <ScoreTile label="Overall" value={overall} />
-      {Object.entries(row?.dimensions ?? {})
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([dimension, value]) => (
-          <ScoreTile key={dimension} label={dimension} value={value} />
-        ))}
-    </section>
+    <>
+      {overall !== undefined && (
+        <section aria-label="Scores" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <ScoreTile label="Overall" value={overall} />
+          {Object.entries(row?.dimensions ?? {})
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([dimension, value]) => (
+              <ScoreTile key={dimension} label={dimension} value={value} />
+            ))}
+        </section>
+      )}
+      {scores.isError && (
+        <p role="alert" className="text-sm text-red-700 dark:text-red-400">
+          Could not load the dimension scores: {scores.error.message}{" "}
+          <button
+            type="button"
+            onClick={() => void scores.refetch()}
+            className="font-medium underline underline-offset-2"
+          >
+            Retry
+          </button>
+        </p>
+      )}
+    </>
   );
 }
 
