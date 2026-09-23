@@ -4,6 +4,7 @@
 //! metadata the frame does not carry return [`Error::MissingMetadata`] so the caller can
 //! report a skip instead of a false pass.
 
+pub mod balance_residual;
 pub mod changepoint;
 pub mod completeness;
 pub mod correlation_break;

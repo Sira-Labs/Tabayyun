@@ -151,7 +151,12 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
       - Auto tolerance for 3+ members from the MAD of deviations from the bin median, floored
         at 2 × the data's estimated resolution when metadata has none.
       - Short runs are dropped before close runs merge (spec order), so blips stay silent.
-- [ ] **011 `tby.balance_residual`** — `docs/specs/011-balance-residual.md` (S7-6)
+- [x] **011 `tby.balance_residual`** — `docs/specs/011-balance-residual.md` (S7-6)
+      - Flag rule changed: r outside the loss band by more than k σ_r (the spec's raw |r| test
+        flagged normal losses); `reason` is `above_band` or `below_band`.
+      - Suspect changed: common mode of all shares removed before attributing (the spec's rule
+        gave the opposite side half the blame); needs a true median, not `median_mad`'s rank.
+      - Episode building and summary formatting now shared in `cross.rs` with spec 010.
 - [ ] **012 Seasonality in the profile, `tby.seasonality_break`** — `docs/specs/012-seasonality-break.md` (S7-7)
 - [ ] **016 `tby.physical_range` episodes** — `docs/specs/016-physical-range-episodes.md` (S7-9, could)
 - [ ] **017 CLI epoch units match the API** — `docs/specs/017-cli-epoch-units.md` (S7-10, could)

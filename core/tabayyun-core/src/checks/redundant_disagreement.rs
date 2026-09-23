@@ -16,9 +16,11 @@
 
 use super::{duration_param, CheckContext, CheckOutput};
 use crate::align::align;
-use crate::cross::{with_group_params, CrossCheck, GroupKind, SeriesGroup};
+use crate::cross::{
+    episodes, member_name as name, num, with_group_params, CrossCheck, GroupKind, SeriesGroup,
+};
 use crate::error::{Error, Result};
-use crate::finding::{Dimension, Finding, Metric, Severity, Window};
+use crate::finding::{Dimension, Finding, Metric, Severity};
 use crate::frame::SeriesFrame;
 use crate::profile::{median_mad, resolution};
 use crate::time::{format_duration, NS_PER_DAY};
@@ -67,24 +69,6 @@ struct Bin {
 
 fn median(xs: &[f64]) -> Option<f64> {
     median_mad(xs).map(|(m, _)| m)
-}
-
-fn name(f: &SeriesFrame) -> &str {
-    f.meta.name.as_deref().unwrap_or(&f.meta.id)
-}
-
-/// A number for a summary: three significant digits, no trailing zeros.
-fn num(x: f64) -> String {
-    if x == 0.0 || !x.is_finite() {
-        return format!("{x}"); // log10 of 0 is -inf and would overflow the digit count
-    }
-    let digits = (2 - x.abs().log10().floor() as i32).clamp(0, 6) as usize;
-    let s = format!("{x:.digits$}");
-    if s.contains('.') {
-        s.trim_end_matches('0').trim_end_matches('.').to_string()
-    } else {
-        s
-    }
 }
 
 impl RedundantDisagreement {
@@ -195,41 +179,12 @@ impl CrossCheck for RedundantDisagreement {
         let group_key = &group.id;
         self.metrics(frames, &bins, group_key, &mut out);
 
-        // Runs of consecutive disagreeing bins on the grid, then episodes.
-        let grid_ns = aligned.grid_ns;
-        let mut runs: Vec<(usize, usize)> = Vec::new(); // indices into `bins`, [s, e)
-        let mut i = 0;
-        while i < bins.len() {
-            if !bins[i].disagrees {
-                i += 1;
-                continue;
-            }
-            let s = i;
-            while i + 1 < bins.len() && bins[i + 1].disagrees && bins[i + 1].ts - bins[i].ts == grid_ns {
-                i += 1;
-            }
-            runs.push((s, i + 1));
-            i += 1;
-        }
-        let span = |s: usize, e: usize| Window::new(bins[s].ts, bins[e - 1].ts + grid_ns);
-        let long: Vec<(usize, usize)> =
-            runs.into_iter().filter(|&(s, e)| span(s, e).duration() >= min_duration).collect();
-        let mut episodes: Vec<Vec<(usize, usize)>> = Vec::new();
-        for run in long {
-            match episodes.last_mut() {
-                Some(ep)
-                    if bins[run.0].ts - span(ep[ep.len() - 1].0, ep[ep.len() - 1].1).end < min_duration =>
-                {
-                    ep.push(run)
-                }
-                _ => episodes.push(vec![run]),
-            }
-        }
+        let ts: Vec<i64> = bins.iter().map(|b| b.ts).collect();
+        let flags: Vec<bool> = bins.iter().map(|b| b.disagrees).collect();
 
         let unit = frames[0].meta.unit.as_deref().map(|u| format!(" {u}")).unwrap_or_default();
-        for ep in episodes {
-            let w = Window::new(bins[ep[0].0].ts, span(ep[ep.len() - 1].0, ep[ep.len() - 1].1).end);
-            let idx: Vec<usize> = ep.iter().flat_map(|&(s, e)| s..e).collect();
+        for ep in episodes(&ts, &flags, aligned.grid_ns, min_duration) {
+            let (w, idx) = (ep.window, ep.bins);
             let mut counts = vec![0usize; m];
             for &k in &idx {
                 if let Some(j) = bins[k].suspect {
@@ -588,15 +543,5 @@ mod tests {
         let (a, b) = (meter("fq-1", 1), meter("fq-2", 2));
         let out = run(&[&a, &b], serde_json::json!({"tolerance_pct": 1.0}));
         assert!(out.findings.is_empty(), "{:?}", out.findings);
-    }
-
-    #[test]
-    fn numbers_read_well() {
-        assert_eq!(num(0.0), "0");
-        assert_eq!(num(f64::NAN), "NaN");
-        assert_eq!(num(4.23456), "4.23");
-        assert_eq!(num(1.0), "1");
-        assert_eq!(num(0.012345), "0.0123");
-        assert_eq!(num(1234.6), "1235");
     }
 }

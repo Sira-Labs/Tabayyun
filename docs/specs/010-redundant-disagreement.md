@@ -68,6 +68,17 @@ Unit (`checks::redundant_disagreement::tests`): `two_of_three_names_suspect`,
 `auto_tolerance_catches_bias`, `sparse_bins_ignored`, `bad_params_are_invalid`,
 `registry_runs_it_on_redundant_groups_only`, `numbers_read_well`.
 
+## Live check (2026-09-23, after PR #34, release run 34)
+
+Three hourly series over 7 days (`live-010-a`, `-b`, `-c`: one shared AR(1) signal plus a daily
+sine and 0.05 bar noise each; `-c` reads 5 bar high on 2024-02-05 from 08:00 to 14:00 UTC), a
+`redundant` group with params `{"tolerance": 1.0}` and a fixed 7-day dataset gave a dataset run
+on the CapRover worker with exactly one `tby.redundant_disagreement` finding, on `live-010-c`,
+window 2024-02-05 08:00–14:00, "live-010-c reads up to 5.02 bar away from live-010-a/live-010-b
+for 6h (tolerance 1 bar)", `suspect` = live-010-c's id, `tolerance_source` = `param`. The other
+three findings were `tby.level_drift` on the synthetic random walk; all four were resolved as
+"test upload".
+
 ## Implementation edits
 
 Recorded on 2026-09-23; approved with the plan.
