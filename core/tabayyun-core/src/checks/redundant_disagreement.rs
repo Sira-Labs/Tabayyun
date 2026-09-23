@@ -75,6 +75,9 @@ fn name(f: &SeriesFrame) -> &str {
 
 /// A number for a summary: three significant digits, no trailing zeros.
 fn num(x: f64) -> String {
+    if x == 0.0 || !x.is_finite() {
+        return format!("{x}"); // log10 of 0 is -inf and would overflow the digit count
+    }
     let digits = (2 - x.abs().log10().floor() as i32).clamp(0, 6) as usize;
     let s = format!("{x:.digits$}");
     if s.contains('.') {
@@ -103,20 +106,23 @@ impl RedundantDisagreement {
                 .flat_map(|f| f.values.iter().filter(|v| v.is_finite()).map(|v| v.abs()))
                 .collect();
             let scale = median(&magnitudes).unwrap_or(0.0);
-            return Ok((pct / 100.0 * scale, "pct"));
+            // Members that mostly read 0 (an idle line) have scale 0: floor like the auto case.
+            return Ok(((pct / 100.0 * scale).max(resolution_floor(frames)).max(f64::MIN_POSITIVE), "pct"));
         }
         if !(self.k.is_finite() && self.k > 0.0) {
             return Err(invalid("k must be a positive number"));
         }
         let spread = median_mad(deviations).map_or(0.0, |(_, mad)| self.k * 1.4826 * mad);
-        // Identical quantised readings have MAD 0: never judge finer than the instruments read.
-        let floor = frames
-            .iter()
-            .filter_map(|f| f.meta.resolution.or_else(|| resolution(&f.values)))
-            .fold(0.0_f64, f64::max)
-            * 2.0;
-        Ok((spread.max(floor).max(f64::MIN_POSITIVE), "auto"))
+        Ok((spread.max(resolution_floor(frames)).max(f64::MIN_POSITIVE), "auto"))
     }
+}
+
+/// Twice the coarsest member resolution (metadata, else estimated from the data): identical
+/// quantised readings would otherwise give a zero tolerance, judged finer than the
+/// instruments read.
+fn resolution_floor(frames: &[&SeriesFrame]) -> f64 {
+    frames.iter().filter_map(|f| f.meta.resolution.or_else(|| resolution(&f.values))).fold(0.0_f64, f64::max)
+        * 2.0
 }
 
 impl CrossCheck for RedundantDisagreement {
@@ -568,7 +574,26 @@ mod tests {
     }
 
     #[test]
+    fn pct_tolerance_on_idle_members_is_floored() {
+        // Two flow meters on an idle line read 0 most of the time, with tiny quantised noise:
+        // the median magnitude is 0, so the percentage alone would tolerate nothing.
+        let meter = |id: &str, seed: u64| {
+            let mut rng = Rng::new(seed);
+            let values = (0..N)
+                .map(|i| if i < N / 4 { 10.0 } else { 0.0 } + (rng.normal() * 2.0).round() * 0.01)
+                .collect();
+            let ts = (0..N as i64).map(|i| T0 + i * NS_PER_MIN).collect();
+            SeriesFrame::with_default_quality(SeriesMeta::new(id), ts, values).unwrap()
+        };
+        let (a, b) = (meter("fq-1", 1), meter("fq-2", 2));
+        let out = run(&[&a, &b], serde_json::json!({"tolerance_pct": 1.0}));
+        assert!(out.findings.is_empty(), "{:?}", out.findings);
+    }
+
+    #[test]
     fn numbers_read_well() {
+        assert_eq!(num(0.0), "0");
+        assert_eq!(num(f64::NAN), "NaN");
         assert_eq!(num(4.23456), "4.23");
         assert_eq!(num(1.0), "1");
         assert_eq!(num(0.012345), "0.0123");
