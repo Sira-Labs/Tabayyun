@@ -36,7 +36,10 @@ CI or upload it in the browser.
 
 ## Acceptance criteria
 
-- [ ] A seconds column containing values on both sides of 1e11 reads uniformly as seconds.
+- [ ] Under `auto`, an integer column with median \|value\| below 1e11 is read as seconds in
+      every row: a stray cell that per-cell inference would have read as milliseconds
+      (e.g. 1 700 000 000 000) is read as seconds too, falls outside the plausible range and
+      exits 2 naming its row.
 - [ ] A declared wrong unit that lands outside the range exits 2 with the message.
 - [ ] The shared table of (value, unit) → ns cases passes in Rust and in `api/tests`.
 - [ ] `ts_unit` appears in the CLI JSON output.
