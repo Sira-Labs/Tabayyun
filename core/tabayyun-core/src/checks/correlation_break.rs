@@ -29,6 +29,8 @@ const MIN_REFERENCE_SEGMENTS: usize = 4;
 const SIGN_FLIP_MIN: f64 = 0.2;
 /// A lag moves when it differs from the reference by more than this many steps.
 const LAG_TOLERANCE: i64 = 1;
+/// Upper bound on `max_lag`: each segment scans 2 × max_lag + 1 lags.
+const MAX_LAG: usize = 240;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -246,6 +248,21 @@ impl CrossCheck for CorrelationBreak {
         let p = self.for_group(group)?;
         let segment_ns = duration_param(ID, "segment", &p.segment)?;
         let grid = if p.grid == "auto" { None } else { Some(duration_param(ID, "grid", &p.grid)?) };
+        let invalid = |reason: &str| Error::InvalidParams {
+            check: ID.into(),
+            reason: format!("group {}: {reason}", group.id),
+        };
+        // `parse_duration` accepts "0s": a zero segment would divide by zero, and a zero grid
+        // would silently fall back to the inferred one.
+        if segment_ns <= 0 {
+            return Err(invalid("segment must be positive"));
+        }
+        if grid.is_some_and(|g| g <= 0) {
+            return Err(invalid("grid must be positive"));
+        }
+        if p.max_lag > MAX_LAG {
+            return Err(invalid(&format!("max_lag must be at most {MAX_LAG} steps")));
+        }
         let mut out = CheckOutput::default();
         for i in 0..frames.len() {
             for j in (i + 1)..frames.len() {
@@ -594,9 +611,17 @@ mod tests {
     fn bad_group_params_are_invalid_params() {
         let (a, b) = pair(0..0, |_, _, _| 0.0);
         let ctx = CheckContext::from_frame(&a);
-        let g = group(GroupKind::Related, &["pt-a", "pt-b"], serde_json::json!({"delta": "high"}));
-        let err = CorrelationBreak::default().run(&[&a, &b], &g, &ctx).unwrap_err();
-        assert!(matches!(err, Error::InvalidParams { .. }), "{err}");
+        for (params, message) in [
+            (serde_json::json!({"delta": "high"}), "invalid type"),
+            (serde_json::json!({"segment": "0s"}), "segment must be positive"),
+            (serde_json::json!({"grid": "0s"}), "grid must be positive"),
+            (serde_json::json!({"max_lag": 241}), "max_lag must be at most 240"),
+        ] {
+            let g = group(GroupKind::Related, &["pt-a", "pt-b"], params);
+            let err = CorrelationBreak::default().run(&[&a, &b], &g, &ctx).unwrap_err();
+            assert!(matches!(err, Error::InvalidParams { .. }), "{err}");
+            assert!(err.to_string().contains(message), "{err}");
+        }
     }
 
     #[test]

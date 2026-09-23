@@ -127,7 +127,8 @@ Recorded on 2026-09-23; approved with the plan.
   ≤ 1 step); otherwise a decoupled day would also report a random lag, and a pair without a
   sharp cross-correlation peak would report noise.
 - Group `params` override the check's params key by key; keys the check does not know (other
-  checks' params) are ignored, a wrong type is `InvalidParams`.
+  checks' params) are ignored, a wrong type is `InvalidParams`, and so are a zero `segment` or
+  `grid` and a `max_lag` above 240 steps.
 - The `insufficient baseline` skip names the pair and the number of usable segments.
   Segments are UTC-aligned (`ts / segment`), so a skipped day separates episodes.
 
