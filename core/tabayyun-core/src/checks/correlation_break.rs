@@ -1,0 +1,577 @@
+//! `tby.correlation_break` — related series stopped agreeing (catalogue #22, spec 009).
+//!
+//! For every pair of a `related` or `redundant` group the pair is aligned (spec 008) and cut
+//! into UTC segments. Per segment the check computes Spearman's ρ over complete bins and the
+//! lag (in grid steps) that maximises the cross-correlation. The first `ref_segments` usable
+//! segments form the reference and only later segments are judged, so a segment never takes
+//! part in its own reference. Consecutive broken segments form one episode and one finding
+//! (ADR-0011); lag episodes are separate findings with their own evidence shape.
+//!
+//! A finding attaches to the pair member that comes first in the group, with the other in
+//! `partner`; metrics are named `rho:<partner>` and `lag_steps:<partner>` so the pairs of one
+//! series do not overwrite each other's points.
+
+use super::{duration_param, episodes, CheckContext, CheckOutput};
+use crate::align::align;
+use crate::cross::{CrossCheck, GroupKind, SeriesGroup};
+use crate::error::{Error, Result};
+use crate::finding::{Dimension, Finding, Metric, Severity, Window};
+use crate::frame::SeriesFrame;
+use crate::profile::median_mad;
+use crate::time::format_duration;
+use serde::{Deserialize, Serialize};
+
+pub const ID: &str = "tby.correlation_break";
+/// Below this many reference segments the reference itself is not trustworthy.
+const MIN_REFERENCE_SEGMENTS: usize = 4;
+/// A sign flip only counts when the new correlation is clearly away from zero.
+const SIGN_FLIP_MIN: f64 = 0.2;
+/// A lag moves when it differs from the reference by more than this many steps.
+const LAG_TOLERANCE: i64 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CorrelationBreak {
+    /// Segment length ρ is computed over, e.g. `1d`.
+    pub segment: String,
+    /// Flag when |ρ − ρ_ref| exceeds this.
+    pub delta: f64,
+    /// Below this |ρ_ref| the pair is not related enough to judge (metrics only).
+    pub min_ref: f64,
+    /// Complete aligned bins a segment needs.
+    pub min_points: usize,
+    /// Leading usable segments that form the reference.
+    pub ref_segments: usize,
+    /// Lags searched, in grid steps, on either side.
+    pub max_lag: usize,
+    /// Alignment grid: `auto` (coarsest expected interval) or a duration.
+    pub grid: String,
+    pub severity: Severity,
+}
+
+impl Default for CorrelationBreak {
+    fn default() -> Self {
+        Self {
+            segment: "1d".into(),
+            delta: 0.3,
+            min_ref: 0.5,
+            min_points: 24,
+            ref_segments: 7,
+            max_lag: 6,
+            grid: "auto".into(),
+            severity: Severity::High,
+        }
+    }
+}
+
+/// Ranks starting at 1, ties sharing their average rank.
+pub(crate) fn average_ranks(xs: &[f64]) -> Vec<f64> {
+    let mut idx: Vec<usize> = (0..xs.len()).collect();
+    idx.sort_by(|&a, &b| xs[a].total_cmp(&xs[b]));
+    let mut ranks = vec![0.0; xs.len()];
+    let mut i = 0;
+    while i < idx.len() {
+        let mut j = i;
+        while j + 1 < idx.len() && xs[idx[j + 1]] == xs[idx[i]] {
+            j += 1;
+        }
+        let rank = (i + j) as f64 / 2.0 + 1.0;
+        for &k in &idx[i..=j] {
+            ranks[k] = rank;
+        }
+        i = j + 1;
+    }
+    ranks
+}
+
+/// Pearson correlation; None with fewer than 3 pairs or a constant side.
+pub(crate) fn pearson(x: &[f64], y: &[f64]) -> Option<f64> {
+    let n = x.len().min(y.len());
+    if n < 3 {
+        return None;
+    }
+    let (mx, my) = (x[..n].iter().sum::<f64>() / n as f64, y[..n].iter().sum::<f64>() / n as f64);
+    let (mut sxy, mut sxx, mut syy) = (0.0, 0.0, 0.0);
+    for i in 0..n {
+        let (dx, dy) = (x[i] - mx, y[i] - my);
+        sxy += dx * dy;
+        sxx += dx * dx;
+        syy += dy * dy;
+    }
+    (sxx > 0.0 && syy > 0.0).then(|| (sxy / (sxx * syy).sqrt()).clamp(-1.0, 1.0))
+}
+
+/// Spearman's ρ: Pearson on average ranks.
+pub(crate) fn spearman(x: &[f64], y: &[f64]) -> Option<f64> {
+    pearson(&average_ranks(x), &average_ranks(y))
+}
+
+/// The lag in `[-max_lag, max_lag]` maximising corr(x[t], y[t + lag]) over pairwise-complete
+/// bins, with that correlation; lags with fewer than `min_pairs` pairs are not considered.
+fn best_lag(x: &[f64], y: &[f64], max_lag: usize, min_pairs: usize) -> Option<(i64, f64)> {
+    let n = x.len() as i64;
+    let mut best: Option<(i64, f64)> = None;
+    for lag in -(max_lag as i64)..=(max_lag as i64) {
+        let (mut xs, mut ys) = (Vec::new(), Vec::new());
+        for t in 0.max(-lag)..n.min(n - lag) {
+            let (a, b) = (x[t as usize], y[(t + lag) as usize]);
+            if a.is_finite() && b.is_finite() {
+                xs.push(a);
+                ys.push(b);
+            }
+        }
+        if xs.len() < min_pairs.max(3) {
+            continue;
+        }
+        if let Some(r) = pearson(&xs, &ys) {
+            // Ties go to the smaller |lag|, so a flat correlation profile reads as no lag.
+            let better = match best {
+                None => true,
+                Some((l, c)) => r > c + 1e-12 || ((r - c).abs() <= 1e-12 && lag.abs() < l.abs()),
+            };
+            if better {
+                best = Some((lag, r));
+            }
+        }
+    }
+    best
+}
+
+/// One usable segment of an aligned pair.
+struct Segment {
+    /// Calendar segment index (`start / segment_ns`), so a skipped day separates episodes.
+    key: usize,
+    window: Window,
+    n_points: usize,
+    rho: f64,
+    lag: Option<(i64, f64)>,
+}
+
+fn median(xs: &[f64]) -> f64 {
+    median_mad(xs).map_or(f64::NAN, |(m, _)| m)
+}
+
+fn name(f: &SeriesFrame) -> &str {
+    f.meta.name.as_deref().unwrap_or(&f.meta.id)
+}
+
+impl CorrelationBreak {
+    /// This check's params with the group's `params` on top (keys of other checks ignored).
+    fn for_group(&self, group: &SeriesGroup) -> Result<Self> {
+        let mut merged = serde_json::to_value(self)?;
+        if let (Some(base), Some(over)) = (merged.as_object_mut(), group.params.as_object()) {
+            for (k, v) in over {
+                if base.contains_key(k) {
+                    base.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        serde_json::from_value(merged).map_err(|e| Error::InvalidParams {
+            check: ID.into(),
+            reason: format!("group {}: {e}", group.id),
+        })
+    }
+
+    fn segments(
+        &self,
+        a: &SeriesFrame,
+        b: &SeriesFrame,
+        segment_ns: i64,
+        grid: Option<i64>,
+    ) -> (i64, Vec<Segment>) {
+        let aligned = align(&[a, b], grid);
+        let (x, y) = (&aligned.columns[0], &aligned.columns[1]);
+        let mut out = Vec::new();
+        let mut s = 0;
+        while s < aligned.len() {
+            let key = aligned.ts[s].div_euclid(segment_ns);
+            let mut e = s;
+            while e < aligned.len() && aligned.ts[e].div_euclid(segment_ns) == key {
+                e += 1;
+            }
+            let complete: Vec<usize> = (s..e).filter(|&i| aligned.complete(i)).collect();
+            if complete.len() >= self.min_points.max(3) {
+                let xs: Vec<f64> = complete.iter().map(|&i| x[i]).collect();
+                let ys: Vec<f64> = complete.iter().map(|&i| y[i]).collect();
+                if let Some(rho) = spearman(&xs, &ys) {
+                    let lag = best_lag(&x[s..e], &y[s..e], self.max_lag, self.min_points / 2);
+                    let window = Window::new(
+                        aligned.ts[complete[0]],
+                        aligned.ts[complete[complete.len() - 1]] + aligned.grid_ns,
+                    );
+                    out.push(Segment { key: key as usize, window, n_points: complete.len(), rho, lag });
+                }
+            }
+            s = e;
+        }
+        (aligned.grid_ns, out)
+    }
+}
+
+impl CrossCheck for CorrelationBreak {
+    fn id(&self) -> &'static str {
+        ID
+    }
+    fn dimension(&self) -> Dimension {
+        Dimension::Consistency
+    }
+    fn default_severity(&self) -> Severity {
+        self.severity
+    }
+    fn kinds(&self) -> &'static [GroupKind] {
+        &[GroupKind::Related, GroupKind::Redundant]
+    }
+
+    fn run(&self, frames: &[&SeriesFrame], group: &SeriesGroup, ctx: &CheckContext) -> Result<CheckOutput> {
+        let p = self.for_group(group)?;
+        let segment_ns = duration_param(ID, "segment", &p.segment)?;
+        let grid = if p.grid == "auto" { None } else { Some(duration_param(ID, "grid", &p.grid)?) };
+        let mut out = CheckOutput::default();
+        for i in 0..frames.len() {
+            for j in (i + 1)..frames.len() {
+                p.pair(frames[i], frames[j], group, segment_ns, grid, ctx, &mut out);
+            }
+        }
+        Ok(out)
+    }
+}
+
+impl CorrelationBreak {
+    #[allow(clippy::too_many_arguments)]
+    fn pair(
+        &self,
+        a: &SeriesFrame,
+        b: &SeriesFrame,
+        group: &SeriesGroup,
+        segment_ns: i64,
+        grid: Option<i64>,
+        ctx: &CheckContext,
+        out: &mut CheckOutput,
+    ) {
+        let (grid_ns, segs) = self.segments(a, b, segment_ns, grid);
+        let partner = b.meta.id.as_str();
+        let metric = |name: &str, ts: i64, value: f64| Metric {
+            check_id: ID.into(),
+            series_id: a.meta.id.clone(),
+            name: format!("{name}:{partner}"),
+            ts,
+            value,
+        };
+        for s in &segs {
+            out.metrics.push(metric("rho", s.window.start, s.rho));
+            if let Some((lag, _)) = s.lag {
+                out.metrics.push(metric("lag_steps", s.window.start, lag as f64));
+            }
+        }
+        let n_ref = self.ref_segments;
+        if n_ref < MIN_REFERENCE_SEGMENTS || segs.len() <= n_ref {
+            let reason = format!(
+                "insufficient baseline ({} usable segments, pair {}/{partner})",
+                segs.len(),
+                a.meta.id
+            );
+            out.skipped.push((ID.into(), reason));
+            return;
+        }
+        let (reference, judged) = segs.split_at(n_ref);
+        let rho_ref = median(&reference.iter().map(|s| s.rho).collect::<Vec<_>>());
+        if rho_ref.abs() < self.min_ref {
+            return; // not a related pair in this window: metrics only
+        }
+        let broken = |s: &Segment| {
+            (s.rho - rho_ref).abs() > self.delta
+                || (s.rho.signum() != rho_ref.signum() && s.rho.abs() > SIGN_FLIP_MIN)
+        };
+        let base = |extra: serde_json::Value| {
+            let mut ev = group.evidence_base();
+            ev.insert("partner".into(), partner.into());
+            if let serde_json::Value::Object(m) = extra {
+                ev.extend(m);
+            }
+            serde_json::Value::Object(ev)
+        };
+        let fraction = |w: &Window| w.duration() as f64 / ctx.window.duration().max(1) as f64;
+
+        let flagged: Vec<(usize, Window, &Segment)> =
+            judged.iter().filter(|s| broken(s)).map(|s| (s.key, s.window, s)).collect();
+        for (w, items) in episodes(flagged) {
+            let worst = items
+                .iter()
+                .max_by(|x, y| (x.rho - rho_ref).abs().total_cmp(&(y.rho - rho_ref).abs()))
+                .unwrap();
+            let verb = if worst.rho.signum() != rho_ref.signum() && worst.rho.abs() > SIGN_FLIP_MIN {
+                "moved against"
+            } else {
+                "stopped tracking"
+            };
+            let summary = format!(
+                "{} {verb} {} for {} (ρ {:.2}, usually {:.2})",
+                name(a),
+                name(b),
+                format_duration(w.duration()),
+                worst.rho,
+                rho_ref
+            );
+            let evidence = base(serde_json::json!({
+                "rho": worst.rho, "rho_ref": rho_ref, "delta": self.delta,
+                "n_segments": items.len(), "n_points": items.iter().map(|s| s.n_points).sum::<usize>(),
+            }));
+            out.findings.push(Finding::new(
+                ID,
+                &a.meta.id,
+                Dimension::Consistency,
+                self.severity,
+                w,
+                fraction(&w),
+                summary,
+                evidence,
+            ));
+        }
+
+        // Lag: judged only where the correlation held and the best cross-correlation is
+        // itself strong, so a decoupled segment's random lag is not reported as a second finding.
+        let ref_lags: Vec<f64> = reference.iter().filter_map(|s| s.lag).map(|(l, _)| l as f64).collect();
+        if ref_lags.len() < MIN_REFERENCE_SEGMENTS {
+            return;
+        }
+        let lag_ref = median(&ref_lags).round() as i64;
+        let lag_flagged: Vec<(usize, Window, (&Segment, i64))> = judged
+            .iter()
+            .filter(|s| !broken(s))
+            .filter_map(|s| s.lag.filter(|(_, r)| *r >= self.min_ref).map(|(l, _)| (s, l)))
+            .filter(|(_, l)| (l - lag_ref).abs() > LAG_TOLERANCE)
+            .map(|(s, l)| (s.key, s.window, (s, l)))
+            .collect();
+        for (w, items) in episodes(lag_flagged) {
+            let &(_, lag) = items.iter().max_by_key(|(_, l)| (l - lag_ref).abs()).unwrap();
+            let summary = format!(
+                "{} lags {} by {} for {} (usually {})",
+                name(b),
+                name(a),
+                format_duration(lag * grid_ns),
+                format_duration(w.duration()),
+                format_duration(lag_ref * grid_ns)
+            );
+            let evidence = base(serde_json::json!({
+                "lag_steps": lag, "lag_ref_steps": lag_ref, "grid_ns": grid_ns, "n_segments": items.len(),
+            }));
+            out.findings.push(Finding::new(
+                ID,
+                &a.meta.id,
+                Dimension::Consistency,
+                self.severity,
+                w,
+                fraction(&w),
+                summary,
+                evidence,
+            ));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cross::{GroupMember, MemberRole};
+    use crate::frame::SeriesMeta;
+    use crate::synth::Rng;
+    use crate::time::{NS_PER_DAY, NS_PER_MIN};
+
+    const STEP: i64 = 15 * NS_PER_MIN;
+    const PER_DAY: usize = 96;
+    const DAYS: usize = 14;
+    const T0: i64 = 1_704_067_200 * 1_000_000_000; // 2024-01-01, a day boundary
+
+    /// A smooth common driver: AR(1) with φ = 0.95 plus a daily sine.
+    fn driver(n: usize, seed: u64) -> Vec<f64> {
+        let mut rng = Rng::new(seed);
+        let mut ar = 0.0;
+        (0..n)
+            .map(|i| {
+                ar = 0.95 * ar + rng.normal();
+                ar + 2.0 * (i as f64 / PER_DAY as f64 * std::f64::consts::TAU).sin()
+            })
+            .collect()
+    }
+
+    fn frame(id: &str, values: Vec<f64>) -> SeriesFrame {
+        let ts = (0..values.len() as i64).map(|i| T0 + i * STEP).collect();
+        let mut meta = SeriesMeta::new(id);
+        meta.name = Some(id.to_uppercase());
+        SeriesFrame::with_default_quality(meta, ts, values).unwrap()
+    }
+
+    /// `x` follows the driver; `y` follows it too except on `days`, where `alter` rewrites it.
+    fn pair(
+        days: std::ops::Range<usize>,
+        alter: impl Fn(usize, &[f64], &mut Rng) -> f64,
+    ) -> (SeriesFrame, SeriesFrame) {
+        let n = DAYS * PER_DAY;
+        let d = driver(n, 7);
+        let mut rng = Rng::new(11);
+        let x: Vec<f64> = d.iter().map(|v| v + 0.05 * rng.normal()).collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| {
+                if days.contains(&(i / PER_DAY)) {
+                    alter(i, &d, &mut rng)
+                } else {
+                    d[i] + 0.05 * rng.normal()
+                }
+            })
+            .collect();
+        (frame("pt-a", x), frame("pt-b", y))
+    }
+
+    fn group(kind: GroupKind, ids: &[&str], params: serde_json::Value) -> SeriesGroup {
+        SeriesGroup {
+            id: "g".into(),
+            name: "PT".into(),
+            kind,
+            members: ids
+                .iter()
+                .map(|s| GroupMember { series_id: s.to_string(), role: MemberRole::Member })
+                .collect(),
+            params,
+        }
+    }
+
+    fn run(frames: &[&SeriesFrame], params: serde_json::Value) -> CheckOutput {
+        let ctx = CheckContext::from_frame(frames[0]);
+        let ids: Vec<&str> = frames.iter().map(|f| f.meta.id.as_str()).collect();
+        CorrelationBreak::default().run(frames, &group(GroupKind::Redundant, &ids, params), &ctx).unwrap()
+    }
+
+    fn day(k: usize) -> i64 {
+        T0 + k as i64 * NS_PER_DAY
+    }
+
+    #[test]
+    fn decoupled_day() {
+        let (a, b) = pair(10..11, |_, _, rng| 3.0 * rng.normal());
+        let out = run(&[&a, &b], serde_json::Value::Null);
+        assert_eq!(out.findings.len(), 1, "{:?}", out.findings);
+        let f = &out.findings[0];
+        assert_eq!((f.series_id.as_str(), f.window.start, f.window.end), ("pt-a", day(10), day(11)));
+        assert_eq!(f.evidence["partner"], "pt-b");
+        assert_eq!(f.evidence["group_id"], "g");
+        assert!(
+            f.evidence["rho"].as_f64().unwrap().abs() < 0.3 && f.evidence["rho_ref"].as_f64().unwrap() > 0.9
+        );
+        assert!(f.summary.starts_with("PT-A stopped tracking PT-B for 1d"), "{}", f.summary);
+        // One rho point per day, named after the partner.
+        assert_eq!(out.metrics.iter().filter(|m| m.name == "rho:pt-b").count(), DAYS);
+        assert!(out.skipped.is_empty());
+    }
+
+    #[test]
+    fn sign_flip() {
+        let (a, b) = pair(9..11, |i, d, rng| -d[i] + 0.05 * rng.normal());
+        let out = run(&[&a, &b], serde_json::Value::Null);
+        assert_eq!(out.findings.len(), 1, "{:?}", out.findings);
+        let f = &out.findings[0];
+        assert_eq!((f.window.start, f.window.end), (day(9), day(11)));
+        assert!(f.evidence["rho"].as_f64().unwrap() < -0.8);
+        assert_eq!(f.evidence["n_segments"], 2);
+        assert!(f.summary.contains("moved against"), "{}", f.summary);
+    }
+
+    #[test]
+    fn lag_shift() {
+        let (a, b) = pair(11..12, |i, d, rng| d[i - 3] + 0.05 * rng.normal());
+        let out = run(&[&a, &b], serde_json::Value::Null);
+        assert_eq!(out.findings.len(), 1, "{:?}", out.findings);
+        let f = &out.findings[0];
+        assert!(f.evidence.get("rho").is_none(), "expected a lag finding: {}", f.evidence);
+        assert_eq!(
+            (f.evidence["lag_steps"].as_i64(), f.evidence["lag_ref_steps"].as_i64()),
+            (Some(3), Some(0))
+        );
+        assert_eq!(f.evidence["grid_ns"], STEP);
+        assert_eq!((f.window.start, f.window.end), (day(11), day(12)));
+        assert!(f.summary.starts_with("PT-B lags PT-A by 45m for 1d"), "{}", f.summary);
+    }
+
+    #[test]
+    fn independent_pair_is_silent() {
+        let n = DAYS * PER_DAY;
+        let a = frame("pt-a", driver(n, 1));
+        let b = frame("pt-b", driver(n, 2));
+        let out = run(&[&a, &b], serde_json::Value::Null);
+        assert!(out.findings.is_empty(), "{:?}", out.findings);
+        assert!(out.skipped.is_empty());
+        assert_eq!(out.metrics.iter().filter(|m| m.name == "rho:pt-b").count(), DAYS);
+    }
+
+    #[test]
+    fn too_few_segments_skips() {
+        let n = 5 * PER_DAY;
+        let d = driver(n, 3);
+        let a = frame("pt-a", d.clone());
+        let b = frame("pt-b", d.iter().map(|v| v * 2.0).collect());
+        let out = run(&[&a, &b], serde_json::Value::Null);
+        assert!(out.findings.is_empty());
+        assert_eq!(out.skipped.len(), 1);
+        assert_eq!(out.skipped[0].0, ID);
+        assert!(
+            out.skipped[0].1.starts_with("insufficient baseline (5 usable segments"),
+            "{}",
+            out.skipped[0].1
+        );
+        // Group params override the defaults: with 4 reference days the pair is judged.
+        let out = run(&[&a, &b], serde_json::json!({"ref_segments": 4, "k": 9}));
+        assert!(out.skipped.is_empty() && out.findings.is_empty());
+    }
+
+    #[test]
+    fn ties_rank_correctly() {
+        assert_eq!(average_ranks(&[10.0, 20.0, 20.0, 30.0]), vec![1.0, 2.5, 2.5, 4.0]);
+        assert_eq!(average_ranks(&[3.0, 1.0, 3.0, 3.0]), vec![3.0, 1.0, 3.0, 3.0]);
+        let r = spearman(&[1.0, 2.0, 2.0, 3.0], &[1.0, 2.0, 2.0, 3.0]).unwrap();
+        assert!((r - 1.0).abs() < 1e-12);
+        assert!((spearman(&[1.0, 2.0, 3.0, 4.0], &[8.0, 4.0, 2.0, 1.0]).unwrap() + 1.0).abs() < 1e-12);
+        assert!(spearman(&[1.0, 1.0, 1.0], &[1.0, 2.0, 3.0]).is_none());
+    }
+
+    #[test]
+    fn every_pair_of_a_triple_is_judged_and_named() {
+        let (a, b) = pair(10..11, |_, _, rng| 3.0 * rng.normal());
+        let c = frame("pt-c", a.values.iter().map(|v| v + 1.0).collect());
+        let out = run(&[&a, &b, &c], serde_json::Value::Null);
+        // b decouples from both a and c; a and c keep agreeing.
+        let mut pairs: Vec<(String, String)> = out
+            .findings
+            .iter()
+            .map(|f| (f.series_id.clone(), f.evidence["partner"].as_str().unwrap().to_string()))
+            .collect();
+        pairs.sort();
+        assert_eq!(pairs, vec![("pt-a".into(), "pt-b".into()), ("pt-b".into(), "pt-c".into())]);
+        assert!(out.metrics.iter().any(|m| m.series_id == "pt-a" && m.name == "rho:pt-c"));
+    }
+
+    #[test]
+    fn bad_group_params_are_invalid_params() {
+        let (a, b) = pair(0..0, |_, _, _| 0.0);
+        let ctx = CheckContext::from_frame(&a);
+        let g = group(GroupKind::Related, &["pt-a", "pt-b"], serde_json::json!({"delta": "high"}));
+        let err = CorrelationBreak::default().run(&[&a, &b], &g, &ctx).unwrap_err();
+        assert!(matches!(err, Error::InvalidParams { .. }), "{err}");
+    }
+
+    #[test]
+    fn registry_runs_it_on_redundant_groups() {
+        use crate::registry::Registry;
+        use std::collections::BTreeMap;
+        let (a, b) = pair(10..11, |_, _, rng| 3.0 * rng.normal());
+        let ctx = CheckContext::from_frame(&a);
+        let groups = vec![group(GroupKind::Redundant, &["pt-a", "pt-b"], serde_json::Value::Null)];
+        let configs = vec![crate::registry::CheckConfig {
+            id: ID.into(),
+            params: serde_json::Value::Null,
+            enabled: true,
+        }];
+        let out = Registry::run_multi(&configs, &[a, b], &BTreeMap::new(), &groups, &ctx).unwrap();
+        assert_eq!(out.per_series["pt-a"].findings.len(), 1);
+        assert!(out.per_series["pt-b"].findings.is_empty());
+        assert!(Registry::default_multi_configs().iter().any(|c| c.id == ID));
+    }
+}

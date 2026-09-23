@@ -6,6 +6,7 @@
 
 pub mod changepoint;
 pub mod completeness;
+pub mod correlation_break;
 pub mod distribution_drift;
 pub mod flatline;
 pub mod interpolation_artifacts;

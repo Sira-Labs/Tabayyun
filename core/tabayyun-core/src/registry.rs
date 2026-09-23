@@ -129,14 +129,28 @@ impl Registry {
         Ok(out)
     }
 
-    /// Built-in cross-series check ids (specs 009–011 add them).
+    /// Built-in cross-series check ids in catalogue order.
     pub fn cross_builtin_ids() -> &'static [&'static str] {
-        &[]
+        &[checks::correlation_break::ID]
     }
 
     /// Instantiate a cross-series check from its id and parameters.
-    pub fn build_cross(id: &str, _params: &serde_json::Value) -> Result<Box<dyn CrossCheck>> {
-        Err(Error::UnknownCheck(id.to_string()))
+    pub fn build_cross(id: &str, params: &serde_json::Value) -> Result<Box<dyn CrossCheck>> {
+        fn parse<T: for<'de> Deserialize<'de> + Default + CrossCheck + 'static>(
+            id: &str,
+            p: &serde_json::Value,
+        ) -> Result<Box<dyn CrossCheck>> {
+            if p.is_null() {
+                return Ok(Box::new(T::default()));
+            }
+            let t: T = serde_json::from_value(p.clone())
+                .map_err(|e| Error::InvalidParams { check: id.to_string(), reason: e.to_string() })?;
+            Ok(Box::new(t))
+        }
+        match id {
+            checks::correlation_break::ID => parse::<checks::correlation_break::CorrelationBreak>(id, params),
+            other => Err(Error::UnknownCheck(other.to_string())),
+        }
     }
 
     /// Default configuration for multi-series runs: every single-series and cross check.
