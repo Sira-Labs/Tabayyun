@@ -34,7 +34,7 @@ Internet ──▶ CapRover nginx (TLS) ──▶ tabayyun-web (Caddy :80) ─�
     | `TABAYYUN_ENV` | `prod` |
     | `TABAYYUN_DATABASE_URL` | `postgresql+psycopg://tabayyun:<password>@srv-captain--tabayyun-db:5432/tabayyun` |
     | `TABAYYUN_SESSION_SECRET` | a generated value, e.g. the output of `openssl rand -base64 48` |
-    | `TABAYYUN_CACHE_DIR` | `/data/cache` |
+    | `TABAYYUN_CACHE_URL` | `/data/cache` (the image default; the older name `TABAYYUN_CACHE_DIR` still works) |
     | `TABAYYUN_TIMESCALE` | optional; `auto` (default) uses TimescaleDB when the extension exists, `off` never does |
 
   - The image runs the schema migration (`python -m tabayyun.db.migrate upgrade head`) on every start before
@@ -49,14 +49,16 @@ Internet ──▶ CapRover nginx (TLS) ──▶ tabayyun-web (Caddy :80) ─�
 
 ## 3. Worker app: `tabayyun-worker`
 
-Runs are executed by a worker process, not by the API. Create app `tabayyun-worker`
-(persistent data ticked, same `/data/cache` directory label `tabayyun-cache` as the api so
-spec 006's Parquet cache is shared) with the api image and one extra variable:
+Runs are executed by a worker process, not by the API. Create app `tabayyun-worker` with the
+api image and one extra variable. The worker writes every successful upload to the Parquet
+cache (spec 006): on a local directory by default, or on S3-compatible storage (section 3a),
+which the live system uses.
 
 | Name | Value |
 |---|---|
 | `TABAYYUN_ROLE` | `worker` |
-| the four api variables | identical to the api app (`TABAYYUN_ENV`, `TABAYYUN_DATABASE_URL`, `TABAYYUN_SESSION_SECRET`, `TABAYYUN_CACHE_DIR`) |
+| the api variables | identical to the api app (`TABAYYUN_ENV`, `TABAYYUN_DATABASE_URL`, `TABAYYUN_SESSION_SECRET`) |
+| `TABAYYUN_CACHE_URL` and `TABAYYUN_S3_*` | see section 3a; without them the cache is `/data/cache` inside the container (tick persistent data with that path to keep it) |
 | `TABAYYUN_WORKER_CONCURRENCY` | optional, default `2` |
 
 - No HTTP settings: the worker serves nothing. Leave the container port at its default and
@@ -67,6 +69,38 @@ spec 006's Parquet cache is shared) with the api image and one extra variable:
   `ghcr.io/thedatadudech/tabayyun-api:latest`.
 - The worker exits with code 3 until the api has migrated the schema to the same revision;
   CapRover restarts it. Its log shows `worker.start` with the revision once it runs.
+
+## 3a. Cache store: RustFS
+
+The Parquet cache lives on S3-compatible storage so later work (charts, several workers) can
+share it. The live system runs RustFS (Apache-2.0); MinIO community builds ended in 2025.
+
+1. One-time app `rustfs`: *Deploy via ImageName* `rustfs/rustfs:1.0.0` (pin the exact tag;
+   upgrade deliberately), persistent directory `/data`, environment `RUSTFS_ACCESS_KEY` and
+   `RUSTFS_SECRET_KEY` (strong root credentials), container HTTP port `9000`. No public
+   domain for the S3 API; open the console (port 9001) only temporarily or over an SSH tunnel.
+2. In the console: create bucket `tabayyun-cache` and an access key limited to it:
+
+   ```json
+   {"Version": "2012-10-17", "Statement": [
+     {"Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": ["arn:aws:s3:::tabayyun-cache/*"]},
+     {"Effect": "Allow", "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+      "Resource": ["arn:aws:s3:::tabayyun-cache"]}]}
+   ```
+3. On `tabayyun-worker` (and later the api, when charts read the cache):
+
+   | Name | Value |
+   |---|---|
+   | `TABAYYUN_CACHE_URL` | `s3://tabayyun-cache` |
+   | `TABAYYUN_S3_ENDPOINT` | `http://srv-captain--rustfs:9000` (internal network, S3 port 9000) |
+   | `TABAYYUN_S3_ALLOW_HTTP` | `true` |
+   | `TABAYYUN_S3_ACCESS_KEY_ID` / `TABAYYUN_S3_SECRET_ACCESS_KEY` | the limited key from step 2 |
+
+4. Check: upload a CSV on `/runs/new`; the run's `stats.cache` shows `"written": true` and the
+   bucket gains `raw/<source id>/<bucket>/<yyyy>/<mm>/part-*.parquet`. A store problem never
+   fails a run: `stats.cache` then carries `"written": false` and the error, and the worker
+   logs `cache.write_failed`.
 
 ## 4. Web app: `tabayyun-web`
 
@@ -141,6 +175,11 @@ Do not enable both paths for the same app, or each push deploys it twice.
 | API log: same message naming `TABAYYUN_SESSION_SECRET` | secret missing, shorter than 16 characters or a placeholder | Generate one and Save & Update |
 | Web log: `dial tcp: lookup api ... no such host` | `TABAYYUN_API_UPSTREAM` missing or misspelled on the **web** app | Set it to `srv-captain--tabayyun-api:8000` (two dashes) and Save & Update |
 | Web log: `lookup srv-captain--... no such host` | the API app has a different name | Match the upstream to `srv-captain--<api app name>:8000` |
+| Run `stats.cache.error` ends in `failed to lookup address` or `Connection refused` | wrong `TABAYYUN_S3_ENDPOINT` (a placeholder, a missing `:9000`, or the app name) | Use `http://srv-captain--<store app>:9000`; `docker service ls` shows the name |
+| Run `stats.cache.error` says `access denied` | a wrong key, or its policy does not cover the bucket | The policy needs object actions on `bucket/*` **and** `s3:ListBucket` on the bucket itself |
+| Run `stats.cache.error` ends in `URL scheme is not allowed` | `http://` endpoint without `TABAYYUN_S3_ALLOW_HTTP=true` |
+| Run `stats.cache.error` says `not found (does the bucket exist?)` | the bucket in `TABAYYUN_CACHE_URL` does not exist | Create it in the store's console, or fix the name | Set it (internal endpoints only) |
+| An AWS-SDK tool (pyarrow, boto3, `aws s3`) uploading to an old MinIO fails with `411 MissingContentLength` | pre-2025 MinIO rejects the streamed checksums that newer AWS SDKs send | Tabayyun is unaffected; for the tool set `AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED` and `AWS_RESPONSE_CHECKSUM_VALIDATION=WHEN_REQUIRED`, or move to RustFS |
 | DB log: `superuser password is not specified` | image deployed before the env vars were saved | Save & Update the db app; it initialises on the next start |
 
 Environment variable changes only take effect after **Save & Update** on that app's App Configs tab.

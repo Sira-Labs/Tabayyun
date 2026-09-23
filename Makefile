@@ -1,5 +1,5 @@
 # Developer entry points. Each directory also works on its own (cargo / uv / pnpm).
-.PHONY: all core api web test lint fmt synth demo dev-infra api-dev worker-dev web-dev db-upgrade db-revision
+.PHONY: all core api web test lint fmt synth demo dev-infra dev-bucket api-dev worker-dev web-dev db-upgrade db-revision
 
 all: lint test
 
@@ -29,6 +29,10 @@ demo:
 
 dev-infra:
 	docker compose -f deploy/compose.dev.yaml up -d
+
+# Bucket for the dev cache on RustFS (TABAYYUN_CACHE_URL=s3://tabayyun-cache, see api/.env.example).
+dev-bucket:
+	cd api && uv run python -c "from pyarrow import fs; fs.S3FileSystem(access_key='tabayyun-dev', secret_key='tabayyun-dev-secret', endpoint_override='localhost:9000', scheme='http', allow_bucket_creation=True).create_dir('tabayyun-cache')"
 
 api-dev:
 	cd api && uv run uvicorn tabayyun.main:app --reload --port 8000

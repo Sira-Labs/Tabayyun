@@ -119,22 +119,23 @@ flags or the same environment variables.
 
 ## Acceptance criteria
 
-- [ ] Round trip on the local store: write two series over three months, read a sub-range of
+- [x] Round trip on the local store: write two series over three months, read a sub-range of
       one, get exactly the rows in range, sorted, with values, quality and ingest times intact.
-- [ ] A second write of overlapping timestamps with different values is read back with the
+- [x] A second write of overlapping timestamps with different values is read back with the
       newer values; untouched timestamps keep the old ones.
-- [ ] Reads prune: a read of one series for one month opens only that bucket and month
-      (asserted through a counting store wrapper in the test).
+- [x] Reads prune: a read of one series for one month opens only that bucket and month
+      (asserted through the read statistics, see Implementation edits).
 - [ ] The same round trip passes against an S3 endpoint in CI (RustFS service container,
-      pinned to the live version, test enabled by `TABAYYUN_TEST_S3_URL`).
-- [ ] `tabayyun cache bench --rows 10000000` writes and reads 10 M rows; the numbers are
-      recorded in this spec.
+      pinned to the live version, test enabled by `TABAYYUN_TEST_S3_URL`). (Passes locally
+      against RustFS 1.0.0; ticked when CI is green.)
+- [x] `tabayyun cache bench --rows 10000000` writes and reads 10 M rows; the numbers are
+      recorded in this spec (Benchmarks).
 - [ ] An upload run on the live system writes its series to the RustFS bucket and a
       `coverage` row; `stats.cache.written` is true. A run with the store unreachable still
       succeeds with `stats.cache.written = false`.
-- [ ] `missing_ranges` unit tests pass (empty, full, gaps at both ends, overlapping and
+- [x] `missing_ranges` unit tests pass (empty, full, gaps at both ends, overlapping and
       touching ranges).
-- [ ] `make lint` and `make test` pass; the wheel still builds for Python 3.11+.
+- [x] `make lint` and `make test` pass; the wheel still builds for Python 3.11+.
 
 ## Test cases
 
@@ -167,6 +168,48 @@ API (`api/tests`): `test_missing_ranges.py`; `tests/db/test_runs_cache.py`
   `AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED`. The cache was still empty, so the store
   was replaced by RustFS 1.0 (GA 16 Sep 2026) the same day; the cache holds only rebuildable
   copies (ADR-0003), so a later store change is a configuration change plus re-uploads.
+
+## Benchmarks
+
+`tabayyun cache bench` (release build, one sandbox VM, RustFS 1.0.0 in Docker on the same
+host), 2026-09-23. Rows are synthetic 1 s samples; generation is not timed.
+
+| Store | Rows × series | Files | Write | Read |
+|---|---|---|---|---|
+| local disk | 10 M × 1 | 4 | 2.14 s (4.7 M rows/s) | 2.14 s (4.7 M rows/s) |
+| RustFS (S3) | 10 M × 1 | 4 | 2.26 s (4.4 M rows/s) | 1.85 s (5.4 M rows/s) |
+| RustFS (S3) | 10 M as 1 000 × 10 k | 1 000 | 9.23 s (1.1 M rows/s) | 2.12 s (4.7 M rows/s) |
+
+About 11 bytes per row on disk for noisy synthetic values. Writes are one sequential PUT per
+series and month, so many small series pay per-request latency; connectors (S9-1) should
+batch series per request cycle or write concurrently.
+
+## Implementation edits
+
+- Pruning is asserted through `Cache::read_with_stats` (`prefixes_listed`, `files_read`,
+  `row_groups_read`, `row_groups_skipped`) instead of a counting store wrapper: the numbers
+  are also useful in logs, and a wrapper would re-implement the whole `ObjectStore` trait.
+- Objects are fetched whole and row groups pruned by statistics after the fetch; ranged
+  reads (fetch only matching row groups) wait until files grow large enough to matter.
+- The cache write happens after the completion transaction, not inside it: the write is
+  network I/O and the transaction holds the per-series advisory lock (spec 003). The
+  coverage row and `stats.cache` are written in a short follow-up transaction.
+- The cache keys a series by its database UUID under its source's UUID, not by the upload's
+  external id, so dataset runs (spec 008) read by the ids they already hold.
+- A second upload whose range starts at the same instant widens the existing coverage row
+  (`ON CONFLICT` on the primary key) instead of failing.
+- `object_store` is pinned at 0.13, the version `parquet` 59 resolves (one copy in the tree);
+  `with_client_options` replaces the whole option set, so `allow_http` is set on the client
+  options, a bug found by the RustFS test.
+- Store errors are summarised as `<what>: <hint>: <root cause>` (for example
+  `access denied (check the key and its bucket policy)`, `Connection refused`), because that
+  line is what an operator reads in `stats.cache.error`; `deploy/caprover.md` lists them.
+- `TABAYYUN_CACHE_DIR` stays accepted as an alias of `TABAYYUN_CACHE_URL`: the live api app
+  and older compose files still set it.
+- CI creates the test bucket with the runner's `aws` CLI; `make dev-bucket` does the same for
+  the dev RustFS.
+- The built extension module `_native.abi3.so` had been committed since sprint 2; it is now
+  ignored and built by maturin only.
 
 ## Out of scope
 

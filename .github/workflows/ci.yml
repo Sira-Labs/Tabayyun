@@ -19,6 +19,17 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run: { working-directory: core }
+    # RustFS for the cache's S3 test (spec 006); throwaway test credentials.
+    services:
+      rustfs:
+        image: rustfs/rustfs:1.0.0
+        env: { RUSTFS_ACCESS_KEY: tabayyun-ci, RUSTFS_SECRET_KEY: tabayyun-ci-secret }
+        ports: ["9000:9000"]
+    env:
+      TABAYYUN_TEST_S3_URL: s3://tabayyun-test
+      TABAYYUN_TEST_S3_ENDPOINT: http://localhost:9000
+      TABAYYUN_TEST_S3_ACCESS_KEY_ID: tabayyun-ci
+      TABAYYUN_TEST_S3_SECRET_ACCESS_KEY: tabayyun-ci-secret
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -27,6 +38,11 @@ jobs:
         with: { workspaces: core }
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
+      - name: Create the S3 test bucket
+        env: { AWS_ACCESS_KEY_ID: tabayyun-ci, AWS_SECRET_ACCESS_KEY: tabayyun-ci-secret, AWS_DEFAULT_REGION: us-east-1 }
+        run: |
+          for i in $(seq 1 30); do curl -s -o /dev/null http://localhost:9000/ && break; sleep 1; done
+          aws --endpoint-url http://localhost:9000 s3 mb s3://tabayyun-test
       - run: cargo test
       - run: cargo run -q --bin tabayyun -- synth --out /tmp/f.csv --faults gap,flatline,nans
       - run: cargo run -q --bin tabayyun -- run --input /tmp/f.csv --quality-col quality --unit "%" | python3 -c "import json,sys; r=json.load(sys.stdin); assert r['findings'], 'expected findings'; print(r['score'])"
@@ -67,9 +83,17 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
+      rustfs:
+        image: rustfs/rustfs:1.0.0
+        env: { RUSTFS_ACCESS_KEY: tabayyun-ci, RUSTFS_SECRET_KEY: tabayyun-ci-secret }
+        ports: ["9000:9000"]
     env:
       TABAYYUN_DATABASE_URL: postgresql+psycopg://tabayyun:tabayyun@localhost:5432/tabayyun
       TABAYYUN_TEST_DATABASE_URL: postgresql+psycopg://tabayyun:tabayyun@localhost:5432/tabayyun
+      TABAYYUN_TEST_S3_URL: s3://tabayyun-test
+      TABAYYUN_TEST_S3_ENDPOINT: http://localhost:9000
+      TABAYYUN_TEST_S3_ACCESS_KEY_ID: tabayyun-ci
+      TABAYYUN_TEST_S3_SECRET_ACCESS_KEY: tabayyun-ci-secret
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -82,6 +106,11 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy
+      - name: Create the S3 test bucket
+        env: { AWS_ACCESS_KEY_ID: tabayyun-ci, AWS_SECRET_ACCESS_KEY: tabayyun-ci-secret, AWS_DEFAULT_REGION: us-east-1 }
+        run: |
+          for i in $(seq 1 30); do curl -s -o /dev/null http://localhost:9000/ && break; sleep 1; done
+          aws --endpoint-url http://localhost:9000 s3 mb s3://tabayyun-test
       - run: uv run pytest -q
       # Models and migrations must agree; the tests leave the schema at head.
       - run: uv run alembic upgrade head && uv run alembic check
