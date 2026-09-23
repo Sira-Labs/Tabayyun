@@ -11,7 +11,7 @@
 
 use crate::checks::{CheckContext, CheckOutput};
 use crate::error::{Error, Result};
-use crate::finding::{Dimension, Severity};
+use crate::finding::{Dimension, Severity, Window};
 use crate::frame::SeriesFrame;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -154,6 +154,66 @@ pub trait CrossCheck: Send + Sync {
     fn run(&self, frames: &[&SeriesFrame], group: &SeriesGroup, ctx: &CheckContext) -> Result<CheckOutput>;
 }
 
+/// A member's display name: its metadata name, else its id.
+pub fn member_name(f: &SeriesFrame) -> &str {
+    f.meta.name.as_deref().unwrap_or(&f.meta.id)
+}
+
+/// A number for a summary: three significant digits, no trailing zeros.
+pub fn num(x: f64) -> String {
+    if x == 0.0 || !x.is_finite() {
+        return format!("{x}"); // log10 of 0 is -inf and would overflow the digit count
+    }
+    let digits = (2 - x.abs().log10().floor() as i32).clamp(0, 6) as usize;
+    let s = format!("{x:.digits$}");
+    if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        s
+    }
+}
+
+/// One episode of flagged bins: its window and the indices of the flagged bins it covers.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Episode {
+    pub window: Window,
+    pub bins: Vec<usize>,
+}
+
+/// Episodes from per-bin flags on an alignment grid. `ts` holds the start of each bin that
+/// counted (sorted; bins that did not count are absent, which breaks a run). Runs of
+/// consecutive flagged bins shorter than `min_duration` are dropped first, then the remaining
+/// runs merge when the gap between them is shorter than `min_duration`.
+pub fn episodes(ts: &[i64], flagged: &[bool], grid_ns: i64, min_duration: i64) -> Vec<Episode> {
+    let mut runs: Vec<(usize, usize)> = Vec::new(); // [s, e) into `ts`
+    let mut i = 0;
+    while i < ts.len() {
+        if !flagged[i] {
+            i += 1;
+            continue;
+        }
+        let s = i;
+        while i + 1 < ts.len() && flagged[i + 1] && ts[i + 1] - ts[i] == grid_ns {
+            i += 1;
+        }
+        runs.push((s, i + 1));
+        i += 1;
+    }
+    let span = |(s, e): (usize, usize)| Window::new(ts[s], ts[e - 1] + grid_ns);
+    let mut out: Vec<Episode> = Vec::new();
+    for run in runs.into_iter().filter(|&r| span(r).duration() >= min_duration) {
+        let w = span(run);
+        match out.last_mut() {
+            Some(ep) if w.start - ep.window.end < min_duration => {
+                ep.window = Window::new(ep.window.start, w.end);
+                ep.bins.extend(run.0..run.1);
+            }
+            _ => out.push(Episode { window: w, bins: (run.0..run.1).collect() }),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,6 +249,37 @@ mod tests {
         let mut g = group(GroupKind::Related, &[("a", Member), ("b", Member)]);
         g.params = json!([1]);
         assert!(err(g).contains("object"));
+    }
+
+    #[test]
+    fn episodes_drop_short_runs_then_merge() {
+        let flags = |on: &[usize], n: usize| (0..n).map(|i| on.contains(&i)).collect::<Vec<_>>();
+        let ts: Vec<i64> = (0..20).map(|i| i * 10).collect();
+        // Runs [2,4) and [6,9), 20 and 30 long, minimum 20: both stay, and the gap of 20 is
+        // not below the minimum, so they stay apart.
+        let eps = episodes(&ts, &flags(&[2, 3, 6, 7, 8], 20), 10, 20);
+        assert_eq!(eps.len(), 2);
+        assert_eq!(eps[0], Episode { window: Window::new(20, 40), bins: vec![2, 3] });
+        // With a minimum of 30 the first run is dropped before merging.
+        let eps = episodes(&ts, &flags(&[2, 3, 6, 7, 8], 20), 10, 30);
+        assert_eq!(eps, vec![Episode { window: Window::new(60, 90), bins: vec![6, 7, 8] }]);
+        // A gap of 10 below a minimum of 20 merges.
+        let eps = episodes(&ts, &flags(&[2, 3, 5, 6], 20), 10, 20);
+        assert_eq!(eps, vec![Episode { window: Window::new(20, 70), bins: vec![2, 3, 5, 6] }]);
+        // A missing bin (absent timestamp) breaks a run; with a minimum of 10 the gap of 10
+        // does not merge the two runs again.
+        let ts2 = [0, 10, 30, 40];
+        assert_eq!(episodes(&ts2, &[true; 4], 10, 10).len(), 2);
+    }
+
+    #[test]
+    fn numbers_read_well() {
+        assert_eq!(num(0.0), "0");
+        assert_eq!(num(f64::NAN), "NaN");
+        assert_eq!(num(4.23456), "4.23");
+        assert_eq!(num(1.0), "1");
+        assert_eq!(num(0.012345), "0.0123");
+        assert_eq!(num(1234.6), "1235");
     }
 
     #[test]
