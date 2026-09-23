@@ -154,6 +154,10 @@ API (`api/tests`): `test_missing_ranges.py`; `tests/db/test_runs_cache.py`
   access key whose policy allows only that bucket. The owner creates the bucket and the key;
   `deploy/README.md` lists the steps. The api does not need the cache until the chart
   endpoints (sprint 9).
+- Verified 2026-09-23 before implementation: from inside the worker container, pyarrow wrote,
+  listed, read and deleted a Parquet object in `tabayyun-cache` over
+  `http://srv-captain--rustfs:9000` with default AWS-SDK settings (no checksum workaround).
+  Port 9000 is the S3 API; 9001 is the console.
 - Dev and CI: `deploy/compose.dev.yaml` gains the same RustFS image with S3 on port 9000; CI
   runs it as a service container for the S3 test, so tests exercise the store that runs live.
 - History (23 Sep 2026): the first live setup used an existing MinIO. Its community builds and
