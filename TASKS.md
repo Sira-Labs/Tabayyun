@@ -165,7 +165,10 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
       - Grid capped at 500 000 bins with checked span arithmetic (a stray far timestamp).
         Follow-up: `frame::modal_interval` (`0 − i64::MIN`) and `Profile::compute`'s
         `3 × interval` gap cut still overflow on timestamps near the i64 limits.
-- [ ] **016 `tby.physical_range` episodes** — `docs/specs/016-physical-range-episodes.md` (S7-9, could)
+- [x] **016 `tby.physical_range` episodes** — `docs/specs/016-physical-range-episodes.md` (S7-9, could)
+      - The spec's `physical_min/max`/`capacity_factor_max` params are `min`/`max`; the
+        capacity factor is still unimplemented.
+      - Strict "closer than" gap (spikes joins at ≤); single excursions keep today's summary.
 - [ ] **017 CLI epoch units match the API** — `docs/specs/017-cli-epoch-units.md` (S7-10, could)
 
 ## Sprint 8 — login, tenants and RBAC (forecast end 29 Sep – 1 Oct)

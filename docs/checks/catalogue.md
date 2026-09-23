@@ -173,8 +173,13 @@ Profiles are versioned and stored; findings link to the profile they used.
 - **Algorithm:** value < physical_min or > physical_max. Limits from metadata, else from
   unit defaults (%, 0–100; K > 0; RH 0–100; kWh per interval ≤ capacity × interval; power ≤
   rated capacity × `capacity_factor_max`).
-- **Params:** `physical_min/max`; `capacity_factor_max` 1.1.
-- **Evidence:** count, min/max observed, limit, source of limit.
+- **Episodes (spec 016):** excursion runs starting less than `cluster_gap` (auto: max(1 h,
+  12 × interval)) after the previous one ends form one finding with the exact count; more
+  than `max_findings` (20) episodes collapse into one low-severity summary (ADR-0011).
+- **Params:** `min`/`max` (else `physical_min/max` from metadata, else the unit's defaults),
+  `cluster_gap`, `max_findings`; `capacity_factor_max` 1.1 is designed, not implemented yet.
+- **Evidence:** count, min/max observed, limits, `n_excursions`, `first_ts`, `last_ts`
+  (summary: `n_episodes`, `share`, `largest`).
 - **Sources:** Timeseer "improbable limits"; Elexon CoP max kWh table; AEMO CT-ratio max; OpenOA `range_flag`.
 
 ### 10. `tby.operational_range` — Outside learned operating band
