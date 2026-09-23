@@ -53,19 +53,40 @@ Metric per member and bin grid summary: `max_abs_diff` per segment of one day.
 
 ## Acceptance criteria
 
-- [ ] 2oo3 synthetic: one member drifts past tolerance for 6 h → one finding attached to
+- [x] 2oo3 synthetic: one member drifts past tolerance for 6 h → one finding attached to
       that member, `suspect` set.
-- [ ] Two members with a 30-minute disagreement → one finding, `suspect` null.
-- [ ] A 10-minute blip → no finding (`min_duration`).
-- [ ] Explicit `tolerance` suppresses a designed offset; `tolerance_pct` works on scaled data.
-- [ ] Bins with a single member present are ignored.
-- [ ] Catalogue row 23 marked ✅.
+- [x] Two members with a 30-minute disagreement → one finding, `suspect` null.
+- [x] A 10-minute blip → no finding (`min_duration`).
+- [x] Explicit `tolerance` suppresses a designed offset; `tolerance_pct` works on scaled data.
+- [x] Bins with a single member present are ignored.
+- [x] Catalogue row 23 marked ✅.
 
 ## Test cases
 
 Unit (`checks::redundant_disagreement::tests`): `two_of_three_names_suspect`,
 `pair_without_suspect`, `short_blip_ignored`, `explicit_tolerance`, `pct_tolerance`,
-`auto_tolerance_catches_bias`, `sparse_bins_ignored`.
+`auto_tolerance_catches_bias`, `sparse_bins_ignored`, `bad_params_are_invalid`,
+`registry_runs_it_on_redundant_groups_only`, `numbers_read_well`.
+
+## Implementation edits
+
+Recorded on 2026-09-23; approved with the plan.
+
+- The metric is `max_abs_diff:<group_id>` rather than `max_abs_diff`: metric points are keyed by
+  (series, check, name, ts), and a series in two redundant groups would overwrite its own line.
+- With three or more members the automatic tolerance uses the MAD of every member's deviation
+  from the bin median (the spec gave the formula for a pair's difference only).
+- Without a `resolution` in the metadata the floor uses the resolution estimated from the data
+  (`profile::resolution`), so identical quantised readings (MAD 0) never give a zero tolerance.
+- Step 4 runs in the order written: runs shorter than `min_duration` are dropped first, then the
+  rest merge when closer than `min_duration`, so two 10-minute blips 5 minutes apart stay silent.
+- A bin where only two of three or more members are present still counts (compared with their
+  mean), but names no suspect. `tolerance` wins over `tolerance_pct` when both are set.
+- `max_abs_diff` and `mean_abs_diff` measure the suspect's distance from the median when there is
+  one, else the largest member's; for a pair, |A − B|.
+- Group `params` override the check's through the shared `cross::with_group_params` (moved there
+  from spec 009's check); a negative `tolerance` or `tolerance_pct`, a non-positive `k` and a zero
+  `grid` are `InvalidParams`.
 
 ## Out of scope
 

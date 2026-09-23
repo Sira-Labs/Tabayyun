@@ -14,7 +14,7 @@
 
 use super::{duration_param, episodes, CheckContext, CheckOutput};
 use crate::align::align;
-use crate::cross::{CrossCheck, GroupKind, SeriesGroup};
+use crate::cross::{with_group_params, CrossCheck, GroupKind, SeriesGroup};
 use crate::error::{Error, Result};
 use crate::finding::{Dimension, Finding, Metric, Severity, Window};
 use crate::frame::SeriesFrame;
@@ -175,22 +175,6 @@ fn name(f: &SeriesFrame) -> &str {
 }
 
 impl CorrelationBreak {
-    /// This check's params with the group's `params` on top (keys of other checks ignored).
-    fn for_group(&self, group: &SeriesGroup) -> Result<Self> {
-        let mut merged = serde_json::to_value(self)?;
-        if let (Some(base), Some(over)) = (merged.as_object_mut(), group.params.as_object()) {
-            for (k, v) in over {
-                if base.contains_key(k) {
-                    base.insert(k.clone(), v.clone());
-                }
-            }
-        }
-        serde_json::from_value(merged).map_err(|e| Error::InvalidParams {
-            check: ID.into(),
-            reason: format!("group {}: {e}", group.id),
-        })
-    }
-
     fn segments(
         &self,
         a: &SeriesFrame,
@@ -245,7 +229,7 @@ impl CrossCheck for CorrelationBreak {
     }
 
     fn run(&self, frames: &[&SeriesFrame], group: &SeriesGroup, ctx: &CheckContext) -> Result<CheckOutput> {
-        let p = self.for_group(group)?;
+        let p = with_group_params(self, ID, group)?;
         let segment_ns = duration_param(ID, "segment", &p.segment)?;
         let grid = if p.grid == "auto" { None } else { Some(duration_param(ID, "grid", &p.grid)?) };
         let invalid = |reason: &str| Error::InvalidParams {

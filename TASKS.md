@@ -130,7 +130,7 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
         `cargo audit`), independent of parquet's version.
       - Done 2026-09-23: CI runs the S3 tests against RustFS; a live two-month upload wrote
         2 objects and its coverage row.
-- [~] **008 Multi-series checks, series groups and dataset runs** — `docs/specs/008-multi-series-and-datasets.md` (S7-3, S7-8)
+- [x] **008 Multi-series checks, series groups and dataset runs** — `docs/specs/008-multi-series-and-datasets.md` (S7-3, S7-8)
       - `run_multi` takes each series' profile so a dataset run finds what an upload of the
         same data finds (the checks' adaptive thresholds depend on it).
       - Cross checks are injected (`run_multi_with`); the built-in list stays empty until
@@ -138,8 +138,7 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
       - Groups with a member outside the dataset are reported in `groups_skipped`, not dropped.
       - `POST /api/runs` JSON answers with the upload's `{id, status, created_at}` shape.
       - Cross-series findings merge only within their group (ADR-0013 amendment).
-      - Live dataset run verified after PR #32 (group run, data read from RustFS); stays `[~]`
-        until the live criterion's cross-series findings, which need 009–010.
+      - Live dataset run verified after PR #32; the cross-series finding after PR #33 (009).
 - [x] **009 `tby.correlation_break`** — `docs/specs/009-correlation-break.md` (S7-4)
       - Pair findings attach to the pair's first member with `partner`; metrics carry the
         partner in their name; dedup also matches `partner` (ADR-0013 amendment).
@@ -147,7 +146,11 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
         correlation held and the reference lag is stable (both found on 3W WELL-00019).
       - 3W: dead PDG gauges on WELL-00001 skip; WELL-00019 (hydrate) keeps ρ ≈ −1 through the
         event, one short unexplained dip flagged. Follow-up: the CLI cannot read brotli Parquet.
-- [ ] **010 `tby.redundant_disagreement`** — `docs/specs/010-redundant-disagreement.md` (S7-5)
+- [x] **010 `tby.redundant_disagreement`** — `docs/specs/010-redundant-disagreement.md` (S7-5)
+      - Metric carries the group (`max_abs_diff:<group>`) so a series in two groups keeps both.
+      - Auto tolerance for 3+ members from the MAD of deviations from the bin median, floored
+        at 2 × the data's estimated resolution when metadata has none.
+      - Short runs are dropped before close runs merge (spec order), so blips stay silent.
 - [ ] **011 `tby.balance_residual`** — `docs/specs/011-balance-residual.md` (S7-6)
 - [ ] **012 Seasonality in the profile, `tby.seasonality_break`** — `docs/specs/012-seasonality-break.md` (S7-7)
 - [ ] **016 `tby.physical_range` episodes** — `docs/specs/016-physical-range-episodes.md` (S7-9, could)
@@ -162,6 +165,14 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
 
 Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, SMTP):
 `docs/roadmap/sprints.md`, "Owner and external dependencies".
+- [x] Keycloak at miftachun.apps.data-and-ai-dude.ch: named admin, OTP and brute-force
+      protection in the master realm (23 Sep).
+- [x] Google OAuth client (External, redirect `…/realms/tabayyun/broker/google/endpoint`);
+      credentials in the owner's password manager, to CapRover env vars in S8-1 (23 Sep).
+- [x] SMTP through the Google Workspace relay (`smtp-relay.gmail.com:587`, allowed by the
+      server IP); SPF, DKIM and DMARC fixed on data-and-ai-dude.com and .ch (23 Sep).
+- [ ] Around 7 Oct: move both DMARC records from `p=none` to `p=quarantine` once the
+      reports show only Google sending (reminder scheduled).
 
 ## Later sprints
 

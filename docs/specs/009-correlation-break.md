@@ -111,6 +111,15 @@ maximised the signed correlation, which for a negatively related pair picks the 
 lag (random lags, four false lag findings on WELL-00019), and raw levels of slowly trending
 series correlate at every lag, which flattens the profile. See "Implementation edits".
 
+## Live check (2026-09-23, after PR #33, release run 33)
+
+Two hourly series over 12 days (`live-009-a`, `live-009-b`: a shared AR(1) driver plus a daily
+sine; b decoupled to noise on day 10), a `related` group and a fixed 12-day dataset gave a
+dataset run on the CapRover worker with exactly one `tby.correlation_break` finding on
+`live-009-a`, window 2024-02-11 (day 10), "live-009-a stopped tracking live-009-b for 1d
+(ρ 0.13, usually 1.00)", `partner` = live-009-b's id. The other three findings were
+single-series checks on the synthetic data; all four were resolved as "test upload".
+
 ## Implementation edits
 
 Recorded on 2026-09-23; approved with the plan.
