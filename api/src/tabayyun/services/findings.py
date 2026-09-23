@@ -405,7 +405,12 @@ async def list_metrics(
     return (await session.execute(stmt)).scalars().all()
 
 
-async def list_scores(session: AsyncSession, series_id: uuid.UUID, *, limit: int) -> Sequence[Score]:
-    """Score rows of one series, newest first."""
-    stmt = select(Score).where(Score.series_id == series_id).order_by(Score.computed_at.desc()).limit(limit)
+async def list_scores(
+    session: AsyncSession, series_id: uuid.UUID, *, limit: int, run_id: uuid.UUID | None = None
+) -> Sequence[Score]:
+    """Score rows of one series, newest first; only the given run's rows when `run_id` is set."""
+    stmt = select(Score).where(Score.series_id == series_id)
+    if run_id is not None:
+        stmt = stmt.where(Score.run_id == run_id)
+    stmt = stmt.order_by(Score.computed_at.desc()).limit(limit)
     return (await session.execute(stmt)).scalars().all()

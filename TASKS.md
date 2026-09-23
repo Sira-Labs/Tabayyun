@@ -99,8 +99,17 @@ story ids there (`S6-1`) map to specs here.
       - `open_findings` = open + acked, matching the default findings list.
       - Follow-ups: CLI per-column inference and range check; `ts_unit` select in the web
         form with spec 005.
-- [ ] **005 Runs list and report in the web app** — `docs/specs/005-runs-web.md`
+- [~] **005 Runs list and report in the web app** — `docs/specs/005-runs-web.md`
       `/runs`, `/runs/new` (with physical limits), `/runs/:id` with polling and evidence.
+      - Runs keep `stats.skipped_checks`; score tiles read the run's score row; the series
+        link is a metadata panel until the series page (sprint 9).
+      - One findings list (buttons in a grid) serves desktop and phone widths.
+      - Vitest pinned to `TZ=Asia/Riyadh` to cover the UTC offset; form tests submit
+        directly because jsdom ignores user-event files for `required`.
+      - Stays `[~]` until the round trip is checked against the deployed worker.
+      - Follow-up (core): `tby.physical_range` reports each excursion as its own finding; a
+        limit set inside the normal range gave 34 findings in the local check. ADR-0011's
+        episode rule should apply to it as it does to spikes.
 
 ## Sprint 7 — Parquet cache and cross-series checks (4 – 10 Oct)
 

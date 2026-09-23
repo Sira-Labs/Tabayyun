@@ -9,7 +9,7 @@ core:
 test:
 	cd core && cargo test
 	cd api && uv run pytest -q
-	cd web && pnpm build
+	cd web && pnpm build && pnpm test
 
 lint:
 	cd core && cargo fmt --check && cargo clippy --all-targets -- -D warnings

@@ -250,6 +250,11 @@ async def test_metrics_and_scores_endpoints(client, app):
     assert (
         len((await client.get(f"/api/series/{series_id}/scores", params={"limit": 1})).json()["items"]) == 1
     )
+    by_run_res = await client.get(f"/api/series/{series_id}/scores", params={"run_id": first["id"]})
+    by_run = by_run_res.json()["items"]
+    assert [s["run_id"] for s in by_run] == [first["id"]]
+    bad_run = await client.get(f"/api/series/{series_id}/scores", params={"run_id": "nope"})
+    assert bad_run.status_code == 422
 
     points = (await client.get(f"/api/series/{series_id}/metrics", params={"limit": 1000})).json()["items"]
     assert len(points) == second["stats"]["n_metrics"]
