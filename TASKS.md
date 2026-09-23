@@ -162,6 +162,9 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
       - Shortest significant candidate, not the highest ACF (harmonics tie); load reads daily.
       - Reference always from the leading segments: the run's profile is its own data.
       - OPSD DE load/wind/solar 2015–2020: silent; a planted flat load week is the one finding.
+      - Grid capped at 500 000 bins with checked span arithmetic (a stray far timestamp).
+        Follow-up: `frame::modal_interval` (`0 − i64::MIN`) and `Profile::compute`'s
+        `3 × interval` gap cut still overflow on timestamps near the i64 limits.
 - [ ] **016 `tby.physical_range` episodes** — `docs/specs/016-physical-range-episodes.md` (S7-9, could)
 - [ ] **017 CLI epoch units match the API** — `docs/specs/017-cli-epoch-units.md` (S7-10, could)
 
