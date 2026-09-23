@@ -138,7 +138,8 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
       - Groups with a member outside the dataset are reported in `groups_skipped`, not dropped.
       - `POST /api/runs` JSON answers with the upload's `{id, status, created_at}` shape.
       - Cross-series findings merge only within their group (ADR-0013 amendment).
-      - Stays `[~]` until the live criterion, which needs 009–010.
+      - Live dataset run verified after PR #32 (group run, data read from RustFS); stays `[~]`
+        until the live criterion's cross-series findings, which need 009–010.
 - [ ] **009 `tby.correlation_break`** — `docs/specs/009-correlation-break.md` (S7-4)
 - [ ] **010 `tby.redundant_disagreement`** — `docs/specs/010-redundant-disagreement.md` (S7-5)
 - [ ] **011 `tby.balance_residual`** — `docs/specs/011-balance-residual.md` (S7-6)
