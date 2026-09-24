@@ -44,7 +44,10 @@ and Kafka Connect's TimestampConverter `unix.precision`. None of them guesses si
 ## Consequences
 - An epoch-integer file that parsed before but produced 1970 dates now fails with a 422 and a
   hint instead of producing a nonsense report.
-- The CLI keeps per-value inference; aligning it with the per-column rule and the range check
+- Amended 2026-09-24 (spec 017): the CLI now follows the per-column rule and the range check
+  too (`--ts-unit`, exit code 2), including integer Parquet columns; the rules live in
+  `tabayyun_core::time` and a shared case table pins both sides. Originally: the CLI kept
+  per-value inference; aligning it with the per-column rule and the range check
   is a follow-up in the core.
 - The web upload form gains a `ts_unit` select with spec 005; until then it sends nothing and
   gets `auto`.

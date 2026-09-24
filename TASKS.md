@@ -169,7 +169,10 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
       - The spec's `physical_min/max`/`capacity_factor_max` params are `min`/`max`; the
         capacity factor is still unimplemented.
       - Strict "closer than" gap (spikes joins at ≤); single excursions keep today's summary.
-- [ ] **017 CLI epoch units match the API** — `docs/specs/017-cli-epoch-units.md` (S7-10, could)
+- [x] **017 CLI epoch units match the API** — `docs/specs/017-cli-epoch-units.md` (S7-10, could)
+      - `--ts-unit` on run, check-multi and cache write (the spec's check/profile do not exist).
+      - Integer Parquet timestamp columns follow the rule too; they were read as ns.
+      - One case table (`epoch_cases.json`) pins the Rust core and the API.
 
 ## Sprint 8 — login, tenants and RBAC (forecast end 29 Sep – 1 Oct)
 
