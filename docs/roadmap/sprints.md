@@ -222,6 +222,7 @@ Goal: quality is monitored continuously, not run by hand.
 | S10-4 | SSE stream for `run.completed` and `finding.created`; web updates live | S | inbox updates without refresh |
 | S10-5 | Alerts: rules on findings and scores, channels email and webhook, throttling, delivery job | M | an alert email arrives for a critical finding |
 | S10-6 | Overview: score tiles per dimension with 30-day sparklines, worst 5 % series, findings by severity over time, connector health strip; filters in URL | S | overview loads in under 1 s for 10k series |
+| S10-7 | Compare view scatter (follow-up to spec 018): XY plot of one series against another on the aligned grid, coloured by time, capped points from the server, finding windows highlighted | C | a correlation-break finding shows the pair's cloud splitting off during the break |
 
 ## Sprint 11 — corrections v1
 

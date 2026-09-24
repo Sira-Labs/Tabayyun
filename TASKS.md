@@ -193,4 +193,4 @@ starts; the plan is the backlog until then.
 
 - [ ] **018 Compare view** — `docs/specs/018-compare-view.md` (S9-7), drafted early on request
       (23 Sep) with `docs/research/06-multi-series-comparison.md`; needs S9-5's chart endpoint.
-      The other sprint 9 stories take 019+.
+      The other sprint 9 stories take 019+. Approved 24 Sep; scatter stays in sprint 10 (S10-7).
