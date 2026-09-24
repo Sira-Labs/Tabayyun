@@ -5,7 +5,7 @@
 # built, so a deployment always runs exactly those images; manual installs set a version.
 services:
   web:
-    image: ghcr.io/thedatadudech/tabayyun-web:${TABAYYUN_TAG:?set TABAYYUN_TAG (a version or sha-<short>)}
+    image: ghcr.io/sira-labs/tabayyun-web:${TABAYYUN_TAG:?set TABAYYUN_TAG (a version or sha-<short>)}
     restart: unless-stopped
     ports:
       - "80:80"
@@ -19,7 +19,7 @@ services:
         condition: service_healthy
 
   api:
-    image: ghcr.io/thedatadudech/tabayyun-api:${TABAYYUN_TAG:?set TABAYYUN_TAG (a version or sha-<short>)}
+    image: ghcr.io/sira-labs/tabayyun-api:${TABAYYUN_TAG:?set TABAYYUN_TAG (a version or sha-<short>)}
     restart: unless-stopped
     env_file: .env
     # The image migrates the schema (python -m tabayyun.db.migrate upgrade head) on every start before serving.
@@ -36,7 +36,7 @@ services:
   worker:
     # Same image and environment as the api; TABAYYUN_ROLE=worker runs the job worker
     # instead of the server. Scale with `docker compose up -d --scale worker=2`.
-    image: ghcr.io/thedatadudech/tabayyun-api:${TABAYYUN_TAG:?set TABAYYUN_TAG (a version or sha-<short>)}
+    image: ghcr.io/sira-labs/tabayyun-api:${TABAYYUN_TAG:?set TABAYYUN_TAG (a version or sha-<short>)}
     restart: unless-stopped
     env_file: .env
     environment:

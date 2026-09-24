@@ -6,7 +6,7 @@ seriously and aim for the ASVS L2 baseline in `docs/frontend/02-security-baselin
 ## Reporting a vulnerability
 
 Please **do not open a public issue**. Use GitHub's private reporting:
-<https://github.com/thedatadudech/Tabayyun/security/advisories/new>.
+<https://github.com/Sira-Labs/Tabayyun/security/advisories/new>.
 
 Include the affected component (core, bindings, api, web, deploy), a version or commit, steps
 to reproduce, and impact. You should hear back within 5 working days. We will keep you
@@ -19,7 +19,7 @@ Tabayyun is pre-1.0. Only the `main` branch and the most recent `v*` tag receive
 ## Scope
 
 In scope: the code in this repository, the published container images
-(`ghcr.io/thedatadudech/tabayyun-api`, `ghcr.io/thedatadudech/tabayyun-web`) and the compose
+(`ghcr.io/sira-labs/tabayyun-api`, `ghcr.io/sira-labs/tabayyun-web`) and the compose
 bundles in `deploy/`. Out of scope: third-party services you integrate (Keycloak, PI Web API,
 OPC UA servers) except where Tabayyun's use of them is at fault; findings that require a
 compromised host or administrator credentials.
