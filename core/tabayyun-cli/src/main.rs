@@ -3,14 +3,14 @@
 //! JSON so it can feed the API, notebooks or CI.
 
 use chrono::{DateTime, Utc};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::PathBuf;
 use tabayyun_core::cache::{Cache, StoreConfig};
 use tabayyun_core::synth::{self, inject, Rng, SynthSpec};
-use tabayyun_core::time::NS_PER_SEC;
+use tabayyun_core::time::{resolve_epoch_column, TsUnit, NS_PER_SEC};
 use tabayyun_core::{
     CheckConfig, CheckContext, CheckOutput, Profile, Quality, Registry, Scorer, SeriesFrame, SeriesGroup,
     SeriesMeta, Window,
@@ -117,6 +117,41 @@ impl StoreArgs {
     }
 }
 
+/// Unit of epoch-integer timestamps (ADR-0014): `auto` takes it from the column's median.
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum TsUnitArg {
+    #[default]
+    Auto,
+    S,
+    Ms,
+    Us,
+    Ns,
+}
+
+impl TsUnitArg {
+    fn declared(self) -> Option<TsUnit> {
+        match self {
+            TsUnitArg::Auto => None,
+            TsUnitArg::S => Some(TsUnit::S),
+            TsUnitArg::Ms => Some(TsUnit::Ms),
+            TsUnitArg::Us => Some(TsUnit::Us),
+            TsUnitArg::Ns => Some(TsUnit::Ns),
+        }
+    }
+}
+
+/// A timestamp column that cannot be read as plausible instants; exits with code 2.
+#[derive(Debug)]
+struct TsError(String);
+
+impl std::fmt::Display for TsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for TsError {}
+
 /// Where a series comes from: a CSV or Parquet file and its column names.
 #[derive(Args)]
 struct InputArgs {
@@ -134,6 +169,9 @@ struct InputArgs {
     ingest_col: Option<String>,
     #[arg(long, default_value = "series")]
     series_id: String,
+    /// Unit of epoch-integer timestamps: auto (from the column's median), s, ms, us or ns.
+    #[arg(long, value_enum, default_value_t = TsUnitArg::Auto)]
+    ts_unit: TsUnitArg,
 }
 
 #[derive(Args)]
@@ -174,6 +212,9 @@ struct CheckMultiArgs {
     value_cols: Vec<String>,
     #[arg(long, default_value = "ts")]
     ts_col: String,
+    /// Unit of epoch-integer timestamps: auto (from the column's median), s, ms, us or ns.
+    #[arg(long, value_enum, default_value_t = TsUnitArg::Auto)]
+    ts_unit: TsUnitArg,
     /// JSON file with a list of series groups ({"id", "name", "kind", "members", "params"}).
     #[arg(long)]
     groups: Option<PathBuf>,
@@ -213,7 +254,8 @@ struct SynthArgs {
 fn main() {
     if let Err(e) = real_main() {
         eprintln!("error: {e}");
-        std::process::exit(1);
+        // A timestamp column read in the wrong unit is bad input, like a bad argument.
+        std::process::exit(if e.downcast_ref::<TsError>().is_some() { 2 } else { 1 });
     }
 }
 
@@ -240,7 +282,7 @@ fn rfc3339_ns(s: &str) -> Result<i64, Box<dyn std::error::Error>> {
 fn cache_cmd(c: CacheCmd) -> Result<(), Box<dyn std::error::Error>> {
     match c {
         CacheCmd::Write { store, src, source, layer } => {
-            let frame = load(&src, SeriesMeta::new(&src.series_id))?;
+            let (frame, _) = load(&src, SeriesMeta::new(&src.series_id))?;
             let report = store.open()?.write(&layer, &source, &frame)?;
             println!("{}", serde_json::to_string(&report)?);
         }
@@ -316,7 +358,7 @@ fn run_cmd(a: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(i) = &a.interval {
         meta.expected_interval_ns = Some(tabayyun_core::time::parse_duration(i).ok_or("bad --interval")?);
     }
-    let frame = load(&a.src, meta)?;
+    let (frame, ts_unit) = load(&a.src, meta)?;
     let mut ctx = CheckContext::from_frame(&frame);
     if let Some(now) = &a.now {
         let t: DateTime<Utc> = now.parse()?;
@@ -332,7 +374,9 @@ fn run_cmd(a: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
         None => Registry::default_configs(),
     };
     let out = Registry::run(&configs, &frame, &ctx)?;
-    print_json(&report_json(&frame, &ctx, profile.as_ref(), out), a.pretty)
+    let mut report = report_json(&frame, &ctx, profile.as_ref(), out);
+    report["ts_unit"] = ts_unit.into();
+    print_json(&report, a.pretty)
 }
 
 fn check_multi_cmd(a: CheckMultiArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -349,6 +393,7 @@ fn check_multi_cmd(a: CheckMultiArgs) -> Result<(), Box<dyn std::error::Error>> 
         None => Registry::default_multi_configs(),
     };
     let mut frames = Vec::with_capacity(a.value_cols.len());
+    let mut ts_unit = String::new();
     for col in &a.value_cols {
         let meta = metas.remove(col).unwrap_or_else(|| SeriesMeta::new(col));
         if meta.id != *col {
@@ -361,8 +406,11 @@ fn check_multi_cmd(a: CheckMultiArgs) -> Result<(), Box<dyn std::error::Error>> 
             quality_col: None,
             ingest_col: None,
             series_id: col.clone(),
+            ts_unit: a.ts_unit,
         };
-        frames.push(load(&src, meta)?);
+        let (frame, unit) = load(&src, meta)?;
+        ts_unit = unit;
+        frames.push(frame);
     }
     let start = frames.iter().filter_map(SeriesFrame::first_ts).min().unwrap_or(0);
     let end = frames.iter().filter_map(SeriesFrame::last_ts).max().map_or(start, |t| t + 1);
@@ -384,7 +432,10 @@ fn check_multi_cmd(a: CheckMultiArgs) -> Result<(), Box<dyn std::error::Error>> 
             (f.meta.id.clone(), report_json(f, &ctx, profiles.get(&f.meta.id), output))
         })
         .collect();
-    print_json(&serde_json::json!({"reports": reports, "groups_skipped": out.groups_skipped}), a.pretty)
+    print_json(
+        &serde_json::json!({"reports": reports, "groups_skipped": out.groups_skipped, "ts_unit": ts_unit}),
+        a.pretty,
+    )
 }
 
 /// One series' report: findings, metrics, score, profile and skipped checks.
@@ -414,41 +465,76 @@ fn print_json(value: &serde_json::Value, pretty: bool) -> Result<(), Box<dyn std
     Ok(())
 }
 
-fn load(a: &InputArgs, meta: SeriesMeta) -> Result<SeriesFrame, Box<dyn std::error::Error>> {
+/// Read one series; also returns the unit its timestamp column was read in (`s`, `ms`, `us`,
+/// `ns` for epoch integers and typed timestamps, `text` for text).
+fn load(a: &InputArgs, meta: SeriesMeta) -> Result<(SeriesFrame, String), Box<dyn std::error::Error>> {
     let ext = a.input.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
     match ext.as_str() {
-        "parquet" | "pq" => {
-            let file = File::open(&a.input)?;
-            let reader = ParquetRecordBatchReaderBuilder::try_new(file)?.build()?;
-            let mut ts = Vec::new();
-            let mut values = Vec::new();
-            let mut quality = Vec::new();
-            let mut ingest: Vec<i64> = Vec::new();
-            for batch in reader {
-                let b = batch?;
-                let f = SeriesFrame::from_record_batch_ext(
-                    meta.clone(),
-                    &b,
-                    &a.ts_col,
-                    &a.value_col,
-                    a.quality_col.as_deref(),
-                    a.ingest_col.as_deref(),
-                )?;
-                ts.extend(f.ts);
-                values.extend(f.values);
-                quality.extend(f.quality);
-                if let Some(i) = f.ingest_ts {
-                    ingest.extend(i);
-                }
-            }
-            let frame = SeriesFrame::new(meta, ts, values, quality)?;
-            Ok(if a.ingest_col.is_some() { frame.with_ingest_ts(ingest)? } else { frame })
-        }
+        "parquet" | "pq" => load_parquet(a, meta),
         _ => load_csv(a, meta),
     }
 }
 
-fn load_csv(a: &InputArgs, meta: SeriesMeta) -> Result<SeriesFrame, Box<dyn std::error::Error>> {
+fn load_parquet(
+    a: &InputArgs,
+    meta: SeriesMeta,
+) -> Result<(SeriesFrame, String), Box<dyn std::error::Error>> {
+    use arrow::datatypes::{DataType, TimeUnit};
+    let builder = ParquetRecordBatchReaderBuilder::try_new(File::open(&a.input)?)?;
+    let schema = builder.schema().clone();
+    let column_type = |name: &str| schema.field_with_name(name).map(|f| f.data_type().clone()).ok();
+    let reader = builder.build()?;
+    let mut ts = Vec::new();
+    let mut values = Vec::new();
+    let mut quality = Vec::new();
+    let mut ingest: Vec<i64> = Vec::new();
+    for batch in reader {
+        let b = batch?;
+        let f = SeriesFrame::from_record_batch_ext(
+            meta.clone(),
+            &b,
+            &a.ts_col,
+            &a.value_col,
+            a.quality_col.as_deref(),
+            a.ingest_col.as_deref(),
+        )?;
+        ts.extend(f.ts);
+        values.extend(f.values);
+        quality.extend(f.quality);
+        if let Some(i) = f.ingest_ts {
+            ingest.extend(i);
+        }
+    }
+    // Integer columns arrive as raw integers: read them as epoch values in one unit, as CSV
+    // integers are. Typed timestamps already carry their unit.
+    let mut ts_unit = "ns".to_string();
+    match column_type(&a.ts_col) {
+        Some(DataType::Int64) => {
+            let (ns, unit) = epoch_column(&ts, &a.ts_col, a.ts_unit)?;
+            ts = ns;
+            ts_unit = unit.as_str().into();
+        }
+        Some(DataType::Timestamp(u, _)) => {
+            ts_unit = match u {
+                TimeUnit::Second => "s",
+                TimeUnit::Millisecond => "ms",
+                TimeUnit::Microsecond => "us",
+                TimeUnit::Nanosecond => "ns",
+            }
+            .into()
+        }
+        _ => {}
+    }
+    if let Some(col) = a.ingest_col.as_deref() {
+        if column_type(col) == Some(DataType::Int64) {
+            ingest = epoch_column(&ingest, col, a.ts_unit)?.0;
+        }
+    }
+    let frame = SeriesFrame::new(meta, ts, values, quality)?;
+    Ok((if a.ingest_col.is_some() { frame.with_ingest_ts(ingest)? } else { frame }, ts_unit))
+}
+
+fn load_csv(a: &InputArgs, meta: SeriesMeta) -> Result<(SeriesFrame, String), Box<dyn std::error::Error>> {
     let mut rdr = csv::ReaderBuilder::new().flexible(true).from_path(&a.input)?;
     let headers = rdr.headers()?.clone();
     let idx = |name: &str| {
@@ -458,38 +544,84 @@ fn load_csv(a: &InputArgs, meta: SeriesMeta) -> Result<SeriesFrame, Box<dyn std:
     let vi = idx(&a.value_col)?;
     let qi = a.quality_col.as_deref().map(idx).transpose()?;
     let ii = a.ingest_col.as_deref().map(idx).transpose()?;
-    let mut ts = Vec::new();
+    let mut ts_cells = Vec::new();
     let mut values = Vec::new();
     let mut quality = Vec::new();
-    let mut ingest = Vec::new();
+    let mut ingest_cells = Vec::new();
     for rec in rdr.records() {
         let rec = rec?;
-        ts.push(parse_ts(rec.get(ti).unwrap_or(""))?);
+        ts_cells.push(rec.get(ti).unwrap_or("").trim().to_string());
         values.push(rec.get(vi).map(|s| s.trim().parse::<f64>().unwrap_or(f64::NAN)).unwrap_or(f64::NAN));
         quality.push(qi.and_then(|i| rec.get(i)).and_then(Quality::parse).unwrap_or(Quality::Good));
         if let Some(i) = ii {
-            ingest.push(parse_ts(rec.get(i).unwrap_or(""))?);
+            ingest_cells.push(rec.get(i).unwrap_or("").trim().to_string());
         }
     }
+    let (ts, ts_unit) = ts_column(&ts_cells, &a.ts_col, a.ts_unit)?;
     let frame = SeriesFrame::new(meta, ts, values, quality)?;
-    Ok(if ii.is_some() { frame.with_ingest_ts(ingest)? } else { frame })
+    let frame = match (ii, a.ingest_col.as_deref()) {
+        (Some(_), Some(col)) => frame.with_ingest_ts(ts_column(&ingest_cells, col, a.ts_unit)?.0)?,
+        _ => frame,
+    };
+    Ok((frame, ts_unit))
 }
 
-/// Parse one timestamp cell into ns since the Unix epoch: RFC 3339, epoch integers (unit
-/// inferred from magnitude) or naive `YYYY-MM-DD[ T]HH:MM:SS[.fraction]` taken as UTC.
-fn parse_ts(s: &str) -> Result<i64, Box<dyn std::error::Error>> {
+/// A CSV timestamp column as ns since the epoch, and the unit it was read in. A column whose
+/// cells are all integers is epoch (one unit for the whole column, ADR-0014); otherwise every
+/// cell is text. Mixing both is an error naming the first cell that differs from the first.
+fn ts_column(
+    cells: &[String],
+    name: &str,
+    unit: TsUnitArg,
+) -> Result<(Vec<i64>, String), Box<dyn std::error::Error>> {
+    let ints: Vec<Option<i64>> = cells.iter().map(|c| c.parse::<i64>().ok()).collect();
+    let Some(first_is_int) = ints.first().map(Option::is_some) else {
+        return Ok((Vec::new(), "text".into()));
+    };
+    if let Some(k) = ints.iter().position(|v| v.is_some() != first_is_int) {
+        let kind = |int: bool| if int { "an epoch integer" } else { "text" };
+        return Err(Box::new(TsError(format!(
+            "column `{name}` mixes epoch integers and text: row {} is {} (`{}`) but row 1 is {}",
+            k + 1,
+            kind(!first_is_int),
+            cells[k],
+            kind(first_is_int)
+        ))));
+    }
+    if first_is_int {
+        let raw: Vec<i64> = ints.into_iter().flatten().collect();
+        let (ns, unit) = epoch_column(&raw, name, unit)?;
+        return Ok((ns, unit.as_str().into()));
+    }
+    let ns = cells
+        .iter()
+        .enumerate()
+        .map(|(k, c)| parse_text_ts(c).map_err(|e| format!("column `{name}` row {}: {e}", k + 1)))
+        .collect::<Result<Vec<i64>, String>>()?;
+    Ok((ns, "text".into()))
+}
+
+/// Epoch integers of one column in one unit; rows in messages count from 1.
+fn epoch_column(
+    raw: &[i64],
+    name: &str,
+    unit: TsUnitArg,
+) -> Result<(Vec<i64>, TsUnit), Box<dyn std::error::Error>> {
+    resolve_epoch_column(raw, unit.declared()).map_err(|e| {
+        let how = if unit.declared().is_some() { "declared" } else { "inferred from the column's median" };
+        Box::new(TsError(format!(
+            "column `{name}` row {}: {e} (unit {how}); pass --ts-unit s|ms|us|ns or use RFC 3339 text",
+            e.index + 1
+        ))) as Box<dyn std::error::Error>
+    })
+}
+
+/// Parse one text timestamp into ns since the Unix epoch: RFC 3339, or naive
+/// `YYYY-MM-DD[ T]HH:MM:SS[.fraction]` taken as UTC. Epoch integers are read per column.
+fn parse_text_ts(s: &str) -> Result<i64, Box<dyn std::error::Error>> {
     let s = s.trim();
     if let Ok(t) = s.parse::<DateTime<Utc>>() {
         return Ok(t.timestamp_nanos_opt().ok_or("timestamp out of range")?);
-    }
-    if let Ok(n) = s.parse::<i64>() {
-        // Heuristic on magnitude: seconds, milliseconds, microseconds or nanoseconds.
-        return Ok(match n.abs() {
-            x if x < 100_000_000_000 => n * NS_PER_SEC,
-            x if x < 100_000_000_000_000 => n * 1_000_000,
-            x if x < 100_000_000_000_000_000 => n * 1_000,
-            _ => n,
-        });
     }
     // Naive timestamps (historian exports: PI, OPC, Petrobras 3W) are taken as UTC. `%.f`
     // also matches an absent fraction, so one pattern per separator covers both.
@@ -556,17 +688,20 @@ fn synth_cmd(a: SynthArgs) -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_ts;
+    use super::{parse_text_ts, ts_column, TsUnitArg};
 
     /// Historian exports mix separators, fractions, offsets and epoch integers.
     #[test]
     fn parses_historian_export_timestamps() {
-        let base = parse_ts("2017-02-01T01:02:07Z").unwrap();
-        assert_eq!(parse_ts("2017-02-01 01:02:07").unwrap(), base);
-        assert_eq!(parse_ts("2017-02-01 01:02:07.000000000").unwrap(), base);
-        assert_eq!(parse_ts("2017-02-01T01:02:07.5").unwrap(), base + 500_000_000);
-        assert_eq!(parse_ts("2017-02-01T02:02:07+01:00").unwrap(), base);
-        assert_eq!(parse_ts("1485910927").unwrap(), base);
-        assert!(parse_ts("01/02/2017 01:02").is_err());
+        let base = parse_text_ts("2017-02-01T01:02:07Z").unwrap();
+        assert_eq!(parse_text_ts("2017-02-01 01:02:07").unwrap(), base);
+        assert_eq!(parse_text_ts("2017-02-01 01:02:07.000000000").unwrap(), base);
+        assert_eq!(parse_text_ts("2017-02-01T01:02:07.5").unwrap(), base + 500_000_000);
+        assert_eq!(parse_text_ts("2017-02-01T02:02:07+01:00").unwrap(), base);
+        assert!(parse_text_ts("01/02/2017 01:02").is_err());
+        // Epoch integers are read per column, in one unit.
+        let cells = vec!["1485910927".to_string(), "1485910987".to_string()];
+        let (ns, unit) = ts_column(&cells, "ts", TsUnitArg::Auto).unwrap();
+        assert_eq!((ns[0], unit.as_str()), (base, "s"));
     }
 }
