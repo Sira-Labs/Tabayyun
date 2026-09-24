@@ -65,9 +65,14 @@ fn single_series_checks_survive_extreme_timestamps() {
         let ctx = CheckContext::from_frame(&f);
         assert!(ctx.window.start <= ctx.window.end, "{name}: context window");
         for c in [ctx.clone(), ctx.clone().with_profile(profile.clone())] {
-            for id in Registry::builtin_ids() {
-                let cfg =
-                    [CheckConfig { id: id.to_string(), params: serde_json::Value::Null, enabled: true }];
+            // Defaults, then every bucket and segment width at 1 ns, so their counts reach the
+            // whole `i64` span.
+            let narrowest = serde_json::json!({"bucket_ns": 1, "segment_ns": 1, "horizon_ns": 1});
+            for (id, params) in Registry::builtin_ids()
+                .iter()
+                .flat_map(|id| [(id, serde_json::Value::Null), (id, narrowest.clone())])
+            {
+                let cfg = [CheckConfig { id: id.to_string(), params, enabled: true }];
                 let out = Registry::run(&cfg, &f, &c).unwrap_or_else(|e| panic!("{name}: {id}: {e}"));
                 assert_windows(&format!("{name}: {id}"), &out.findings);
             }
@@ -79,41 +84,41 @@ fn single_series_checks_survive_extreme_timestamps() {
         let (ts, values) = tabayyun_core::downsample::m4(&f, 4);
         assert_eq!(ts.len(), values.len(), "{name}: m4");
         assert!(ts.windows(2).all(|w| w[0] <= w[1]), "{name}: m4 order");
+        assert_eq!((ts.first(), ts.last()), (f.ts.first(), f.ts.last()), "{name}: m4 keeps both ends");
     }
+}
+
+/// One group of each kind over members `a` and `b`, with `params` on every group.
+fn groups(params: &serde_json::Value, tag: &str) -> Vec<SeriesGroup> {
+    let member = |id: &str, role| GroupMember { series_id: id.into(), role };
+    let pair = |input, output| vec![member("a", input), member("b", output)];
+    [
+        (GroupKind::Related, pair(MemberRole::Member, MemberRole::Member)),
+        (GroupKind::Redundant, pair(MemberRole::Member, MemberRole::Member)),
+        (GroupKind::Balance, pair(MemberRole::Input, MemberRole::Output)),
+    ]
+    .into_iter()
+    .map(|(kind, members)| SeriesGroup {
+        id: format!("{kind:?}-{tag}"),
+        name: format!("{kind:?} {tag}"),
+        kind,
+        members,
+        params: params.clone(),
+    })
+    .collect()
 }
 
 #[test]
 fn cross_checks_survive_extreme_timestamps() {
-    let member = |id: &str, role| GroupMember { series_id: id.into(), role };
-    let groups = [
-        SeriesGroup {
-            id: "rel".into(),
-            name: "related".into(),
-            kind: GroupKind::Related,
-            members: vec![member("a", MemberRole::Member), member("b", MemberRole::Member)],
-            params: serde_json::Value::Null,
-        },
-        SeriesGroup {
-            id: "red".into(),
-            name: "redundant".into(),
-            kind: GroupKind::Redundant,
-            members: vec![member("a", MemberRole::Member), member("b", MemberRole::Member)],
-            params: serde_json::Value::Null,
-        },
-        SeriesGroup {
-            id: "bal".into(),
-            name: "balance".into(),
-            kind: GroupKind::Balance,
-            members: vec![member("a", MemberRole::Input), member("b", MemberRole::Output)],
-            params: serde_json::Value::Null,
-        },
-    ];
+    // Defaults, then a 1 ns grid and segment, which would need more bins than `align` builds.
+    let mut all = groups(&serde_json::Value::Null, "default");
+    all.extend(groups(&serde_json::json!({"grid": "1ns", "segment": "1ns"}), "narrowest"));
     for (name, ts) in layouts() {
         let frames = [frame("a", ts.clone(), 0.0), frame("b", ts, 0.5)];
         let profiles: BTreeMap<String, Profile> =
             frames.iter().map(|f| (f.meta.id.clone(), Profile::compute(f))).collect();
         let ctx = CheckContext { now_ns: i64::MAX, window: Window::new(i64::MIN, i64::MAX), profile: None };
-        let out = Registry::run_multi(&Registry::default_multi_configs(), &frames, &profiles, &groups, &ctx)
+        let out = Registry::run_multi(&Registry::default_multi_configs(), &frames, &profiles, &all, &ctx)
             .unwrap_or_else(|e| panic!("{name}: {e}"));
         for (id, o) in &out.per_series {
             assert_windows(&format!("{name}: {id}"), &o.findings);

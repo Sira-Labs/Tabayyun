@@ -140,7 +140,7 @@ pub(crate) fn segments(frame: &SeriesFrame, segment_ns: i64) -> Vec<(usize, usiz
     let start = frame.ts[0];
     let mut s = 0usize;
     while s < n {
-        let k = frame.ts[s].saturating_sub(start) / segment_ns + 1;
+        let k = (frame.ts[s].saturating_sub(start) / segment_ns).saturating_add(1);
         let seg_end_ts = start.saturating_add(k.saturating_mul(segment_ns));
         let mut e = s;
         while e < n && frame.ts[e] < seg_end_ts {

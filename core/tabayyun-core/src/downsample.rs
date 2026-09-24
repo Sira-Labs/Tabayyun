@@ -19,14 +19,15 @@ pub fn m4(frame: &SeriesFrame, buckets: usize) -> (Vec<i64>, Vec<f64>) {
     let mut out_idx: Vec<usize> = Vec::with_capacity(buckets * 4);
     let mut i = 0usize;
     for b in 0..buckets {
-        let end_ts = if b + 1 == buckets {
-            i64::MAX
-        } else {
-            t0.saturating_add(((span * (b + 1) as f64) / buckets as f64) as i64)
-        };
         let start = i;
-        while i < n && frame.ts[i] < end_ts {
-            i += 1;
+        if b + 1 == buckets {
+            // The last bucket takes every remaining sample, including one at `i64::MAX`.
+            i = n;
+        } else {
+            let end_ts = t0.saturating_add(((span * (b + 1) as f64) / buckets as f64) as i64);
+            while i < n && frame.ts[i] < end_ts {
+                i += 1;
+            }
         }
         if start == i {
             continue;

@@ -58,6 +58,7 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 - Timestamps near the `i64` limits no longer overflow in the checks, the profile, the scorer,
   M4 or the cross checks; writing a sample at `i64::MAX` to the cache no longer hangs, and a
-  group spanning more than 10 million grid bins aligns to nothing instead of allocating them.
+  group needing more than 20 million grid cells (bins times members) aligns to nothing instead
+  of allocating them.
 
 [Unreleased]: https://github.com/thedatadudech/Tabayyun/commits/main

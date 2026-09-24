@@ -176,7 +176,9 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
 - [x] **Follow-ups without a spec** (approved as fixes, 24 Sep)
       - Timestamp arithmetic saturates everywhere (from 012); `tests/extreme_timestamps.rs`
         runs every check at both `i64` limits. Found on the way: `Cache::write` hung on
-        `i64::MAX`, and `align` had no bin cap (now 10 million, empty beyond).
+        `i64::MAX`, and `align` had no bin cap (now 20 million cells, bins times members, so
+        a pair keeps 10 million bins; empty beyond). Bucket and segment widths of 1 ns are
+        tested too; M4's last bucket keeps a sample at `i64::MAX`.
       - CLI reads brotli, gzip and lz4 Parquet (from 009); codecs on the CLI only, so the
         wheel stays small; release binary 18.8 → 20.3 MB.
 

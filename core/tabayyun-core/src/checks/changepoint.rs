@@ -151,7 +151,7 @@ impl Check for Changepoint {
         let (t0, t1) = (f.ts[0], f.ts[n - 1]);
         let span = t1.saturating_sub(t0).max(1);
         let mut bucket_ns = self.bucket_ns.max(1);
-        if span / bucket_ns + 1 > self.max_buckets as i64 {
+        if span / bucket_ns >= self.max_buckets as i64 {
             bucket_ns = (span as f64 / self.max_buckets as f64).ceil() as i64;
         }
         let buckets = (span / bucket_ns + 1) as usize;

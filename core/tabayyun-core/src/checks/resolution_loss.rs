@@ -64,7 +64,7 @@ impl Check for ResolutionLoss {
         let start = f.ts[0];
         let mut s = 0usize;
         while s < n {
-            let k = f.ts[s].saturating_sub(start) / self.segment_ns + 1;
+            let k = (f.ts[s].saturating_sub(start) / self.segment_ns).saturating_add(1);
             let seg_end_ts = start.saturating_add(k.saturating_mul(self.segment_ns));
             let mut e = s;
             while e < n && f.ts[e] < seg_end_ts {
