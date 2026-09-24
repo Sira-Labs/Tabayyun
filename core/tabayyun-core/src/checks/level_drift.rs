@@ -83,9 +83,10 @@ impl Check for LevelDrift {
         }
         let spread =
             profile.noise_mad.unwrap_or(0.0).max(0.1 * 1.4826 * mad).max(profile.resolution.unwrap_or(0.0));
-        let span = f.ts[f.len() - 1].saturating_sub(f.ts[0]).max(1);
+        // The span is an exact `u64`: it can exceed `i64::MAX`.
+        let span = f.ts[f.len() - 1].abs_diff(f.ts[0]).max(1);
         let mut segment_ns = self.segment_ns.max(1);
-        if span / segment_ns >= self.max_segments as i64 {
+        if span / segment_ns as u64 >= self.max_segments as u64 {
             segment_ns = (span as f64 / self.max_segments as f64).ceil() as i64;
         }
         let mut xs = Vec::new();
@@ -96,7 +97,7 @@ impl Check for LevelDrift {
                 continue;
             }
             let Some((med, _)) = median_mad(&seg) else { continue };
-            xs.push(w.start.saturating_sub(f.ts[0]) as f64 / NS_PER_DAY as f64);
+            xs.push(w.start.abs_diff(f.ts[0]) as f64 / NS_PER_DAY as f64);
             ys.push(med);
         }
         if xs.len() < self.min_segments {

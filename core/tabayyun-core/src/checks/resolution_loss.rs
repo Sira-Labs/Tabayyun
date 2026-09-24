@@ -61,13 +61,14 @@ impl Check for ResolutionLoss {
         if base_density <= 0.0 {
             return Ok(out);
         }
-        let start = f.ts[0];
+        // Segment index from the exact elapsed time, as in `segments`.
+        let (start, width) = (f.ts[0], self.segment_ns.max(1) as u64);
+        let index = |t: i64| t.abs_diff(start) / width;
         let mut s = 0usize;
         while s < n {
-            let k = (f.ts[s].saturating_sub(start) / self.segment_ns).saturating_add(1);
-            let seg_end_ts = start.saturating_add(k.saturating_mul(self.segment_ns));
-            let mut e = s;
-            while e < n && f.ts[e] < seg_end_ts {
+            let k = index(f.ts[s]);
+            let mut e = s + 1;
+            while e < n && index(f.ts[e]) == k {
                 e += 1;
             }
             let seg: Vec<f64> = f.values[s..e].iter().copied().filter(|v| v.is_finite()).collect();
@@ -99,7 +100,7 @@ impl Check for ResolutionLoss {
                 }
                 out.metrics.push(metric(ID, &f, "distinct_density", w.end, density));
             }
-            s = e.max(s + 1);
+            s = e;
         }
         Ok(out)
     }

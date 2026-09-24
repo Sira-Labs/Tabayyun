@@ -125,3 +125,34 @@ fn cross_checks_survive_extreme_timestamps() {
         }
     }
 }
+
+/// Checks that report findings on a series.
+fn firing(ts: Vec<i64>, values: Vec<f64>) -> std::collections::BTreeSet<String> {
+    let f = SeriesFrame::with_default_quality(SeriesMeta::new("x"), ts, values).unwrap();
+    let out = Registry::run(&Registry::default_configs(), &f, &CheckContext::from_frame(&f)).unwrap();
+    out.findings.into_iter().map(|f| f.check_id).collect()
+}
+
+#[test]
+fn a_stray_sample_at_i64_min_keeps_the_segment_checks_working() {
+    // Twenty days of 10-minute data: quantized from day 10, eight times noisier from day 14.
+    let (t0, step, n) = (1_704_067_200_000_000_000_i64, 10 * NS_PER_MIN, 20 * 144);
+    let ts: Vec<i64> = (0..n).map(|i| t0 + i as i64 * step).collect();
+    let values: Vec<f64> = (0..n)
+        .map(|i| {
+            let noise = ((i * 7919) % 101) as f64 / 100.0 - 0.5;
+            match i / 144 {
+                14.. => 20.0 + 8.0 * noise,
+                10.. => (20.0 + noise).round(),
+                _ => 20.0 + noise,
+            }
+        })
+        .collect();
+    let plain = firing(ts.clone(), values.clone());
+    assert!(plain.contains("tby.noise_level") && plain.contains("tby.distribution_drift"), "{plain:?}");
+    // One sample at `i64::MIN` in front: elapsed times from it exceed `i64::MAX`, and saturating
+    // them put every later sample in a segment of its own, which silenced the segment checks.
+    let stray =
+        firing([i64::MIN].into_iter().chain(ts).collect(), [20.0].into_iter().chain(values).collect());
+    assert!(plain.is_subset(&stray), "lost {:?}", plain.difference(&stray).collect::<Vec<_>>());
+}

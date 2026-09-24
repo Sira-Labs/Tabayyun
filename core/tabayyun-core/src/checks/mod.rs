@@ -137,16 +137,17 @@ pub(crate) fn segments(frame: &SeriesFrame, segment_ns: i64) -> Vec<(usize, usiz
     if n == 0 || segment_ns <= 0 {
         return out;
     }
-    let start = frame.ts[0];
+    let (start, width) = (frame.ts[0], segment_ns as u64);
+    // Elapsed time is a `u64`: a frame starting near `i64::MIN` spans more than `i64::MAX`,
+    // and saturating there would put every later sample in a segment of its own.
+    let index = |t: i64| t.abs_diff(start) / width;
     let mut s = 0usize;
     while s < n {
-        let k = (frame.ts[s].saturating_sub(start) / segment_ns).saturating_add(1);
-        let seg_end_ts = start.saturating_add(k.saturating_mul(segment_ns));
-        let mut e = s;
-        while e < n && frame.ts[e] < seg_end_ts {
+        let k = index(frame.ts[s]);
+        let mut e = s + 1;
+        while e < n && index(frame.ts[e]) == k {
             e += 1;
         }
-        let e = e.max(s + 1);
         out.push((s, e, Window::new(frame.ts[s], frame.ts[e - 1].saturating_add(1))));
         s = e;
     }
