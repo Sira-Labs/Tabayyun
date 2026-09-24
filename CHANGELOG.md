@@ -45,6 +45,9 @@ All notable changes to this project are documented here. The format follows
   and pull request templates, Dependabot, CODEOWNERS and the `main` branch ruleset.
 
 ### Changed
+- `tby.physical_range` reports one finding per episode of nearby excursions with the exact
+  count, and one summary above 20 episodes, instead of one finding per excursion (spec 016).
+  Open findings of the old shape do not merge with the new ones.
 - `TABAYYUN_CACHE_DIR` is now `TABAYYUN_CACHE_URL` (the old name is still accepted).
 - Checks are Rust kernels without Polars in the core (ADR-0015 supersedes ADR-0002).
 

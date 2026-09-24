@@ -17,7 +17,7 @@ afternoon, instead of 34 findings I have to triage one by one.
 
 ## Interface
 
-New params (existing `physical_min/max`, `capacity_factor_max` unchanged):
+New params (existing `min`, `max` and `severity` unchanged):
 
 | Param | Default | Meaning |
 |---|---|---|
@@ -28,6 +28,8 @@ Evidence per episode keeps today's keys (`count`, `min_observed`, `max_observed`
 `limit_min`, `limit_max`) and adds `n_excursions`, `first_ts`, `last_ts`. The summary finding
 has `n_episodes`, `count`, `share`, `min_observed`, `max_observed`, `limit_min`, `limit_max`,
 `largest` (up to 5 episodes with window and count); severity low (ADR-0011 summary rule).
+Both also carry `cluster_gap_ns` (the summary also `max_findings`). New metric
+`range_episodes` (episodes in the window) next to `out_of_range_ratio`.
 
 ## Behaviour
 
@@ -42,16 +44,38 @@ has `n_episodes`, `count`, `share`, `min_observed`, `max_observed`, `limit_min`,
 
 ## Acceptance criteria
 
-- [ ] 34 excursions, each starting less than `cluster_gap` after the previous one ends (1-min
+- [x] 34 excursions, each starting less than `cluster_gap` after the previous one ends (1-min
       data, gaps of 3 min) → one finding with `n_excursions = 34`.
-- [ ] Two excursions a day apart → two findings.
-- [ ] 50 separated episodes → one low-severity summary finding.
-- [ ] Existing physical_range tests updated and passing; catalogue entry updated.
+- [x] Two excursions a day apart → two findings.
+- [x] 50 separated episodes → one low-severity summary finding.
+- [x] Existing physical_range tests updated and passing; catalogue entry updated.
 
 ## Test cases
 
 Unit (`checks::physical_range::tests`): `clustered_excursions_one_finding`,
-`distant_excursions_separate`, `many_episodes_summary`, existing tests.
+`distant_excursions_separate`, `many_episodes_summary`, `bad_cluster_gap_is_invalid`, existing
+tests (`needs_limits`, `unit_default_limits`, which now also pins the one-excursion summary).
+
+## Implementation edits
+
+Recorded on 2026-09-23; approved with the plan.
+
+- The spec named the existing params `physical_min/max` and `capacity_factor_max`; the check
+  has `min`, `max` and `severity` (limits otherwise come from metadata or the unit), and
+  `capacity_factor_max` is not implemented yet (the catalogue keeps it as designed).
+- "Closer than `cluster_gap`" is strict: a run starting exactly `cluster_gap` after the
+  previous one ends starts a new episode. `tby.spikes` joins at ≤ `cluster_gap`, measured
+  spike to spike; the two differ only on that boundary.
+- An episode with one excursion keeps today's summary ("5 values outside physical limits
+  [0, 100] (observed 250 to 250)"); several read "34 excursions (102 values) outside physical
+  limits [0, 100] within 3h21m (observed …)". `last_ts` is the end of the last excursion
+  (the next sample's timestamp, as the window end), not the last out-of-range sample.
+- `largest` in the summary is ordered by out-of-range samples, then by start; each entry has
+  `start`, `end`, `count` and `n_excursions`. An explicit `cluster_gap` that does not parse or
+  is not positive is `InvalidParams`.
+- Existing open findings of the old evidence shape do not merge with new ones (ADR-0013);
+  after the live check the leftover `tby.physical_range` findings of earlier test uploads are
+  resolved as "superseded by spec 016".
 
 ## Out of scope
 

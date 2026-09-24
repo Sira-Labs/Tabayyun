@@ -121,6 +121,15 @@ flag level of 0.46; Christmas weeks do not trip it. Solar's winter weeks are its
 (0.65). Wind has no rhythm: its reference segments agree on no candidate, so it only reports
 metrics.
 
+## Live check (2026-09-23, after PR #37, release run 37)
+
+One hourly series over six weeks (`live-012-load`: a daily sine of ±10 MW around 50 MW with
+1 MW noise, from 2024-01-18, a 7-day boundary; week 5, 2024-02-15 to 02-22, flat at 50 MW
+plus noise, a constant estimate) uploaded as a run on the CapRover worker gave exactly one
+finding, `tby.seasonality_break` over 2024-02-15 00:00 – 02-22 00:00, "Daily pattern weakened
+for 7d (strength 0.14, usually 0.99)", `reason` `weaker`, `period_ref_ns` one day. No other
+check fired; the finding was resolved as "test upload".
+
 ## Implementation edits
 
 Recorded on 2026-09-23; the first three were approved with the plan, after a simulation.
