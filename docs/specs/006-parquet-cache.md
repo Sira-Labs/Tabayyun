@@ -100,7 +100,7 @@ flags or the same environment variables.
    in-place append) and returns the keys, the row count and `[first_ts, last_ts + 1)`. An
    empty frame writes nothing and returns `rows = 0`.
 3. `read` lists only the bucket prefixes of the requested series and the months overlapping
-   `[start_ns, end_ns)`, skips row groups whose `series_id` or `ts` statistics exclude the
+   `[start_ns, end_ns)` (an `end_ns` of `END_OF_TIME = i64::MAX` has no end), skips row groups whose `series_id` or `ts` statistics exclude the
    request, filters rows, and merges parts. When the same `(series_id, ts)` appears in more
    than one file, the row from the file with the larger `write_ns` wins (re-uploads correct
    the cache without rewriting files). Each requested series is returned, empty when absent.
@@ -228,6 +228,16 @@ batch series per request cycle or write concurrently.
   the dev RustFS.
 - The built extension module `_native.abi3.so` had been committed since sprint 2; it is now
   ignored and built by maturin only.
+- An end of `i64::MAX` (`time::END_OF_TIME`) has no end (issue #42, 24 Sep). Ranges stay
+  half-open, but no instant follows `i64::MAX`, so `[start, i64::MAX)` could never hold a
+  sample there: a write whose last sample is `i64::MAX` (pandas' `Timestamp.max`, reachable
+  through RFC 3339 text) reported an end its own read excluded. One helper,
+  `time::before_end`, carries the rule for every range check in the cache. The alternative,
+  an optional end in the core, binding and API, changes every signature for one instant.
+  The API's coverage rows already held that instant (ends round up to the microsecond);
+  dataset runs clamp their window and `now` to the core's `i64` range (`to_core_ns`), so a
+  window ending after 2262 reaches the end of time instead of overflowing, and `now_ns` on
+  uploads outside that range is a 422.
 
 ## Out of scope
 

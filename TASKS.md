@@ -183,6 +183,11 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
         every later one in its own segment, silencing the segment checks.
       - CLI reads brotli, gzip and lz4 Parquet (from 009); codecs on the CLI only, so the
         wheel stays small; release binary 18.8 → 20.3 MB.
+- [x] **Issue #42: the cache's end of time** (approved 24 Sep, no spec)
+      - An end of `i64::MAX` has no end (`time::END_OF_TIME`, `before_end`); chosen over an
+        optional end in every signature. Recorded in spec 006's implementation edits.
+      - Dataset runs clamp window and `now` to `i64` (`to_core_ns`); `now_ns` on uploads is
+        bounded (422). A window past 2262 used to fail the run, a `now` past it the request.
 
 ## Sprint 8 — login, tenants and RBAC (forecast end 29 Sep – 1 Oct)
 
