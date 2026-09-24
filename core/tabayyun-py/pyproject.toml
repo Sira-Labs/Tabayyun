@@ -20,5 +20,21 @@ module-name = "tabayyun_core._native"
 features = ["pyo3/extension-module"]
 manifest-path = "Cargo.toml"
 
+[tool.uv]
+# uv rebuilds a path dependency only when its cache keys change (by default pyproject.toml
+# alone), so `uv run` in api/ kept installing a stale wheel after core edits. Every input of
+# the wheel is listed: the binding and core Rust sources, the manifests and lock, and the
+# Python package copied into it.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "src/**/*.rs" },
+    { file = "python/**/*.py" },
+    { file = "../Cargo.toml" },
+    { file = "../Cargo.lock" },
+    { file = "../tabayyun-core/Cargo.toml" },
+    { file = "../tabayyun-core/src/**/*.rs" },
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

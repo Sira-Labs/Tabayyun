@@ -190,6 +190,9 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
         bounded (422). A window past 2262 used to fail the run, a `now` past it the request.
       - Follow-up from review: a window wholly outside the core's range is a 422 at dataset
         create/update and at run creation (`check_core_range`); partial overlap still runs.
+- [x] **uv kept a stale core wheel** (24 Sep, no spec): `uv run` in api/ rebuilt the core only
+      when its pyproject.toml changed, so tests ran an old core; `tool.uv.cache-keys` in
+      `core/tabayyun-py/pyproject.toml` now lists every wheel input.
 
 ## Sprint 8 — login, tenants and RBAC (forecast end 29 Sep – 1 Oct)
 
