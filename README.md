@@ -9,15 +9,15 @@
 
 **Verify time series before you act on them.**
 
-[![CI](https://github.com/thedatadudech/Tabayyun/actions/workflows/ci.yml/badge.svg)](https://github.com/thedatadudech/Tabayyun/actions/workflows/ci.yml)
-[![Release](https://github.com/thedatadudech/Tabayyun/actions/workflows/release.yml/badge.svg)](https://github.com/thedatadudech/Tabayyun/actions/workflows/release.yml)
-[![Version](https://img.shields.io/github/v/release/thedatadudech/Tabayyun?include_prereleases&label=version)](https://github.com/thedatadudech/Tabayyun/releases)
-[![Rust](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fthedatadudech%2FTabayyun%2Fmain%2Fcore%2FCargo.toml&query=%24.workspace.package.rust-version&prefix=%E2%89%A5%20&label=rust&color=dea584)](core/Cargo.toml)
+[![CI](https://github.com/Sira-Labs/Tabayyun/actions/workflows/ci.yml/badge.svg)](https://github.com/Sira-Labs/Tabayyun/actions/workflows/ci.yml)
+[![Release](https://github.com/Sira-Labs/Tabayyun/actions/workflows/release.yml/badge.svg)](https://github.com/Sira-Labs/Tabayyun/actions/workflows/release.yml)
+[![Version](https://img.shields.io/github/v/release/Sira-Labs/Tabayyun?include_prereleases&label=version)](https://github.com/Sira-Labs/Tabayyun/releases)
+[![Rust](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FSira-Labs%2FTabayyun%2Fmain%2Fcore%2FCargo.toml&query=%24.workspace.package.rust-version&prefix=%E2%89%A5%20&label=rust&color=dea584)](core/Cargo.toml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776ab)](api/pyproject.toml)
 [![Node](https://img.shields.io/badge/node-22%20LTS-5fa04e)](web/package.json)
-[![Images](https://img.shields.io/badge/images-ghcr.io-2496ed)](https://github.com/thedatadudech?tab=packages&repo_name=Tabayyun)
+[![Images](https://img.shields.io/badge/images-ghcr.io-2496ed)](https://github.com/orgs/Sira-Labs/packages?repo_name=Tabayyun)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![CodeRabbit](https://img.shields.io/coderabbit/prs/github/thedatadudech/Tabayyun?labelColor=171717&color=FF570A&label=CodeRabbit%20reviews)](https://coderabbit.ai)
+[![CodeRabbit](https://img.shields.io/coderabbit/prs/github/Sira-Labs/Tabayyun?labelColor=171717&color=FF570A&label=CodeRabbit%20reviews)](https://coderabbit.ai)
 
 > *Tabayyun* (تبيّن): to verify a report before acting on it.
 
@@ -125,7 +125,7 @@ local by default · secure by design · extensible with sandboxed Python checks.
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, [SECURITY.md](SECURITY.md) for
-reporting vulnerabilities privately, and the [milestones](https://github.com/thedatadudech/Tabayyun/milestones)
+reporting vulnerabilities privately, and the [milestones](https://github.com/Sira-Labs/Tabayyun/milestones)
 for what is planned next.
 
 ## Licence

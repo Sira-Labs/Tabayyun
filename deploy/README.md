@@ -5,8 +5,8 @@ Two images are built by `.github/workflows/release.yml` on every push to `main` 
 
 | Image | Contents |
 |---|---|
-| `ghcr.io/thedatadudech/tabayyun-api` | Python API with the Rust core wheel built in-image (no compiler at runtime) |
-| `ghcr.io/thedatadudech/tabayyun-web` | Static SPA served by Caddy with security headers; proxies `/api` to the API |
+| `ghcr.io/sira-labs/tabayyun-api` | Python API with the Rust core wheel built in-image (no compiler at runtime) |
+| `ghcr.io/sira-labs/tabayyun-web` | Static SPA served by Caddy with security headers; proxies `/api` to the API |
 
 Tags: `latest` (main), `main`, `sha-<short>`, and `<version>` for tags. The compose bundle
 requires `TABAYYUN_TAG`; the CD job sets it to the `sha-<short>` tag of the images it just
@@ -22,8 +22,8 @@ and a `deploy-caprover` job in the release workflow.
 
 ```bash
 mkdir -p ~/tabayyun && cd ~/tabayyun
-curl -fsSL https://raw.githubusercontent.com/thedatadudech/Tabayyun/main/deploy/compose.yaml -o compose.yaml
-curl -fsSL https://raw.githubusercontent.com/thedatadudech/Tabayyun/main/deploy/.env.example -o .env
+curl -fsSL https://raw.githubusercontent.com/Sira-Labs/Tabayyun/main/deploy/compose.yaml -o compose.yaml
+curl -fsSL https://raw.githubusercontent.com/Sira-Labs/Tabayyun/main/deploy/.env.example -o .env
 # edit .env: POSTGRES_PASSWORD and TABAYYUN_SESSION_SECRET (both mandatory, generate with
 # `openssl rand -base64 36`), TABAYYUN_DOMAIN for automatic TLS; OIDC values stay empty
 # until the auth router ships
@@ -56,8 +56,8 @@ packages and for private packages of the same repository.
 ## Air-gapped installs
 
 ```bash
-docker pull ghcr.io/thedatadudech/tabayyun-api:latest ghcr.io/thedatadudech/tabayyun-web:latest timescale/timescaledb:latest-pg17
-docker save ghcr.io/thedatadudech/tabayyun-api:latest ghcr.io/thedatadudech/tabayyun-web:latest timescale/timescaledb:latest-pg17 | zstd > tabayyun-images.tar.zst
+docker pull ghcr.io/sira-labs/tabayyun-api:latest ghcr.io/sira-labs/tabayyun-web:latest timescale/timescaledb:latest-pg17
+docker save ghcr.io/sira-labs/tabayyun-api:latest ghcr.io/sira-labs/tabayyun-web:latest timescale/timescaledb:latest-pg17 | zstd > tabayyun-images.tar.zst
 # on the target host
 zstd -d < tabayyun-images.tar.zst | docker load
 ```

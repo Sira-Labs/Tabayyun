@@ -73,15 +73,15 @@ has to import it once under **Settings → Rules → Rulesets → New ruleset �
 ruleset**, or with the GitHub CLI:
 
 ```bash
-gh api -X POST repos/thedatadudech/Tabayyun/rulesets --input .github/rulesets/protect-main.json
+gh api -X POST repos/Sira-Labs/Tabayyun/rulesets --input .github/rulesets/protect-main.json
 ```
 
 After editing the JSON, do not re-run the import (`POST` creates a second ruleset). Update the
 existing one instead: edit it in the same settings page, or send the file to its ID:
 
 ```bash
-id=$(gh api repos/thedatadudech/Tabayyun/rulesets --jq '.[] | select(.name=="protect-main") | .id')
-gh api -X PUT "repos/thedatadudech/Tabayyun/rulesets/$id" --input .github/rulesets/protect-main.json
+id=$(gh api repos/Sira-Labs/Tabayyun/rulesets --jq '.[] | select(.name=="protect-main") | .id')
+gh api -X PUT "repos/Sira-Labs/Tabayyun/rulesets/$id" --input .github/rulesets/protect-main.json
 ```
 
 Until the ruleset is active, the CI and review-thread gates above are convention, not
