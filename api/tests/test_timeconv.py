@@ -4,7 +4,16 @@ from datetime import UTC, datetime
 
 import pytest
 
-from tabayyun.services.timeconv import datetime_to_ns, ns_to_datetime, ns_to_datetime_ceil, parse_time
+from tabayyun.services.coverage import missing_ranges
+from tabayyun.services.timeconv import (
+    CORE_NS_MAX,
+    CORE_NS_MIN,
+    datetime_to_ns,
+    ns_to_datetime,
+    ns_to_datetime_ceil,
+    parse_time,
+    to_core_ns,
+)
 
 NS = 1_700_000_000_123_456_789
 
@@ -28,3 +37,21 @@ def test_parse_time_rejects_garbage_and_out_of_range(value):
     """Unparsable and out-of-range values raise ValueError, never OverflowError."""
     with pytest.raises(ValueError, match="not RFC 3339 or epoch ns"):
         parse_time(value)
+
+
+def test_to_core_ns_clamps_to_the_core_range():
+    """The core takes `i64` ns; later instants clamp to its end of time, which has no end."""
+    assert to_core_ns(NS) == NS
+    assert (CORE_NS_MIN, CORE_NS_MAX) == (-(2**63), 2**63 - 1)
+    far = datetime_to_ns(datetime(2300, 1, 1, tzinfo=UTC))
+    assert to_core_ns(far) == CORE_NS_MAX
+    assert to_core_ns(-far) == CORE_NS_MIN
+
+
+def test_coverage_of_a_write_ending_at_the_core_limit_holds_it():
+    """A write whose last sample is `i64::MAX` reports the end `CORE_NS_MAX`; its stored
+    coverage end rounds up past it, so a window reaching the end of time has no gap there."""
+    start = CORE_NS_MAX - 5_000
+    stored = (datetime_to_ns(ns_to_datetime(start)), datetime_to_ns(ns_to_datetime_ceil(CORE_NS_MAX)))
+    assert stored[1] > CORE_NS_MAX
+    assert missing_ranges([stored], start, CORE_NS_MAX) == []

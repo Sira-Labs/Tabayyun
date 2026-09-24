@@ -11,6 +11,10 @@ import re
 from datetime import UTC, datetime, timedelta
 
 EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+# The core's timestamps are `i64` ns (the database's `BIGINT` too). CORE_NS_MAX is the core's
+# END_OF_TIME: as a range end it has no end, so it includes `i64::MAX` itself (issue #42).
+CORE_NS_MIN = -(2**63)
+CORE_NS_MAX = 2**63 - 1
 _EPOCH_NS = re.compile(r"^-?\d+$")
 
 
@@ -22,6 +26,11 @@ def ns_to_datetime(ns: int) -> datetime:
 def ns_to_datetime_ceil(ns: int) -> datetime:
     """Nanoseconds since the epoch to an aware datetime, rounded up to the microsecond."""
     return EPOCH + timedelta(microseconds=-(-ns // 1000))
+
+
+def to_core_ns(ns: int) -> int:
+    """Nanoseconds clamped to the core's `i64` range; later instants become its end of time."""
+    return min(max(ns, CORE_NS_MIN), CORE_NS_MAX)
 
 
 def datetime_to_ns(value: datetime) -> int:

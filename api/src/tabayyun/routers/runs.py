@@ -22,7 +22,7 @@ from tabayyun.services import dataset_runs
 from tabayyun.services import runs as runs_service
 from tabayyun.services import series as series_service
 from tabayyun.services.runs import MAX_UPLOAD_BYTES, RunParams, UploadError
-from tabayyun.services.timeconv import ns_to_datetime, parse_time
+from tabayyun.services.timeconv import CORE_NS_MAX, CORE_NS_MIN, ns_to_datetime, parse_time
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -124,7 +124,7 @@ async def create_run(
     ingest_col: Annotated[str | None, Form(max_length=128)] = None,
     physical_min: Annotated[float | None, Form()] = None,
     physical_max: Annotated[float | None, Form()] = None,
-    now_ns: Annotated[int | None, Form()] = None,
+    now_ns: Annotated[int | None, Form(ge=CORE_NS_MIN, le=CORE_NS_MAX)] = None,
     ts_unit: Annotated[core.TsUnit, Form(description="Unit of epoch integer timestamps")] = "auto",
 ) -> RunCreated:
     """Store the upload (or, with a JSON body, the dataset run), queue the run; 202 with its id."""

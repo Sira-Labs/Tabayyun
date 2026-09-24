@@ -127,6 +127,27 @@ async def test_dataset_run_over_cached_uploads(client, setup):
     assert stats["n_findings"] == stats["n_findings_new"] + stats["n_findings_merged"] > 0
 
 
+async def test_a_window_past_the_core_range_reaches_its_last_instant(client):
+    """A fixed window ending in 2300 runs over the core's end of time (issue #42).
+
+    The series' last sample is `i64::MAX`, the latest instant the core holds; the window is
+    clamped to the core's range, so the run reads that sample and reports no gap after it.
+    """
+    last = "2262-04-11T23:47:16.854775807Z"  # i64::MAX ns
+    csv = f"ts,value\n2262-04-11T23:47:16.854775806Z,1.0\n{last},2.0\n".encode()
+    series = await _upload(client, "pt-end", csv)
+    window = {"start": "2262-04-11T00:00:00Z", "end": "2300-01-01T00:00:00Z"}
+    r = await client.post("/api/datasets", json={"name": "End", "series_ids": [series], "window": window})
+    assert r.status_code == 201, r.text
+    run = await _run(client, r.json()["id"], now=window["end"])
+    assert run["status"] == "succeeded", run
+    start = datetime_to_ns(datetime(2262, 4, 11, tzinfo=UTC))
+    assert run["window"] == {"start": start, "end": 2**63 - 1}
+    assert run["stats"]["n_samples"] == 2
+    first = (2**63 - 2) // 1000 * 1000  # the first sample, stored to the microsecond
+    assert run["stats"]["missing"] == {series: [[start, first]]}
+
+
 async def test_rerun_merges_instead_of_doubling(client, setup):
     first = await _run(client, setup["dataset"], now=WINDOW["end"])
     second = await _run(client, setup["dataset"], now=WINDOW["end"])
