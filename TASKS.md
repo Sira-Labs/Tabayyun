@@ -188,6 +188,8 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
         optional end in every signature. Recorded in spec 006's implementation edits.
       - Dataset runs clamp window and `now` to `i64` (`to_core_ns`); `now_ns` on uploads is
         bounded (422). A window past 2262 used to fail the run, a `now` past it the request.
+      - Follow-up from review: a window wholly outside the core's range is a 422 at dataset
+        create/update and at run creation (`check_core_range`); partial overlap still runs.
 
 ## Sprint 8 — login, tenants and RBAC (forecast end 29 Sep – 1 Oct)
 

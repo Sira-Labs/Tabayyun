@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Dataset, DatasetSeries, Series
 from tabayyun.services.pagination import decode_keyset, encode_keyset
-from tabayyun.services.timeconv import parse_time
+from tabayyun.services.timeconv import CORE_NS_MAX, CORE_NS_MIN, datetime_to_ns, ns_to_datetime, parse_time
 
 log = structlog.get_logger()
 
@@ -79,8 +79,20 @@ def window_policy(window: dict[str, Any]) -> dict[str, str]:
             raise DatasetError("window", str(exc)) from exc
         if start >= end:
             raise DatasetError("window", "start must be before end")
+        check_core_range(start, end)
         return {"start": start.isoformat(), "end": end.isoformat()}
     raise DatasetError("window", "give either start and end, or last")
+
+
+def check_core_range(start: datetime, end: datetime) -> None:
+    """Reject a `[start, end)` holding no instant the core can represent (`i64` ns).
+
+    A window that only reaches past the range is kept: runs clamp it to the core's range
+    (issue #42). One wholly outside would clamp to an empty window at a limit.
+    """
+    if datetime_to_ns(start) > CORE_NS_MAX or datetime_to_ns(end) <= CORE_NS_MIN:
+        first, last = ns_to_datetime(CORE_NS_MIN).isoformat(), ns_to_datetime(CORE_NS_MAX).isoformat()
+        raise DatasetError("window", f"window lies outside the supported range {first} to {last}")
 
 
 def resolve_window(policy: dict[str, Any], now: datetime) -> tuple[datetime, datetime]:

@@ -60,9 +60,16 @@ def test_window_rules():
         ({"start": WEEK["start"]}, "either start and end, or last"),
         ({"last": "7d", **WEEK}, "either start and end, or last"),
         ({}, "either start and end, or last"),
+        # Wholly outside the core's `i64` ns (1677-09-21 to 2262-04-11): nothing could be read.
+        ({"start": "2300-01-01T00:00:00Z", "end": "2301-01-01T00:00:00Z"}, "outside the supported range"),
+        ({"start": "1500-01-01T00:00:00Z", "end": "1600-01-01T00:00:00Z"}, "outside the supported range"),
     ]:
         with pytest.raises(DatasetError, match=message):
             window_policy(bad)
+    # A window reaching past the range keeps the part inside it.
+    assert window_policy({"start": "2262-04-11T00:00:00Z", "end": "2300-01-01T00:00:00Z"})["end"].startswith(
+        "2300"
+    )
     now = datetime(2026, 2, 1, tzinfo=UTC)
     assert resolve_window({"last": "24h"}, now) == (now - timedelta(hours=24), now)
     assert resolve_window(window_policy(WEEK), now) == (HOUR0, HOUR0 + timedelta(days=7))

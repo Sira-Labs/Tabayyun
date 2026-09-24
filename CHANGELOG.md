@@ -64,5 +64,7 @@ All notable changes to this project are documented here. The format follows
   `i64::MAX` now has no end (issue #42). Dataset runs whose window or `now` lies after 2262
   run to that end instead of failing, and an upload's `now_ns` outside the `i64` range is a
   422 instead of a 500.
+- A dataset window lying wholly outside 1677–2262, fixed or resolved at a run's `now`, is a
+  422 instead of a run that fails in the worker.
 
 [Unreleased]: https://github.com/thedatadudech/Tabayyun/commits/main
