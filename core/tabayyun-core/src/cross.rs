@@ -193,18 +193,18 @@ pub fn episodes(ts: &[i64], flagged: &[bool], grid_ns: i64, min_duration: i64) -
             continue;
         }
         let s = i;
-        while i + 1 < ts.len() && flagged[i + 1] && ts[i + 1] - ts[i] == grid_ns {
+        while i + 1 < ts.len() && flagged[i + 1] && ts[i + 1].saturating_sub(ts[i]) == grid_ns {
             i += 1;
         }
         runs.push((s, i + 1));
         i += 1;
     }
-    let span = |(s, e): (usize, usize)| Window::new(ts[s], ts[e - 1] + grid_ns);
+    let span = |(s, e): (usize, usize)| Window::new(ts[s], ts[e - 1].saturating_add(grid_ns));
     let mut out: Vec<Episode> = Vec::new();
     for run in runs.into_iter().filter(|&r| span(r).duration() >= min_duration) {
         let w = span(run);
         match out.last_mut() {
-            Some(ep) if w.start - ep.window.end < min_duration => {
+            Some(ep) if w.start.saturating_sub(ep.window.end) < min_duration => {
                 ep.window = Window::new(ep.window.start, w.end);
                 ep.bins.extend(run.0..run.1);
             }

@@ -87,7 +87,7 @@ impl Check for PhysicalRange {
         }
         let interval = expected_interval(&f, ctx).unwrap_or(1).max(1);
         let cluster_gap = if self.cluster_gap == "auto" {
-            (12 * interval).max(NS_PER_HOUR)
+            interval.saturating_mul(12).max(NS_PER_HOUR)
         } else {
             duration_param(ID, "cluster_gap", &self.cluster_gap)?
         };
@@ -107,7 +107,7 @@ impl Check for PhysicalRange {
         for (s, e) in runs {
             let w = run_window(&f, s, e, interval);
             match episodes.last_mut() {
-                Some(ep) if w.start - ep.window().end < cluster_gap => ep.runs.push((s, e, w)),
+                Some(ep) if w.start.saturating_sub(ep.window().end) < cluster_gap => ep.runs.push((s, e, w)),
                 _ => episodes.push(Episode { runs: vec![(s, e, w)] }),
             }
         }

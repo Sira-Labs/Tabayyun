@@ -56,9 +56,9 @@ impl Check for Latency {
         } else {
             duration_param(ID, "sla", &self.sla)?
         };
-        let mut lat: Vec<i64> = frame.ts.iter().zip(ingest).map(|(t, i)| i - t).collect();
+        let mut lat: Vec<i64> = frame.ts.iter().zip(ingest).map(|(t, i)| i.saturating_sub(*t)).collect();
         let future = lat.iter().filter(|l| **l < -future_tol).count();
-        let max_lead = lat.iter().copied().min().unwrap_or(0).min(0).abs();
+        let max_lead = lat.iter().copied().min().unwrap_or(0).min(0).saturating_abs();
         lat.sort_unstable();
         let p95 = lat[((n - 1) as f64 * 0.95).round() as usize];
         let p50 = lat[(n - 1) / 2];
@@ -67,7 +67,7 @@ impl Check for Latency {
         out.metrics.push(metric(ID, frame, "future_samples", ctx.window.end, future as f64));
 
         if p95 > sla {
-            let late = frame.ts.iter().zip(ingest).filter(|(t, i)| *i - *t > sla).count();
+            let late = frame.ts.iter().zip(ingest).filter(|(t, i)| i.saturating_sub(**t) > sla).count();
             out.findings.push(Finding::new(
                 ID,
                 &frame.meta.id,

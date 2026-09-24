@@ -74,7 +74,7 @@ impl Window {
     }
 
     pub fn duration(&self) -> i64 {
-        (self.end - self.start).max(0)
+        self.end.saturating_sub(self.start).max(0)
     }
 
     /// Fraction of `self` covered by `other`, clipped to [0, 1].
@@ -85,7 +85,7 @@ impl Window {
         }
         let s = self.start.max(other.start);
         let e = self.end.min(other.end);
-        ((e - s).max(0) as f64 / d as f64).clamp(0.0, 1.0)
+        (e.saturating_sub(s).max(0) as f64 / d as f64).clamp(0.0, 1.0)
     }
 }
 

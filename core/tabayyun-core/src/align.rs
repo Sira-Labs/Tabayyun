@@ -6,9 +6,14 @@
 //! series down to a slow one's rate is honest, the reverse would invent samples.
 //!
 //! `align` never invents data: a bin without a usable, finite sample is NaN, and cross checks
-//! ignore bins where a member they need is NaN.
+//! ignore bins where a member they need is NaN. A span needing more than [`MAX_BINS`] bins
+//! aligns to nothing, so the cross checks stay silent on it.
 
 use crate::frame::SeriesFrame;
+
+/// Most bins `align` builds: 10 million (19 years of minutes). A stray far timestamp would
+/// otherwise ask for a grid across centuries; such a group aligns to nothing instead.
+pub const MAX_BINS: usize = 10_000_000;
 
 /// Members on one grid: `columns[j][i]` is member `j`'s mean in the bin starting at `ts[i]`.
 #[derive(Debug, Clone, PartialEq)]
@@ -51,7 +56,11 @@ pub fn align(frames: &[&SeriesFrame], grid_ns: Option<i64>) -> Aligned {
     let (Some(lo), Some(hi)) = (bounds.clone().min(), bounds.max()) else {
         return empty(grid);
     };
-    let n = (hi - lo + 1) as usize;
+    let Some(n) =
+        hi.checked_sub(lo).and_then(|d| usize::try_from(d).ok()).map(|d| d + 1).filter(|&n| n <= MAX_BINS)
+    else {
+        return empty(grid);
+    };
     let columns = frames
         .iter()
         .map(|f| {
@@ -68,7 +77,8 @@ pub fn align(frames: &[&SeriesFrame], grid_ns: Option<i64>) -> Aligned {
             sum.iter().zip(&count).map(|(s, &c)| if c > 0 { s / c as f64 } else { f64::NAN }).collect()
         })
         .collect();
-    Aligned { ts: (lo..=hi).map(|k| k * grid).collect(), grid_ns: grid, columns }
+    // The first bin can start before `i64::MIN`; its start clamps there.
+    Aligned { ts: (lo..=hi).map(|k| k.saturating_mul(grid)).collect(), grid_ns: grid, columns }
 }
 
 #[cfg(test)]

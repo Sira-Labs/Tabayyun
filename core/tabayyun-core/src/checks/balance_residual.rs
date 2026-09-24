@@ -329,7 +329,7 @@ impl BalanceResidual {
     fn metrics(&self, bins: &[Bin], series_id: &str, group_key: &str, out: &mut CheckOutput) {
         let mut days: BTreeMap<i64, (Vec<f64>, Vec<f64>)> = BTreeMap::new();
         for b in bins {
-            let day = days.entry(b.ts.div_euclid(NS_PER_DAY) * NS_PER_DAY).or_default();
+            let day = days.entry(b.ts.div_euclid(NS_PER_DAY).saturating_mul(NS_PER_DAY)).or_default();
             day.0.push(b.residual);
             if b.share.is_finite() {
                 day.1.push(b.share);

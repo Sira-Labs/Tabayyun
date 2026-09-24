@@ -83,7 +83,7 @@ impl Check for LevelDrift {
         }
         let spread =
             profile.noise_mad.unwrap_or(0.0).max(0.1 * 1.4826 * mad).max(profile.resolution.unwrap_or(0.0));
-        let span = (f.ts[f.len() - 1] - f.ts[0]).max(1);
+        let span = f.ts[f.len() - 1].saturating_sub(f.ts[0]).max(1);
         let mut segment_ns = self.segment_ns.max(1);
         if span / segment_ns + 1 > self.max_segments as i64 {
             segment_ns = (span as f64 / self.max_segments as f64).ceil() as i64;
@@ -96,7 +96,7 @@ impl Check for LevelDrift {
                 continue;
             }
             let Some((med, _)) = median_mad(&seg) else { continue };
-            xs.push((w.start - f.ts[0]) as f64 / NS_PER_DAY as f64);
+            xs.push(w.start.saturating_sub(f.ts[0]) as f64 / NS_PER_DAY as f64);
             ys.push(med);
         }
         if xs.len() < self.min_segments {
@@ -106,7 +106,7 @@ impl Check for LevelDrift {
         let drift = slope_per_day * (self.horizon_ns as f64 / NS_PER_DAY as f64);
         out.metrics.push(metric(ID, &f, "slope_per_day", ctx.window.end, slope_per_day));
         if spread > 0.0 && drift.abs() > self.k * spread {
-            let w = Window::new(f.ts[0], f.ts[f.len() - 1] + 1);
+            let w = Window::new(f.ts[0], f.ts[f.len() - 1].saturating_add(1));
             out.findings.push(Finding::new(
                 ID, &f.meta.id, Dimension::Accuracy, self.severity, w,
                 ctx.window.overlap_fraction(&w) * 0.5,

@@ -218,6 +218,9 @@ impl Cache {
             while e < n && frame.ts[e] < month_end {
                 e += 1;
             }
+            // April 2262 ends after `i64::MAX`, so its end saturates there; a sample at
+            // `i64::MAX` still belongs to it.
+            let e = e.max(s + 1);
             let key = self.key(&format!(
                 "{layer}/{source_id}/{bucket:02x}/{y:04}/{m:02}/part-{write_ns:019}-{:016x}.parquet",
                 random_u64()
@@ -236,7 +239,12 @@ impl Cache {
             }
             Ok::<_, Error>(())
         })?;
-        Ok(WriteReport { files: keys, rows: n, start_ns: frame.ts[0], end_ns: frame.ts[n - 1] + 1 })
+        Ok(WriteReport {
+            files: keys,
+            rows: n,
+            start_ns: frame.ts[0],
+            end_ns: frame.ts[n - 1].saturating_add(1),
+        })
     }
 
     /// Read series `[start_ns, end_ns)`. Every requested id is returned in request order, with
@@ -605,7 +613,7 @@ fn month_start_ns(y: i64, m: u32) -> i64 {
 fn months_between(start_ns: i64, end_ns: i64) -> Vec<(i64, u32)> {
     let mut out = Vec::new();
     let (mut y, mut m) = year_month(start_ns);
-    let last = year_month(end_ns - 1);
+    let last = year_month(end_ns.saturating_sub(1));
     while (y, m) <= last {
         out.push((y, m));
         if m == 12 {
@@ -678,6 +686,21 @@ mod tests {
         assert_eq!(f.values, a.values[i0..i0 + 48]);
         assert_eq!(f.quality, a.quality[i0..i0 + 48]);
         assert_eq!(f.ingest_ts.as_deref(), a.ingest_ts.as_deref().map(|v| &v[i0..i0 + 48]));
+    }
+
+    #[test]
+    fn timestamps_at_the_i64_limits() {
+        // A sample at `i64::MAX` (pandas' `Timestamp.max`) used to loop forever: its month's
+        // end saturates to the sample itself.
+        let (_dir, cache) = temp_store();
+        let ts = vec![i64::MIN, 0, i64::MAX];
+        let f =
+            SeriesFrame::with_default_quality(SeriesMeta::new("s"), ts.clone(), vec![1.0, 2.0, 3.0]).unwrap();
+        let report = cache.write("raw", "src", &f).unwrap();
+        assert_eq!((report.rows, report.files.len()), (3, 3));
+        assert_eq!((report.start_ns, report.end_ns), (i64::MIN, i64::MAX));
+        let got = &cache.read("raw", "src", &["s"], i64::MIN, i64::MAX).unwrap()[0];
+        assert_eq!(got.ts, vec![i64::MIN, 0], "the window is half-open");
     }
 
     #[test]

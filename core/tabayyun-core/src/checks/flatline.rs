@@ -94,7 +94,7 @@ impl Check for Flatline {
             }
         }
         let min_duration = if self.min_duration == "auto" {
-            (10 * interval).max(NS_PER_HOUR)
+            interval.saturating_mul(10).max(NS_PER_HOUR)
         } else {
             duration_param(ID, "min_duration", &self.min_duration)?
         };

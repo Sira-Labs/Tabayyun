@@ -64,7 +64,8 @@ impl Check for ResolutionLoss {
         let start = f.ts[0];
         let mut s = 0usize;
         while s < n {
-            let seg_end_ts = start + ((f.ts[s] - start) / self.segment_ns + 1) * self.segment_ns;
+            let k = f.ts[s].saturating_sub(start) / self.segment_ns + 1;
+            let seg_end_ts = start.saturating_add(k.saturating_mul(self.segment_ns));
             let mut e = s;
             while e < n && f.ts[e] < seg_end_ts {
                 e += 1;
@@ -76,7 +77,7 @@ impl Check for ResolutionLoss {
                 let distinct = 1 + sorted.windows(2).filter(|w| w[0] != w[1]).count();
                 let density = distinct as f64 / seg.len() as f64;
                 let step = resolution(&f.values[s..e]).unwrap_or(0.0);
-                let w = Window::new(f.ts[s], f.ts[e - 1] + 1);
+                let w = Window::new(f.ts[s], f.ts[e - 1].saturating_add(1));
                 let density_drop = density < self.min_distinct_ratio * base_density;
                 // A larger step only counts when the segment actually sits on a grid of that
                 // step; the raw minimum step of a noisy continuous signal grows with fewer

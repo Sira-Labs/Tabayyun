@@ -43,7 +43,7 @@ impl Check for RateOfChange {
             return Ok(out);
         }
         let interval = expected_interval(&f, ctx).unwrap_or(1);
-        let gap_cut = 3 * interval;
+        let gap_cut = interval.saturating_mul(3);
         let (limit, source) = match self.max_rate {
             Some(r) => (r, "explicit"),
             None => {
@@ -57,7 +57,7 @@ impl Check for RateOfChange {
         // rate[i] is the rate arriving at sample i (from i-1). Index 0 never violates.
         let mut rate = vec![0.0f64; n];
         for (i, r) in rate.iter_mut().enumerate().skip(1) {
-            let dt = f.ts[i] - f.ts[i - 1];
+            let dt = f.ts[i].saturating_sub(f.ts[i - 1]);
             let (a, b) = (f.values[i - 1], f.values[i]);
             if dt > 0 && dt <= gap_cut && a.is_finite() && b.is_finite() {
                 *r = (b - a).abs() / (dt as f64 / 1e9);

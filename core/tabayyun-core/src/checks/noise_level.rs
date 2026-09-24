@@ -67,7 +67,7 @@ impl Check for NoiseLevel {
         let (f, _) = frame.normalized();
         let (profile, source) = baseline(ctx, &f);
         let Some(base) = profile.noise_mad.filter(|s| *s > 0.0) else { return Ok(out) };
-        let gap_cut = profile.expected_interval_ns.map(|i| 3 * i).unwrap_or(i64::MAX);
+        let gap_cut = profile.expected_interval_ns.map(|i| i.saturating_mul(3)).unwrap_or(i64::MAX);
         // Per segment: index, window, segment sigma, ratio.
         let mut stats: Vec<(usize, Window, f64, f64)> = Vec::new();
         for (k, (s, e, w)) in segments(&f, self.segment_ns).into_iter().enumerate() {

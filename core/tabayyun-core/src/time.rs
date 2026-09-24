@@ -57,6 +57,12 @@ impl TsUnit {
     }
 }
 
+/// Differences between consecutive timestamps. Timestamps are any `i64` (typed Arrow columns
+/// are not range-checked), so differences saturate at the `i64` limits instead of overflowing.
+pub fn steps(ts: &[i64]) -> impl Iterator<Item = i64> + '_ {
+    ts.windows(2).map(|w| w[1].saturating_sub(w[0]))
+}
+
 /// Epoch-integer instants must fall in `[1971-01-01, 2200-01-01)` UTC (ADR-0014): a date in
 /// 1970 or centuries ahead means the unit is wrong. Older data is read as text.
 pub const PLAUSIBLE_RANGE_NS: (i64, i64) = (31_536_000 * NS_PER_SEC, 7_258_118_400 * NS_PER_SEC);

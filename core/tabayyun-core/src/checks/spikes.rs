@@ -96,7 +96,7 @@ impl Check for Spikes {
         }
         let interval = expected_interval(&f, ctx).unwrap_or(1).max(1);
         let cluster_gap = if self.cluster_gap == "auto" {
-            (12 * interval).max(NS_PER_HOUR)
+            interval.saturating_mul(12).max(NS_PER_HOUR)
         } else {
             duration_param(ID, "cluster_gap", &self.cluster_gap)?
         };
@@ -160,7 +160,9 @@ impl Check for Spikes {
         let mut clusters: Vec<Cluster> = Vec::new();
         for h in &spikes {
             match clusters.last_mut() {
-                Some(c) if f.ts[h.i] - f.ts[c.spikes.last().unwrap().i] <= cluster_gap => c.spikes.push(*h),
+                Some(c) if f.ts[h.i].saturating_sub(f.ts[c.spikes.last().unwrap().i]) <= cluster_gap => {
+                    c.spikes.push(*h)
+                }
                 _ => clusters.push(Cluster { spikes: vec![*h] }),
             }
         }
@@ -173,7 +175,7 @@ impl Check for Spikes {
         let cluster_json = |c: &Cluster| {
             let p = c.peak();
             serde_json::json!({
-                "start_ts": f.ts[c.spikes[0].i], "end_ts": f.ts[c.spikes.last().unwrap().i] + interval,
+                "start_ts": f.ts[c.spikes[0].i], "end_ts": f.ts[c.spikes.last().unwrap().i].saturating_add(interval),
                 "count": c.spikes.len(), "peak_ts": f.ts[p.i], "peak_value": p.x, "peak_local_median": p.med, "peak_z": p.z,
                 "ts": c.spikes.iter().take(self.max_listed).map(|h| f.ts[h.i]).collect::<Vec<_>>(),
                 "values": c.spikes.iter().take(self.max_listed).map(|h| h.x).collect::<Vec<_>>(),
@@ -185,7 +187,7 @@ impl Check for Spikes {
             top.sort_by(|a, b| b.spikes.len().cmp(&a.spikes.len()).then(b.peak().z.total_cmp(&a.peak().z)));
             let win = Window::new(
                 f.ts[clusters[0].spikes[0].i],
-                f.ts[clusters.last().unwrap().spikes.last().unwrap().i] + interval,
+                f.ts[clusters.last().unwrap().spikes.last().unwrap().i].saturating_add(interval),
             );
             let peak = clusters.iter().map(|c| c.peak()).max_by(|a, b| a.z.total_cmp(&b.z)).unwrap();
             out.findings.push(Finding::new(
@@ -205,7 +207,7 @@ impl Check for Spikes {
         for c in &clusters {
             let first = c.spikes[0];
             let last = c.spikes.last().unwrap();
-            let win = Window::new(f.ts[first.i], f.ts[last.i] + interval);
+            let win = Window::new(f.ts[first.i], f.ts[last.i].saturating_add(interval));
             let p = c.peak();
             let summary = if c.spikes.len() == 1 {
                 format!(
