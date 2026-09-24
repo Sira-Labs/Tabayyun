@@ -59,9 +59,12 @@ Entry points (links that build the URL):
                stats: {min, max, mean, sd, first: {ts, value}} | null}]}
     ```
   - `ts` values are ns strings. `n_raw` is the number of raw points in the window.
+  - Chart points are M4 of every finite raw sample in `[from, to)`, whatever its quality, so
+    bad-quality stretches stay visible (S9-5 marks them in its quality rug).
   - `stats` is computed on the raw, usable (good or uncertain quality), finite samples in
     `[from, to)`, before downsampling. `sd` is the population standard deviation. `first` is
-    the earliest such sample. `stats` is null when the window holds none.
+    the earliest such sample. `stats` is null when the window holds none, which can happen
+    while chart points exist (every finite sample is bad).
   - It reuses S9-5's M4 kernel and cache reads, one call instead of eight.
 - `GET /api/series-groups/{id}/residual?from=&to=&width_px=`
   - For a `balance` group, or any group with exactly two members.
@@ -115,12 +118,14 @@ grid bin, plus Σin per bin for the band. It is pure, and uses the same `align` 
    - `index`: 100 × x / x₀, where x₀ = `stats.first.value`, the earliest usable raw sample in
      the window. The mode is unavailable when x₀ ≤ 0 or `stats.min` < 0 < `stats.max`: the
      series' sign changes, and a negative x₀ would flip the axis.
-   - A series whose `stats` is null keeps its "no data" legend entry in every mode.
+   - A series whose `stats` is null is drawn raw only: in a normalised mode it is hidden with
+     the reason "no usable samples in the window" in its legend entry.
    - The cursor readout always shows raw values with their units.
 4. **Downsampling.** One `compare/chart` call returns M4 points per series on identical bins.
    - The client outer-joins them (`uPlot.join`).
    - The readout shows, for each series, the point nearest the cursor inside the hovered bin.
-   - A series with no data in the window stays in the legend, marked "no data".
+   - A series with no finite sample in the window (empty `ts`) stays in the legend, marked
+     "no data".
 5. **Residual lane.** With `group` set to a balance or a two-member group, a lane under the
    plot shows the residual with a zero line. For balances it also shows the loss band as a
    uPlot band.
@@ -192,6 +197,8 @@ grid bin, plus Σin per bin for the band. It is pure, and uses the same `align` 
   - `chart_bins_identical_for_all_series`;
   - `chart_stats_from_raw_window` (mean, sd, min, max and first from raw usable samples,
     independent of `width_px`);
+  - `chart_points_keep_bad_quality` (bad-quality finite samples appear in the points; a
+    window of only bad samples has points and `stats` null);
   - `chart_rejects_count_and_unknown_ids`;
   - `residual_balance_band_and_episode`;
   - `residual_pair_no_band`;
@@ -199,7 +206,8 @@ grid bin, plus Σin per bin for the band. It is pure, and uses the same `align` 
 - **Web** (Vitest, `web/src/__tests__/compare.*.test.ts`):
   - `axis_groups_by_unit` (1, 2 and 3 units);
   - `normalise_modes` (range with and without limits, z, index refusal on x₀ ≤ 0 and on a
-    sign change, sd = 0 and hi = lo refusals, identical output at two widths);
+    sign change, sd = 0 and hi = lo refusals, identical output at two widths, a series with
+    null `stats` hidden with its reason);
   - `palette_contrast_light_dark`;
   - `url_state_round_trip`;
   - `finding_selection_marks_suspect`;
