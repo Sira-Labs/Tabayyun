@@ -56,6 +56,18 @@ Unit (`checks::physical_range::tests`): `clustered_excursions_one_finding`,
 `distant_excursions_separate`, `many_episodes_summary`, `bad_cluster_gap_is_invalid`, existing
 tests (`needs_limits`, `unit_default_limits`, which now also pins the one-excursion summary).
 
+## Live check (2026-09-24, after PR #38, release run 38)
+
+One day of 1-minute data in % (`live-016-level`, 2024-02-01: a daily sine around 70 % with
+0.5 % noise; from 13:00 UTC, 34 three-minute excursions to 101–117.5 %, each three minutes
+after the previous one) uploaded as a run on the CapRover worker gave exactly one
+`tby.physical_range` finding, critical, 13:00–16:21 UTC, "34 excursions (102 values) outside
+physical limits [0, 100] within 3h21m (observed 101 to 117.5)", `n_excursions` 34, `count`
+102. Before this change the same data would have given 34 findings. Two `tby.spikes`
+findings (the excursion edges) came with it; all three were resolved as "test upload".
+No open `tby.physical_range` finding of the old evidence shape was left on the live system
+(the only one was already resolved), so nothing had to be marked superseded.
+
 ## Implementation edits
 
 Recorded on 2026-09-23; approved with the plan.
