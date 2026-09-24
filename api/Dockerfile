@@ -14,7 +14,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cd tabayyun-py && maturin build --release --out /wheels --compatibility linux
 
 # Stage 2: Python API with the wheel installed (no compiler in the runtime image).
-FROM python:3.12-slim-bookworm AS api
+FROM python:3.14-slim-bookworm AS api
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 UV_SYSTEM_PYTHON=1
 COPY --from=ghcr.io/astral-sh/uv:0.8 /uv /usr/local/bin/uv
 WORKDIR /app
