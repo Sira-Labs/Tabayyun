@@ -13,7 +13,8 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/tabayyun
+  # GHCR names must be lowercase; the owner `Sira-Labs` is not, so the prefix is spelled out.
+  IMAGE_PREFIX: ghcr.io/sira-labs/tabayyun
 
 jobs:
   images:

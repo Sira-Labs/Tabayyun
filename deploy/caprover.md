@@ -45,7 +45,7 @@ Internet ──▶ CapRover nginx (TLS) ──▶ tabayyun-web (Caddy :80) ─�
 - HTTP Settings: no public domain needed (the web app proxies to it). If you want the API
   reachable directly, enable HTTPS on its default domain.
 - Deployment tab → **Enable App Token**, copy it (used by CI below). For the first deploy,
-  *Deploy via ImageName*: `ghcr.io/thedatadudech/tabayyun-api:latest`.
+  *Deploy via ImageName*: `ghcr.io/sira-labs/tabayyun-api:latest`.
 
 ## 3. Worker app: `tabayyun-worker`
 
@@ -66,7 +66,7 @@ which the live system uses.
 - Deployment tab → **Enable App Token**, copy it into the GitHub secret
   `CAPROVER_APP_TOKEN_WORKER`. The release workflow deploys the worker only when that secret
   exists, so nothing breaks before the app is created. First deploy via ImageName:
-  `ghcr.io/thedatadudech/tabayyun-api:latest`.
+  `ghcr.io/sira-labs/tabayyun-api:latest`.
 - The worker exits with code 3 until the api has migrated the schema to the same revision;
   CapRover restarts it. Its log shows `worker.start` with the revision once it runs.
 
@@ -111,7 +111,7 @@ share it. The live system runs RustFS (Apache-2.0); MinIO community builds ended
 - Container HTTP port: `80`.
 - HTTP Settings: connect your domain (e.g. `tabayyun.example.com`), Enable HTTPS, Force HTTPS.
 - Deployment tab → **Enable App Token**, copy it. First deploy via ImageName:
-  `ghcr.io/thedatadudech/tabayyun-web:latest`.
+  `ghcr.io/sira-labs/tabayyun-web:latest`.
 
 Open the domain: the page should show the API version and let you upload a CSV.
 
@@ -146,7 +146,7 @@ image on the server. Both Dockerfiles use the repository root as build context, 
 | `tabayyun-api` | `./deploy/caprover/api/captain-definition` |
 | `tabayyun-web` | `./deploy/caprover/web/captain-definition` |
 
-In each app's Deployment tab fill in *Repository* (`github.com/thedatadudech/Tabayyun`),
+In each app's Deployment tab fill in *Repository* (`github.com/Sira-Labs/Tabayyun`),
 *Branch* (`main`) and, because the repository is public, no username/password. Save, copy
 the generated webhook URL, and add it on GitHub under Settings → Webhooks (content type
 JSON, "just the push event"). Every push to `main` then rebuilds and redeploys both apps.

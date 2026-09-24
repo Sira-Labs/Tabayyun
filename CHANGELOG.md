@@ -45,6 +45,8 @@ All notable changes to this project are documented here. The format follows
   and pull request templates, Dependabot, CODEOWNERS and the `main` branch ruleset.
 
 ### Changed
+- The repository moved to `Sira-Labs/Tabayyun`; images are published as
+  `ghcr.io/sira-labs/tabayyun-api` and `ghcr.io/sira-labs/tabayyun-web` (was `ghcr.io/thedatadudech/…`).
 - `tby.physical_range` reports one finding per episode of nearby excursions with the exact
   count, and one summary above 20 episodes, instead of one finding per excursion (spec 016).
   Open findings of the old shape do not merge with the new ones.
@@ -67,4 +69,4 @@ All notable changes to this project are documented here. The format follows
 - A dataset window lying wholly outside 1677–2262, fixed or resolved at a run's `now`, is a
   422 instead of a run that fails in the worker.
 
-[Unreleased]: https://github.com/thedatadudech/Tabayyun/commits/main
+[Unreleased]: https://github.com/Sira-Labs/Tabayyun/commits/main
