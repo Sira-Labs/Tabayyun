@@ -51,7 +51,13 @@ All notable changes to this project are documented here. The format follows
 - The CLI reads epoch-integer timestamps in one unit per column (`--ts-unit`, inferred from the
   median otherwise) and exits 2 on instants outside 1971–2199, as the API does; integer Parquet
   timestamp columns are no longer taken as nanoseconds (spec 017, ADR-0014).
+- The CLI reads brotli, gzip and lz4 Parquet as well as snappy and zstd.
 - `TABAYYUN_CACHE_DIR` is now `TABAYYUN_CACHE_URL` (the old name is still accepted).
 - Checks are Rust kernels without Polars in the core (ADR-0015 supersedes ADR-0002).
+
+### Fixed
+- Timestamps near the `i64` limits no longer overflow in the checks, the profile, the scorer,
+  M4 or the cross checks; writing a sample at `i64::MAX` to the cache no longer hangs, and a
+  group spanning more than 10 million grid bins aligns to nothing instead of allocating them.
 
 [Unreleased]: https://github.com/thedatadudech/Tabayyun/commits/main
