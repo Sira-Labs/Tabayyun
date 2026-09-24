@@ -16,7 +16,7 @@ EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 CORE_NS_MIN = -(2**63)
 CORE_NS_MAX = 2**63 - 1
 _EPOCH_NS = re.compile(r"^-?\d+$")
-_FRACTION = re.compile(r"\.(\d+)")
+_FRACTION = re.compile(r"[.,](\d+)")  # ISO 8601 allows either decimal mark; `fromisoformat` too
 
 
 def ns_to_datetime(ns: int) -> datetime:

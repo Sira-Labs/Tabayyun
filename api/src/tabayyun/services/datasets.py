@@ -24,6 +24,7 @@ from tabayyun.services.pagination import decode_keyset, encode_keyset
 from tabayyun.services.timeconv import (
     CORE_NS_MAX,
     CORE_NS_MIN,
+    datetime_to_ns,
     ns_to_datetime,
     parse_time,
     parse_time_ns,
@@ -85,8 +86,10 @@ def window_policy(window: dict[str, Any]) -> dict[str, str]:
             raise DatasetError("window", str(exc)) from exc
         if start >= end:
             raise DatasetError("window", "start must be before end")
-        # Judged on the requested ns: microseconds could pull a start just past the range into it.
+        # Both the requested window and the one stored (to the microsecond, which runs use) must
+        # hold an instant the core can represent: rounding can move either bound across a limit.
         check_core_range(parse_time_ns(str(window["start"])), parse_time_ns(str(window["end"])))
+        check_core_range(datetime_to_ns(start), datetime_to_ns(end))
         return {"start": start.isoformat(), "end": end.isoformat()}
     raise DatasetError("window", "give either start and end, or last")
 

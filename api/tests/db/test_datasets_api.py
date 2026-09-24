@@ -69,6 +69,12 @@ def test_window_rules():
             "outside the supported range",
         ),
         ({"start": "9223372036854775808", "end": "2300-01-01T00:00:00Z"}, "outside the supported range"),
+        (
+            {"start": "2262-04-11T23:47:16,854775808Z", "end": "2300-01-01T00:00:00Z"},
+            "outside the supported range",
+        ),
+        # Inside as requested, but stored to the microsecond the end falls below the range.
+        ({"start": "1600-01-01T00:00:00Z", "end": str(-(2**63) + 1)}, "outside the supported range"),
     ]:
         with pytest.raises(DatasetError, match=message):
             window_policy(bad)
