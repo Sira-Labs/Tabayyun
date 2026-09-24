@@ -95,7 +95,7 @@ async def create_dataset_run(session: AsyncSession, dataset_id: uuid.UUID, *, no
     if dataset is None:
         raise DatasetNotFoundError(str(dataset_id))
     start, end = datasets_service.resolve_window(dataset.window_policy, now)
-    datasets_service.check_core_range(start, end)
+    datasets_service.check_core_range(datetime_to_ns(start), datetime_to_ns(end))
     run = Run(
         org_id=DEFAULT_ORG_ID,
         workspace_id=DEFAULT_WORKSPACE_ID,

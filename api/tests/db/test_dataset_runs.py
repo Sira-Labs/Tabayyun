@@ -199,6 +199,8 @@ async def test_request_errors(client, setup):
     r = await client.post("/api/runs", json={"dataset_id": future, "now": "2300-01-01T00:00:00Z"})
     assert r.status_code == 422 and r.json()["detail"][0]["loc"] == ["body", "now"]
     assert "outside the supported range" in r.json()["detail"][0]["msg"]
+    r = await client.post("/api/runs", json={"dataset_id": future, "now": "0001-01-01T00:00:00Z"})
+    assert r.status_code == 422 and r.json()["detail"][0]["loc"] == ["body", "now"]
     r = await client.post("/api/runs", content=b"{", headers={"content-type": "application/json"})
     assert r.status_code == 422
     r = await client.post("/api/runs", data={"series_id": "x"})

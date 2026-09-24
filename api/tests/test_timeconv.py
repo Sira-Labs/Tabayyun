@@ -12,6 +12,7 @@ from tabayyun.services.timeconv import (
     ns_to_datetime,
     ns_to_datetime_ceil,
     parse_time,
+    parse_time_ns,
     to_core_ns,
 )
 
@@ -55,3 +56,19 @@ def test_coverage_of_a_write_ending_at_the_core_limit_holds_it():
     stored = (datetime_to_ns(ns_to_datetime(start)), datetime_to_ns(ns_to_datetime_ceil(CORE_NS_MAX)))
     assert stored[1] > CORE_NS_MAX
     assert missing_ranges([stored], start, CORE_NS_MAX) == []
+
+
+@pytest.mark.parametrize(
+    ("value", "ns"),
+    [
+        ("9223372036854775808", 2**63),
+        ("2262-04-11T23:47:16.854775807Z", 2**63 - 1),
+        ("2262-04-11T23:47:16.8547758Z", 2**63 - 8),
+        ("2026-01-01T00:00:00Z", 1_767_225_600 * 10**9),
+        ("1969-12-31T23:59:59.999999999Z", -1),
+        ("2026-01-01T01:00:00.000000001+01:00", 1_767_225_600 * 10**9 + 1),
+    ],
+)
+def test_parse_time_ns_keeps_nanoseconds(value, ns):
+    """Epoch ns and RFC 3339 text to exact ns; `parse_time` keeps only microseconds."""
+    assert parse_time_ns(value) == ns

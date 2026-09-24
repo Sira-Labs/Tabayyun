@@ -16,6 +16,7 @@ EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 CORE_NS_MIN = -(2**63)
 CORE_NS_MAX = 2**63 - 1
 _EPOCH_NS = re.compile(r"^-?\d+$")
+_FRACTION = re.compile(r"\.(\d+)")
 
 
 def ns_to_datetime(ns: int) -> datetime:
@@ -52,3 +53,19 @@ def parse_time(value: str) -> datetime:
         # OverflowError: an epoch value outside the datetime range (years 1–9999).
         raise ValueError(f"not RFC 3339 or epoch ns: {value!r}") from exc
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def parse_time_ns(value: str) -> int:
+    """Like `parse_time`, but exact to the nanosecond: a datetime keeps only microseconds.
+
+    Validity checks that must see the requested instant (issue #42) use this.
+    """
+    text = value.strip()
+    if _EPOCH_NS.match(text):
+        return int(text)
+    ns = datetime_to_ns(parse_time(text))
+    fraction = _FRACTION.search(text)
+    if fraction and len(fraction.group(1)) > 6:
+        # Digits 7-9 of the fraction; the datetime already carries the first six.
+        ns += int(fraction.group(1)[6:9].ljust(3, "0"))
+    return ns

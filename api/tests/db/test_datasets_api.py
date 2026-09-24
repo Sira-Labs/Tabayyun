@@ -63,13 +63,23 @@ def test_window_rules():
         # Wholly outside the core's `i64` ns (1677-09-21 to 2262-04-11): nothing could be read.
         ({"start": "2300-01-01T00:00:00Z", "end": "2301-01-01T00:00:00Z"}, "outside the supported range"),
         ({"start": "1500-01-01T00:00:00Z", "end": "1600-01-01T00:00:00Z"}, "outside the supported range"),
+        # Judged on the requested nanosecond: 1 ns past i64::MAX, which microseconds would hide.
+        (
+            {"start": "2262-04-11T23:47:16.854775808Z", "end": "2300-01-01T00:00:00Z"},
+            "outside the supported range",
+        ),
+        ({"start": "9223372036854775808", "end": "2300-01-01T00:00:00Z"}, "outside the supported range"),
     ]:
         with pytest.raises(DatasetError, match=message):
             window_policy(bad)
-    # A window reaching past the range keeps the part inside it.
+    # A window reaching past the range keeps the part inside it, down to i64::MAX itself.
     assert window_policy({"start": "2262-04-11T00:00:00Z", "end": "2300-01-01T00:00:00Z"})["end"].startswith(
         "2300"
     )
+    assert window_policy({"start": "2262-04-11T23:47:16.854775807Z", "end": "2300-01-01T00:00:00Z"})
+    # A relative window reaching before year 1 cannot even be resolved.
+    with pytest.raises(DatasetError, match="outside the supported range"):
+        resolve_window({"last": "48h"}, datetime(1, 1, 1, tzinfo=UTC))
     now = datetime(2026, 2, 1, tzinfo=UTC)
     assert resolve_window({"last": "24h"}, now) == (now - timedelta(hours=24), now)
     assert resolve_window(window_policy(WEEK), now) == (HOUR0, HOUR0 + timedelta(days=7))
