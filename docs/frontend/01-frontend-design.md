@@ -27,6 +27,7 @@ Research: `docs/research/03-frontend-auth-security.md`.
   /overview                          workspace score, worst series, open findings, run health
   /series                            catalogue: search, filters (source, unit, score, kind), bulk actions
   /series/:id                        series detail: chart + findings overlay, profile, checks, history
+  /compare                           2–8 series on one chart, state in the URL (spec 018)
   /findings                          triage inbox: group by check / series / asset; ack, mute, resolve, assign
   /datasets                          datasets and their series selection
   /suites, /suites/:id               check suites, schedules, per-check thresholds, run history
@@ -54,6 +55,15 @@ Research: `docs/research/03-frontend-auth-security.md`.
   (unit, limits, asset path) editable by editors, related series.
 - Tabs: Findings, Checks (effective thresholds, with "why this threshold" explanation:
   metadata / auto-baseline / override), Score history, Audit.
+
+### Compare view
+- 2–8 series on one shared time axis: axes grouped by unit (two at most), stacked lanes synced
+  with `uPlot.sync` beyond that; optional normalisation (range, z, index), raw values always
+  in the readout.
+- Residual lane for balances and pairs with the loss band; cross-series findings shaded across
+  lanes, the suspect drawn thicker and labelled. Opens from a group, dataset, finding or series.
+- Okabe-Ito colours adjusted to 3:1 per theme, dashes from the fifth series, end labels, a
+  table view with keyboard cursor. Spec 018, research `docs/research/06-multi-series-comparison.md`.
 
 ### Findings inbox
 - Virtualised table, saved filters, group-by. Row expands to evidence: statistic, threshold,
