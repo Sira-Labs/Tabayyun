@@ -42,7 +42,7 @@ from tabayyun.services import groups as groups_service
 from tabayyun.services import runs as runs_service
 from tabayyun.services import series as series_service
 from tabayyun.services.cache import CacheError, RunCache
-from tabayyun.services.timeconv import datetime_to_ns, ns_to_datetime, ns_to_datetime_ceil
+from tabayyun.services.timeconv import datetime_to_ns, ns_to_datetime, ns_to_datetime_ceil, to_core_ns
 
 log = structlog.get_logger()
 
@@ -100,8 +100,11 @@ async def create_dataset_run(session: AsyncSession, dataset_id: uuid.UUID, *, no
         status="queued",
         window_start=start,
         window_end=end,
-        now_ns=datetime_to_ns(now),
-        stats={"window": {"start": datetime_to_ns(start), "end": datetime_to_ns(end)}},
+        # The run works in the core's `i64` ns: a window past 2262 ends at its end of time.
+        now_ns=to_core_ns(datetime_to_ns(now)),
+        stats={
+            "window": {"start": to_core_ns(datetime_to_ns(start)), "end": to_core_ns(datetime_to_ns(end))}
+        },
         created_at=runs_service.utc_now(),
     )
     session.add(run)

@@ -60,5 +60,9 @@ All notable changes to this project are documented here. The format follows
   M4 or the cross checks; writing a sample at `i64::MAX` to the cache no longer hangs, and a
   group needing more than 20 million grid cells (bins times members) aligns to nothing instead
   of allocating them.
+- A cache write whose last sample is at `i64::MAX` reads back in full: a range end of
+  `i64::MAX` now has no end (issue #42). Dataset runs whose window or `now` lies after 2262
+  run to that end instead of failing, and an upload's `now_ns` outside the `i64` range is a
+  422 instead of a 500.
 
 [Unreleased]: https://github.com/thedatadudech/Tabayyun/commits/main

@@ -12,6 +12,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from tabayyun import core
 from tabayyun.services.runs import MAX_UPLOAD_BYTES, UploadError, parse_upload
+from tabayyun.services.timeconv import CORE_NS_MAX, CORE_NS_MIN
 
 router = APIRouter(prefix="/api/checks", tags=["checks"])
 
@@ -33,7 +34,7 @@ async def run_checks(
     ingest_col: Annotated[str | None, Form(max_length=128)] = None,
     physical_min: Annotated[float | None, Form()] = None,
     physical_max: Annotated[float | None, Form()] = None,
-    now_ns: Annotated[int | None, Form()] = None,
+    now_ns: Annotated[int | None, Form(ge=CORE_NS_MIN, le=CORE_NS_MAX)] = None,
     ts_unit: Annotated[core.TsUnit, Form(description="Unit of epoch integer timestamps")] = "auto",
 ) -> core.CheckReport:
     """Run the built-in checks on an uploaded CSV without storing anything."""

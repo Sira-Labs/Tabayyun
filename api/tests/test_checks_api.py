@@ -57,3 +57,15 @@ async def test_empty_upload_is_400(app):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.post("/api/checks/run", files={"file": ("f.csv", b"", "text/csv")})
     assert r.status_code == 400
+
+
+@pytest.mark.parametrize(("now_ns", "status"), [(2**63 - 1, 200), (2**63, 422), (-(2**63) - 1, 422)])
+async def test_now_ns_must_fit_the_core(app, now_ns, status):
+    """`now_ns` is an `i64` in the core; beyond that range the request is rejected, not a 500."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            "/api/checks/run",
+            files={"file": ("f.csv", faulty_csv([]), "text/csv")},
+            data={"series_id": "now", "now_ns": str(now_ns)},
+        )
+    assert r.status_code == status, r.text
