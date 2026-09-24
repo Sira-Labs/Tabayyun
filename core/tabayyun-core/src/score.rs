@@ -48,7 +48,7 @@ pub struct ScoreReport {
 /// Integral of the maximum weight over `[start, end)` among weighted intervals, divided by
 /// the span duration. Intervals outside the span are clipped.
 pub fn merged_coverage(intervals: &[(i64, i64, f64)], start: i64, end: i64) -> f64 {
-    let span = (end - start).max(1) as f64;
+    let span = end.saturating_sub(start).max(1) as f64;
     let mut events: Vec<(i64, bool, f64)> = Vec::with_capacity(intervals.len() * 2);
     for &(s, e, w) in intervals {
         let (s, e) = (s.max(start), e.min(end));
@@ -68,7 +68,7 @@ pub fn merged_coverage(intervals: &[(i64, i64, f64)], start: i64, end: i64) -> f
     let mut prev_t = events[0].0;
     for (t, open, w) in events {
         if let Some((&k, _)) = active.iter().next_back() {
-            integral += (t - prev_t) as f64 * (k as f64 / 1e6);
+            integral += t.saturating_sub(prev_t) as f64 * (k as f64 / 1e6);
         }
         prev_t = t;
         let c = active.entry(key(w)).or_insert(0);
@@ -109,8 +109,8 @@ impl Scorer {
                     continue;
                 }
                 let s = f.window.start.max(window.start);
-                let e = f.window.end.min(window.end).max(s + 1);
-                let density = f.score_impact * span / (e - s) as f64;
+                let e = f.window.end.min(window.end).max(s.saturating_add(1));
+                let density = f.score_impact * span / e.saturating_sub(s) as f64;
                 if density > f.severity.weight() {
                     let slot = points.entry((s, e)).or_insert(0.0);
                     *slot = slot.max(f.score_impact);
@@ -133,7 +133,11 @@ impl Scorer {
         let mine = findings.iter().filter(|f| f.series_id == series_id);
         let start = mine.clone().map(|f| f.window.start).min().unwrap_or(0);
         let end = mine.map(|f| f.window.end).max().unwrap_or(1);
-        self.score_window(series_id, findings, crate::finding::Window::new(start, end.max(start + 1)))
+        self.score_window(
+            series_id,
+            findings,
+            crate::finding::Window::new(start, end.max(start.saturating_add(1))),
+        )
     }
 
     fn finish(&self, series_id: &str, findings: &[Finding], impact: BTreeMap<Dimension, f64>) -> ScoreReport {

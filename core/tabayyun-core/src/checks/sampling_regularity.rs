@@ -57,9 +57,9 @@ impl Check for SamplingRegularity {
             return Ok(out);
         }
         let Some(expected) = expected_interval(&f, ctx) else { return Ok(out) };
-        let iats: Vec<i64> = f.ts.windows(2).map(|w| w[1] - w[0]).collect();
+        let iats: Vec<i64> = crate::time::steps(&f.ts).collect();
         // Gaps (handled by completeness) are excluded from the regularity statistic.
-        let gap_cut = 3 * expected;
+        let gap_cut = expected.saturating_mul(3);
         let considered: Vec<i64> = iats.iter().copied().filter(|d| *d <= gap_cut).collect();
         let regular = considered
             .iter()
@@ -84,14 +84,15 @@ impl Check for SamplingRegularity {
         let mut seg_no = 0i64;
         let mut changes: Vec<(Window, i64)> = Vec::new();
         for i in 0..=f.len() {
-            let boundary = i == f.len() || f.ts[i] - start >= (seg_no + 1) * self.segment_ns;
+            let boundary =
+                i == f.len() || f.ts[i].saturating_sub(start) >= (seg_no + 1).saturating_mul(self.segment_ns);
             if boundary {
                 if i - seg_start_idx >= 8 {
                     if let Some(m) = modal_interval(&f.ts[seg_start_idx..i]) {
                         if ((m - expected).abs() as f64) > self.change_tol * expected as f64 {
                             let w = Window::new(
                                 f.ts[seg_start_idx],
-                                if i < f.len() { f.ts[i] } else { f.ts[i - 1] + m },
+                                if i < f.len() { f.ts[i] } else { f.ts[i - 1].saturating_add(m) },
                             );
                             changes.push((w, m));
                         }

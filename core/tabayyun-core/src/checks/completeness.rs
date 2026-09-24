@@ -71,12 +71,12 @@ impl Check for Completeness {
         // Leading / trailing gaps relative to the evaluation window count too.
         let mut prev = win.start;
         for &t in present.iter().chain(std::iter::once(&win.end)) {
-            if t - prev > gap_threshold {
+            if t.saturating_sub(prev) > gap_threshold {
                 gaps.push((prev, t));
             }
             prev = prev.max(t);
         }
-        let gap_total: i64 = gaps.iter().map(|(s, e)| e - s).sum();
+        let gap_total = gaps.iter().fold(0i64, |acc, (s, e)| acc.saturating_add(e.saturating_sub(*s)));
         let expected_n = (win_dur / interval as f64).round().max(1.0);
         let completeness = (present.iter().filter(|t| **t >= win.start && **t < win.end).count() as f64
             / expected_n)

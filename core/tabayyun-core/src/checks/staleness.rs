@@ -34,7 +34,7 @@ impl Staleness {
     fn threshold(&self, interval: Option<i64>) -> Result<Option<i64>> {
         let min_age = duration_param(ID, "min_age", &self.min_age)?;
         if self.max_age == "auto" {
-            Ok(interval.map(|i| (3 * i).max(min_age)))
+            Ok(interval.map(|i| i.saturating_mul(3).max(min_age)))
         } else {
             duration_param(ID, "max_age", &self.max_age).map(Some)
         }
@@ -58,7 +58,7 @@ impl Check for Staleness {
         let Some(max_age) = self.threshold(interval)? else { return Ok(out) };
         let newest = if self.ignore_quality_bad { frame.last_good_ts() } else { frame.last_ts() };
         let age = match newest {
-            Some(t) => ctx.now_ns - t,
+            Some(t) => ctx.now_ns.saturating_sub(t),
             None => ctx.window.duration(),
         };
         out.metrics.push(metric(ID, frame, "stale_age_ns", ctx.now_ns, age as f64));

@@ -93,12 +93,14 @@ fn cut(t0: i64, values: &[f64], step_ns: i64, len_ns: i64) -> Vec<Segment> {
     if n == 0 || len_ns < step_ns {
         return Vec::new();
     }
-    let bin = |ts: i64| ((ts - t0) + step_ns - 1).div_euclid(step_ns).clamp(0, n) as usize;
+    let bin =
+        |ts: i64| ts.saturating_sub(t0).saturating_add(step_ns - 1).div_euclid(step_ns).clamp(0, n) as usize;
     let expected = (len_ns / step_ns) as f64;
-    let (first_k, last_k) = (t0.div_euclid(len_ns), (t0 + (n - 1) * step_ns).div_euclid(len_ns));
+    let (first_k, last_k) =
+        (t0.div_euclid(len_ns), t0.saturating_add((n - 1).saturating_mul(step_ns)).div_euclid(len_ns));
     (first_k..=last_k)
         .filter_map(|k| {
-            let (start, end) = (k * len_ns, (k + 1) * len_ns);
+            let (start, end) = (k.saturating_mul(len_ns), (k + 1).saturating_mul(len_ns));
             let v = &values[bin(start)..bin(end)];
             let filled = v.iter().filter(|x| x.is_finite()).count() as f64;
             (filled >= MIN_COVERAGE * expected).then(|| Segment {
@@ -231,7 +233,7 @@ impl Check for SeasonalityBreak {
             }
         }
 
-        let data_end = f.ts[f.len() - 1] + step;
+        let data_end = f.ts[f.len() - 1].saturating_add(step);
         let name = period_name(p);
         for (w, items) in episodes(broken) {
             let w = Window::new(w.start.max(f.ts[0]), w.end.min(data_end));

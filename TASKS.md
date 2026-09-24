@@ -173,6 +173,16 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
       - `--ts-unit` on run, check-multi and cache write (the spec's check/profile do not exist).
       - Integer Parquet timestamp columns follow the rule too; they were read as ns.
       - One case table (`epoch_cases.json`) pins the Rust core and the API.
+- [x] **Follow-ups without a spec** (approved as fixes, 24 Sep)
+      - Timestamp arithmetic saturates everywhere (from 012); `tests/extreme_timestamps.rs`
+        runs every check at both `i64` limits. Found on the way: `Cache::write` hung on
+        `i64::MAX`, and `align` had no bin cap (now 20 million cells, bins times members, so
+        a pair keeps 10 million bins; empty beyond). Bucket and segment widths of 1 ns are
+        tested too; M4's last bucket keeps a sample at `i64::MAX`. Segment and bucket indices
+        use the exact `u64` elapsed time: saturating it made a stray sample at `i64::MIN` put
+        every later one in its own segment, silencing the segment checks.
+      - CLI reads brotli, gzip and lz4 Parquet (from 009); codecs on the CLI only, so the
+        wheel stays small; release binary 18.8 → 20.3 MB.
 
 ## Sprint 8 — login, tenants and RBAC (forecast end 29 Sep – 1 Oct)
 

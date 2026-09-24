@@ -53,7 +53,7 @@ pub fn regularise(frame: &SeriesFrame, step_ns: i64) -> (i64, Vec<f64>) {
         if !v.is_finite() || !frame.quality[i].is_usable() {
             continue;
         }
-        let k = ((frame.ts[i] - start) / step_ns) as usize;
+        let k = (frame.ts[i].saturating_sub(start) / step_ns) as usize;
         if k < n {
             sum[k] += v;
             count[k] += 1;

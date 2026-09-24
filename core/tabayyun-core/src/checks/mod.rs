@@ -52,8 +52,8 @@ impl CheckContext {
     /// batch evaluation of historical files.
     pub fn from_frame(frame: &SeriesFrame) -> Self {
         let start = frame.first_ts().unwrap_or(0);
-        let end = frame.last_ts().unwrap_or(0) + 1;
-        Self { now_ns: end - 1, window: Window::new(start, end), profile: None }
+        let last = frame.last_ts().unwrap_or(0);
+        Self { now_ns: last, window: Window::new(start, last.saturating_add(1)), profile: None }
     }
 
     pub fn with_profile(mut self, profile: Profile) -> Self {
@@ -115,8 +115,9 @@ pub(crate) fn runs_where(n: usize, mut pred: impl FnMut(usize) -> bool) -> Vec<(
 /// end of the frame).
 pub(crate) fn run_window(frame: &SeriesFrame, start: usize, end: usize, interval_ns: i64) -> Window {
     let s = frame.ts[start];
-    let e = if end < frame.len() { frame.ts[end] } else { frame.ts[end - 1] + interval_ns.max(1) };
-    Window::new(s, e.max(s + 1))
+    let e =
+        if end < frame.len() { frame.ts[end] } else { frame.ts[end - 1].saturating_add(interval_ns.max(1)) };
+    Window::new(s, e.max(s.saturating_add(1)))
 }
 
 /// Helper used by several checks: expected interval from metadata, profile, or data.
@@ -136,16 +137,18 @@ pub(crate) fn segments(frame: &SeriesFrame, segment_ns: i64) -> Vec<(usize, usiz
     if n == 0 || segment_ns <= 0 {
         return out;
     }
-    let start = frame.ts[0];
+    let (start, width) = (frame.ts[0], segment_ns as u64);
+    // Elapsed time is a `u64`: a frame starting near `i64::MIN` spans more than `i64::MAX`,
+    // and saturating there would put every later sample in a segment of its own.
+    let index = |t: i64| t.abs_diff(start) / width;
     let mut s = 0usize;
     while s < n {
-        let seg_end_ts = start + ((frame.ts[s] - start) / segment_ns + 1) * segment_ns;
-        let mut e = s;
-        while e < n && frame.ts[e] < seg_end_ts {
+        let k = index(frame.ts[s]);
+        let mut e = s + 1;
+        while e < n && index(frame.ts[e]) == k {
             e += 1;
         }
-        let e = e.max(s + 1);
-        out.push((s, e, Window::new(frame.ts[s], frame.ts[e - 1] + 1)));
+        out.push((s, e, Window::new(frame.ts[s], frame.ts[e - 1].saturating_add(1))));
         s = e;
     }
     out

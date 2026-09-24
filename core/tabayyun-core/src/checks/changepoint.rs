@@ -148,11 +148,12 @@ impl Check for Changepoint {
             return Ok(out);
         }
         // Bucket by time (median per bucket), widening the bucket if the series is very long.
+        // Elapsed times are exact `u64`s: a span can exceed `i64::MAX`.
         let (t0, t1) = (f.ts[0], f.ts[n - 1]);
-        let span = (t1 - t0).max(1);
-        let mut bucket_ns = self.bucket_ns.max(1);
-        if span / bucket_ns + 1 > self.max_buckets as i64 {
-            bucket_ns = (span as f64 / self.max_buckets as f64).ceil() as i64;
+        let span = t1.abs_diff(t0).max(1);
+        let mut bucket_ns = self.bucket_ns.max(1) as u64;
+        if span / bucket_ns >= self.max_buckets as u64 {
+            bucket_ns = (span as f64 / self.max_buckets as f64).ceil() as u64;
         }
         let buckets = (span / bucket_ns + 1) as usize;
         let mut groups: Vec<Vec<f64>> = vec![Vec::new(); buckets];
@@ -160,7 +161,7 @@ impl Check for Changepoint {
             if !f.values[i].is_finite() || !f.quality[i].is_usable() {
                 continue;
             }
-            let b = (((f.ts[i] - t0) / bucket_ns) as usize).min(buckets - 1);
+            let b = ((f.ts[i].abs_diff(t0) / bucket_ns) as usize).min(buckets - 1);
             groups[b].push(f.values[i]);
         }
         let mut xs: Vec<f64> = Vec::with_capacity(buckets);
@@ -169,7 +170,8 @@ impl Check for Changepoint {
             if !g.is_empty() {
                 g.sort_by(|a, b| a.partial_cmp(b).unwrap());
                 xs.push(quantile_f64(g, 0.5));
-                ts.push(t0 + b as i64 * bucket_ns);
+                let start = i128::from(t0) + b as i128 * i128::from(bucket_ns);
+                ts.push(start.min(i128::from(i64::MAX)) as i64);
             }
         }
         let m = xs.len();
@@ -250,7 +252,7 @@ impl Check for Changepoint {
         };
         if changes.len() > self.max_findings {
             // Level shifts are how this series behaves; one summary keeps the list actionable.
-            let span = (t1 - t0).max(1);
+            let span = t1.saturating_sub(t0).max(1);
             let mut largest: Vec<&(Window, f64, f64, f64, f64, f64, usize)> = changes.iter().collect();
             largest.sort_by(|a, b| b.3.total_cmp(&a.3));
             let w = Window::new(changes[0].0.start, t1 + 1);

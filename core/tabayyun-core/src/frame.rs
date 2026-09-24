@@ -356,7 +356,7 @@ pub fn modal_interval(ts: &[i64]) -> Option<i64> {
     }
     let mut sorted = ts.to_vec();
     sorted.sort_unstable();
-    let mut iats: Vec<i64> = sorted.windows(2).map(|w| w[1] - w[0]).filter(|d| *d > 0).collect();
+    let mut iats: Vec<i64> = crate::time::steps(&sorted).filter(|d| *d > 0).collect();
     if iats.is_empty() {
         return None;
     }

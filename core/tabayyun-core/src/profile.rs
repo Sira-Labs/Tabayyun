@@ -57,7 +57,7 @@ impl Profile {
             return p;
         }
         p.expected_interval_ns = modal_interval(&f.ts);
-        let mut iats: Vec<i64> = f.ts.windows(2).map(|w| w[1] - w[0]).collect();
+        let mut iats: Vec<i64> = crate::time::steps(&f.ts).collect();
         if !iats.is_empty() {
             iats.sort_unstable();
             p.iat_p50_ns = Some(quantile_i64(&iats, 0.5));
@@ -84,11 +84,11 @@ impl Profile {
         p.resolution = resolution(&f.values);
         p.constant_fraction = constant_fraction(&f.values, 10);
         p.linear_fraction = linear_fraction(&f.values, 6, p.resolution.unwrap_or(0.0) * 0.5);
-        let gap_cut = p.expected_interval_ns.map(|i| 3 * i).unwrap_or(i64::MAX);
+        let gap_cut = p.expected_interval_ns.map(|i| i.saturating_mul(3)).unwrap_or(i64::MAX);
         let mut rates: Vec<f64> = Vec::with_capacity(n);
         let mut diffs: Vec<f64> = Vec::with_capacity(n);
         for i in 1..n {
-            let dt = f.ts[i] - f.ts[i - 1];
+            let dt = f.ts[i].saturating_sub(f.ts[i - 1]);
             let (a, b) = (f.values[i - 1], f.values[i]);
             if dt <= 0 || dt > gap_cut || !a.is_finite() || !b.is_finite() {
                 continue;
@@ -124,7 +124,7 @@ impl Profile {
 pub fn noise_sigma(ts: &[i64], values: &[f64], gap_cut_ns: i64) -> Option<f64> {
     let mut diffs = Vec::with_capacity(values.len());
     for i in 1..values.len().min(ts.len()) {
-        let dt = ts[i] - ts[i - 1];
+        let dt = ts[i].saturating_sub(ts[i - 1]);
         if dt <= 0 || dt > gap_cut_ns || !values[i].is_finite() || !values[i - 1].is_finite() {
             continue;
         }

@@ -14,7 +14,9 @@ path = "src/main.rs"
 [dependencies]
 tabayyun-core = { path = "../tabayyun-core" }
 arrow = { workspace = true }
-parquet = { workspace = true }
+# Input files come from anywhere, so the CLI reads every codec pyarrow writes; the core and
+# the wheel only read the cache's own zstd parts and keep the workspace set.
+parquet = { workspace = true, features = ["brotli", "lz4", "flate2-zlib-rs"] }
 clap = { workspace = true }
 csv = { workspace = true }
 chrono = { workspace = true }

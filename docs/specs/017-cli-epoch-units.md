@@ -54,6 +54,12 @@ CLI (`tabayyun-cli/tests/ts_unit.rs`): `column_unit_is_uniform`, `wrong_unit_exi
 `core/tabayyun-core/tests/data/epoch_cases.json` (`test_thresholds_match_the_core`,
 `test_conversion_matches_the_core`).
 
+## Release (2026-09-24, after PR #40, release run 40)
+
+Release run 40 on `c59491f` succeeded and published the `tabayyun-api` and `tabayyun-web`
+images. No live check: the change is in the CLI only, which is not deployed, and the live API
+already reads epoch integers by ADR-0014; the shared case table pins the two together.
+
 ## Implementation edits
 
 Recorded on 2026-09-24; approved with the plan.

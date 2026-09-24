@@ -6,9 +6,16 @@
 //! series down to a slow one's rate is honest, the reverse would invent samples.
 //!
 //! `align` never invents data: a bin without a usable, finite sample is NaN, and cross checks
-//! ignore bins where a member they need is NaN.
+//! ignore bins where a member they need is NaN. A grid needing more than [`MAX_CELLS`] cells
+//! (bins times members) aligns to nothing, so the cross checks stay silent on it.
 
 use crate::frame::SeriesFrame;
+
+/// Most cells `align` builds, bins times members: 20 million, 160 MB of means. A pair gets
+/// 10 million bins (19 years of minutes), a 32-member group 625 000 (434 days of minutes). A
+/// stray far timestamp would otherwise ask for a grid across centuries; such a group aligns
+/// to nothing instead.
+pub const MAX_CELLS: usize = 20_000_000;
 
 /// Members on one grid: `columns[j][i]` is member `j`'s mean in the bin starting at `ts[i]`.
 #[derive(Debug, Clone, PartialEq)]
@@ -51,24 +58,36 @@ pub fn align(frames: &[&SeriesFrame], grid_ns: Option<i64>) -> Aligned {
     let (Some(lo), Some(hi)) = (bounds.clone().min(), bounds.max()) else {
         return empty(grid);
     };
-    let n = (hi - lo + 1) as usize;
+    let Some(n) = hi
+        .checked_sub(lo)
+        .and_then(|d| usize::try_from(d).ok())
+        .map(|d| d + 1)
+        .filter(|&n| n.saturating_mul(frames.len()) <= MAX_CELLS)
+    else {
+        return empty(grid);
+    };
     let columns = frames
         .iter()
         .map(|f| {
-            let mut sum = vec![0.0; n];
+            // Sums accumulate in the column itself, which then becomes the means.
+            let mut column = vec![0.0; n];
             let mut count = vec![0u32; n];
             for i in 0..f.len() {
                 let v = f.values[i];
                 if v.is_finite() && f.quality[i].is_usable() {
                     let k = (bin(f.ts[i]) - lo) as usize;
-                    sum[k] += v;
+                    column[k] += v;
                     count[k] += 1;
                 }
             }
-            sum.iter().zip(&count).map(|(s, &c)| if c > 0 { s / c as f64 } else { f64::NAN }).collect()
+            for (x, &c) in column.iter_mut().zip(&count) {
+                *x = if c > 0 { *x / c as f64 } else { f64::NAN };
+            }
+            column
         })
         .collect();
-    Aligned { ts: (lo..=hi).map(|k| k * grid).collect(), grid_ns: grid, columns }
+    // The first bin can start before `i64::MIN`; its start clamps there.
+    Aligned { ts: (lo..=hi).map(|k| k.saturating_mul(grid)).collect(), grid_ns: grid, columns }
 }
 
 #[cfg(test)]
@@ -140,5 +159,16 @@ mod tests {
         assert_eq!((a.grid_ns, a.len(), a.columns.len()), (0, 0, 1));
         let empty = frame("e", &[], &[]);
         assert!(align(&[&empty], Some(MIN)).is_empty());
+    }
+
+    #[test]
+    fn the_cap_counts_cells_across_members() {
+        // Just over a third of the cap in bins: fine for one member, too many for three.
+        let bins = (MAX_CELLS / 3 + 1) as i64;
+        let x = frame("x", &[0, (bins - 1) * MIN], &[1.0, 2.0]);
+        let a = align(&[&x], Some(MIN));
+        assert_eq!((a.len(), a.columns[0][0], a.columns[0][a.len() - 1]), (bins as usize, 1.0, 2.0));
+        let a = align(&[&x, &x, &x], Some(MIN));
+        assert_eq!((a.grid_ns, a.len(), a.columns.len()), (MIN, 0, 3));
     }
 }

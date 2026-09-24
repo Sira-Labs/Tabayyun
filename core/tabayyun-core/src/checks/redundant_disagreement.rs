@@ -285,7 +285,7 @@ impl RedundantDisagreement {
                 if !d.is_finite() {
                     continue;
                 }
-                let start = b.ts.div_euclid(NS_PER_DAY) * NS_PER_DAY;
+                let start = b.ts.div_euclid(NS_PER_DAY).saturating_mul(NS_PER_DAY);
                 match day {
                     Some((s, v)) if s == start => day = Some((s, v.max(d.abs()))),
                     _ => {
