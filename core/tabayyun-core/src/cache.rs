@@ -13,6 +13,7 @@
 use crate::error::{Error, Result};
 use crate::frame::{SeriesFrame, SeriesMeta};
 use crate::quality::Quality;
+use crate::time::{before_end, END_OF_TIME};
 use arrow::array::{
     Array, ArrayRef, Float64Array, RecordBatch, StringArray, TimestampNanosecondArray, UInt8Array,
 };
@@ -69,7 +70,9 @@ pub struct WriteReport {
     pub rows: usize,
     /// First timestamp written (ns), 0 when nothing was written.
     pub start_ns: i64,
-    /// Last timestamp written + 1 ns, 0 when nothing was written.
+    /// Last timestamp written + 1 ns, 0 when nothing was written. A last sample at `i64::MAX`
+    /// gives [`END_OF_TIME`], which as a range end has no end, so `[start_ns, end_ns)` always
+    /// holds every row written.
     pub end_ns: i64,
 }
 
@@ -247,8 +250,9 @@ impl Cache {
         })
     }
 
-    /// Read series `[start_ns, end_ns)`. Every requested id is returned in request order, with
-    /// an empty frame when the cache holds nothing for it.
+    /// Read series `[start_ns, end_ns)`; an `end_ns` of [`END_OF_TIME`] has no end. Every
+    /// requested id is returned in request order, with an empty frame when the cache holds
+    /// nothing for it.
     pub fn read(
         &self,
         layer: &str,
@@ -277,7 +281,7 @@ impl Cache {
                 .map(|id| SeriesFrame::with_default_quality(SeriesMeta::new(*id), vec![], vec![]))
                 .collect::<Result<Vec<_>>>()
         };
-        if series_ids.is_empty() || end_ns <= start_ns {
+        if series_ids.is_empty() || !before_end(start_ns, end_ns) {
             return Ok((empty(series_ids)?, stats));
         }
         let wanted: BTreeSet<&str> = series_ids.iter().copied().collect();
@@ -436,7 +440,7 @@ fn row_group_may_match(rg: &RowGroupMetaData, wanted: &BTreeSet<&str>, start_ns:
         match (col.column_path().string().as_str(), col.statistics()) {
             ("ts", Some(Statistics::Int64(s))) => {
                 if let (Some(lo), Some(hi)) = (s.min_opt(), s.max_opt()) {
-                    if *hi < start_ns || *lo >= end_ns {
+                    if *hi < start_ns || !before_end(*lo, end_ns) {
                         return false;
                     }
                 }
@@ -508,7 +512,7 @@ fn decode_part<'a>(
             .and_then(|c| c.as_any().downcast_ref::<TimestampNanosecondArray>());
         for i in 0..batch.num_rows() {
             let t = ts.value(i);
-            if t < start_ns || t >= end_ns {
+            if t < start_ns || !before_end(t, end_ns) {
                 continue;
             }
             let Some(list) = rows.get_mut(ids.value(i)) else { continue };
@@ -613,7 +617,8 @@ fn month_start_ns(y: i64, m: u32) -> i64 {
 fn months_between(start_ns: i64, end_ns: i64) -> Vec<(i64, u32)> {
     let mut out = Vec::new();
     let (mut y, mut m) = year_month(start_ns);
-    let last = year_month(end_ns.saturating_sub(1));
+    // The last instant in the range: the one before `end_ns`, or `i64::MAX` itself at END_OF_TIME.
+    let last = year_month(if end_ns == END_OF_TIME { end_ns } else { end_ns.saturating_sub(1) });
     while (y, m) <= last {
         out.push((y, m));
         if m == 12 {
@@ -698,9 +703,24 @@ mod tests {
             SeriesFrame::with_default_quality(SeriesMeta::new("s"), ts.clone(), vec![1.0, 2.0, 3.0]).unwrap();
         let report = cache.write("raw", "src", &f).unwrap();
         assert_eq!((report.rows, report.files.len()), (3, 3));
-        assert_eq!((report.start_ns, report.end_ns), (i64::MIN, i64::MAX));
-        let got = &cache.read("raw", "src", &["s"], i64::MIN, i64::MAX).unwrap()[0];
-        assert_eq!(got.ts, vec![i64::MIN, 0], "the window is half-open");
+        // The report's end saturates to `END_OF_TIME`, which reads back every sample.
+        assert_eq!((report.start_ns, report.end_ns), (i64::MIN, END_OF_TIME));
+        let got = &cache.read("raw", "src", &["s"], report.start_ns, report.end_ns).unwrap()[0];
+        assert_eq!(got.ts, ts, "an end at END_OF_TIME has no end");
+        let last = &cache.read("raw", "src", &["s"], i64::MAX, END_OF_TIME).unwrap()[0];
+        assert_eq!(last.ts, vec![i64::MAX], "[i64::MAX, END_OF_TIME) holds i64::MAX");
+    }
+
+    #[test]
+    fn ends_below_end_of_time_stay_exclusive() {
+        let (_dir, cache) = temp_store();
+        let ts = vec![i64::MAX - 2, i64::MAX - 1, i64::MAX];
+        let f = SeriesFrame::with_default_quality(SeriesMeta::new("s"), ts, vec![1.0, 2.0, 3.0]).unwrap();
+        cache.write("raw", "src", &f).unwrap();
+        let got = &cache.read("raw", "src", &["s"], 0, i64::MAX - 1).unwrap()[0];
+        assert_eq!(got.ts, vec![i64::MAX - 2]);
+        let none = &cache.read("raw", "src", &["s"], i64::MAX - 1, i64::MAX - 1).unwrap()[0];
+        assert!(none.is_empty(), "an empty window below END_OF_TIME reads nothing");
     }
 
     #[test]

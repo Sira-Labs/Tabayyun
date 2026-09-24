@@ -57,6 +57,16 @@ impl TsUnit {
     }
 }
 
+/// The end of time as a range end. Ranges are half-open `[start, end)` everywhere, but no
+/// instant follows `i64::MAX`, so an end there can only mean "no end": `[start, END_OF_TIME)`
+/// includes `i64::MAX` itself. The cache's range checks go through [`before_end`] (issue #42).
+pub const END_OF_TIME: i64 = i64::MAX;
+
+/// Whether `t` lies before the half-open range end `end`; an end at [`END_OF_TIME`] has none.
+pub fn before_end(t: i64, end: i64) -> bool {
+    t < end || end == END_OF_TIME
+}
+
 /// Differences between consecutive timestamps. Timestamps are any `i64` (typed Arrow columns
 /// are not range-checked), so differences saturate at the `i64` limits instead of overflowing.
 pub fn steps(ts: &[i64]) -> impl Iterator<Item = i64> + '_ {
@@ -220,6 +230,13 @@ pub fn format_duration(ns: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn range_ends_are_exclusive_except_end_of_time() {
+        assert!(before_end(9, 10) && !before_end(10, 10) && !before_end(11, 10));
+        assert!(!before_end(i64::MAX, i64::MAX - 1));
+        assert!(before_end(i64::MAX, END_OF_TIME) && before_end(i64::MIN, END_OF_TIME));
+    }
 
     /// The table shared with `api/tests/test_ts_unit.py`.
     fn cases() -> serde_json::Value {
