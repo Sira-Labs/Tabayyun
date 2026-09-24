@@ -87,11 +87,15 @@ class Plan:
 
 
 async def create_dataset_run(session: AsyncSession, dataset_id: uuid.UUID, *, now: datetime) -> Run:
-    """Queue a run of the dataset over its window resolved at `now`, in the caller's transaction."""
+    """Queue a run of the dataset over its window resolved at `now`, in the caller's transaction.
+
+    Raises DatasetNotFoundError, or DatasetError when that window lies outside the core's range.
+    """
     dataset = await datasets_service.get_dataset(session, dataset_id)
     if dataset is None:
         raise DatasetNotFoundError(str(dataset_id))
     start, end = datasets_service.resolve_window(dataset.window_policy, now)
+    datasets_service.check_core_range(datetime_to_ns(start), datetime_to_ns(end))
     run = Run(
         org_id=DEFAULT_ORG_ID,
         workspace_id=DEFAULT_WORKSPACE_ID,

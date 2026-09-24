@@ -21,7 +21,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Dataset, DatasetSeries, Series
 from tabayyun.services.pagination import decode_keyset, encode_keyset
-from tabayyun.services.timeconv import parse_time
+from tabayyun.services.timeconv import (
+    CORE_NS_MAX,
+    CORE_NS_MIN,
+    datetime_to_ns,
+    ns_to_datetime,
+    parse_time,
+    parse_time_ns,
+)
 
 log = structlog.get_logger()
 
@@ -79,14 +86,36 @@ def window_policy(window: dict[str, Any]) -> dict[str, str]:
             raise DatasetError("window", str(exc)) from exc
         if start >= end:
             raise DatasetError("window", "start must be before end")
+        # Both the requested window and the one stored (to the microsecond, which runs use) must
+        # hold an instant the core can represent: rounding can move either bound across a limit.
+        check_core_range(parse_time_ns(str(window["start"])), parse_time_ns(str(window["end"])))
+        check_core_range(datetime_to_ns(start), datetime_to_ns(end))
         return {"start": start.isoformat(), "end": end.isoformat()}
     raise DatasetError("window", "give either start and end, or last")
+
+
+def _outside_core_range() -> DatasetError:
+    first, last = ns_to_datetime(CORE_NS_MIN).isoformat(), ns_to_datetime(CORE_NS_MAX).isoformat()
+    return DatasetError("window", f"window lies outside the supported range {first} to {last}")
+
+
+def check_core_range(start_ns: int, end_ns: int) -> None:
+    """Reject a `[start_ns, end_ns)` holding no instant the core can represent (`i64` ns).
+
+    A window that only reaches past the range is kept: runs clamp it to the core's range
+    (issue #42). One wholly outside would clamp to an empty window at a limit.
+    """
+    if start_ns > CORE_NS_MAX or end_ns <= CORE_NS_MIN:
+        raise _outside_core_range()
 
 
 def resolve_window(policy: dict[str, Any], now: datetime) -> tuple[datetime, datetime]:
     """The concrete `[start, end)` of a stored policy at `now`."""
     if "last" in policy:
-        return now - parse_last(policy["last"]), now
+        try:
+            return now - parse_last(policy["last"]), now
+        except OverflowError as exc:  # the start falls before year 1, far below the core's range
+            raise _outside_core_range() from exc
     return parse_time(policy["start"]), parse_time(policy["end"])
 
 

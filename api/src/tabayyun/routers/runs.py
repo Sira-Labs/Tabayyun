@@ -21,6 +21,7 @@ from tabayyun.db import get_session
 from tabayyun.services import dataset_runs
 from tabayyun.services import runs as runs_service
 from tabayyun.services import series as series_service
+from tabayyun.services.datasets import DatasetError
 from tabayyun.services.runs import MAX_UPLOAD_BYTES, RunParams, UploadError
 from tabayyun.services.timeconv import CORE_NS_MAX, CORE_NS_MIN, ns_to_datetime, parse_time
 
@@ -94,6 +95,10 @@ async def _create_dataset_run(
         run = await dataset_runs.create_dataset_run(session, body.dataset_id, now=now)
     except dataset_runs.DatasetNotFoundError as exc:
         raise HTTPException(status_code=404, detail="dataset not found") from exc
+    except DatasetError as exc:  # the window resolved at `now` lies outside the core's range
+        raise HTTPException(
+            status_code=422, detail=[{"loc": ["body", "now"], "msg": exc.message, "type": "value_error"}]
+        ) from exc
     if request.app.state.settings.inline_jobs:
         await session.commit()
         background.add_task(

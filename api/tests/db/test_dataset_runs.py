@@ -193,6 +193,14 @@ async def test_request_errors(client, setup):
     assert (await client.post("/api/runs", json={"dataset_id": "nope"})).status_code == 422
     r = await client.post("/api/runs", json={"dataset_id": setup["dataset"], "now": "someday"})
     assert r.status_code == 422 and r.json()["detail"][0]["loc"] == ["body", "now"]
+    # A relative window resolved at a `now` far past 2262 lies wholly outside the core's range.
+    body = {"name": "future", "series_ids": [setup["a"]], "window": {"last": "48h"}}
+    future = (await client.post("/api/datasets", json=body)).json()["id"]
+    r = await client.post("/api/runs", json={"dataset_id": future, "now": "2300-01-01T00:00:00Z"})
+    assert r.status_code == 422 and r.json()["detail"][0]["loc"] == ["body", "now"]
+    assert "outside the supported range" in r.json()["detail"][0]["msg"]
+    r = await client.post("/api/runs", json={"dataset_id": future, "now": "0001-01-01T00:00:00Z"})
+    assert r.status_code == 422 and r.json()["detail"][0]["loc"] == ["body", "now"]
     r = await client.post("/api/runs", content=b"{", headers={"content-type": "application/json"})
     assert r.status_code == 422
     r = await client.post("/api/runs", data={"series_id": "x"})
