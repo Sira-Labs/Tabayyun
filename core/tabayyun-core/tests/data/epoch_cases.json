@@ -1,0 +1,31 @@
+{
+  "_doc": "Epoch-integer timestamps (ADR-0014, spec 017). Read by core/tabayyun-core/src/time.rs tests and api/tests/test_ts_unit.py so the CLI and the API cannot drift apart. `infer`: median |value| -> unit, thresholds as half-open ranges. `convert`: value in unit -> ns since the epoch, or null when it overflows or falls outside [1971-01-01, 2200-01-01).",
+  "infer": [
+    {"median_abs": 0, "unit": "s"},
+    {"median_abs": 1700000000, "unit": "s"},
+    {"median_abs": 99999999999, "unit": "s"},
+    {"median_abs": 100000000000, "unit": "ms"},
+    {"median_abs": 1700000000000, "unit": "ms"},
+    {"median_abs": 99999999999999, "unit": "ms"},
+    {"median_abs": 100000000000000, "unit": "us"},
+    {"median_abs": 1700000000000000, "unit": "us"},
+    {"median_abs": 99999999999999999, "unit": "us"},
+    {"median_abs": 100000000000000000, "unit": "ns"},
+    {"median_abs": 1700000000000000000, "unit": "ns"}
+  ],
+  "convert": [
+    {"value": 1700000000, "unit": "s", "ns": 1700000000000000000},
+    {"value": 1700000000000, "unit": "ms", "ns": 1700000000000000000},
+    {"value": 1700000000000000, "unit": "us", "ns": 1700000000000000000},
+    {"value": 1700000000000000000, "unit": "ns", "ns": 1700000000000000000},
+    {"value": 31536000, "unit": "s", "ns": 31536000000000000},
+    {"value": 31535999, "unit": "s", "ns": null},
+    {"value": 7258118399, "unit": "s", "ns": 7258118399000000000},
+    {"value": 7258118400, "unit": "s", "ns": null},
+    {"value": 1700000000000, "unit": "s", "ns": null},
+    {"value": 1700000000, "unit": "ns", "ns": null},
+    {"value": 1700000000, "unit": "ms", "ns": null},
+    {"value": 9223372036854775807, "unit": "s", "ns": null},
+    {"value": -1700000000, "unit": "s", "ns": null}
+  ]
+}

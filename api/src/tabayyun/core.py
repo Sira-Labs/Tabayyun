@@ -20,8 +20,9 @@ SeriesKind = Literal["measurement", "counter", "setpoint", "status"]
 TsUnit = Literal["auto", "s", "ms", "us", "ns"]
 
 # Epoch integer timestamps (ADR-0014): the unit is declared or inferred from the magnitude of
-# the median value with the same thresholds as the CLI's `parse_ts`
-# (core/tabayyun-cli/src/main.rs), then checked against a plausible date range.
+# the median value with the same thresholds as `tabayyun_core::time::infer_epoch_unit`, then
+# checked against a plausible date range. `core/tabayyun-core/tests/data/epoch_cases.json` pins
+# both sides (spec 017).
 NS_PER_UNIT = {"s": 1_000_000_000, "ms": 1_000_000, "us": 1_000, "ns": 1}
 UNIT_NAMES = {"s": "seconds", "ms": "milliseconds", "us": "microseconds", "ns": "nanoseconds"}
 EPOCH_INT_MIN_NS = int(datetime(1971, 1, 1, tzinfo=UTC).timestamp()) * 1_000_000_000
@@ -42,7 +43,7 @@ class ParsedCsv:
 
 
 def infer_epoch_unit(magnitude: int) -> str:
-    """Unit of an epoch integer from its magnitude (same thresholds as the CLI)."""
+    """Unit of an epoch integer from its magnitude (same thresholds as the Rust core)."""
     if magnitude < 100_000_000_000:
         return "s"
     if magnitude < 100_000_000_000_000:

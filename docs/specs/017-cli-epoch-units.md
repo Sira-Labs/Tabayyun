@@ -17,11 +17,12 @@ CI or upload it in the browser.
 
 ## Interface
 
-- `--ts-unit auto|s|ms|us|ns` (default `auto`) on `check`, `profile` and `check-multi`.
+- `--ts-unit auto|s|ms|us|ns` (default `auto`) on `run`, `check-multi` and `cache write` (the
+  commands that read a file; see the edits).
 - `tabayyun_core::time::{infer_epoch_unit(median_abs: i64) -> TsUnit, epoch_to_ns(v, unit)
   -> Option<i64>, PLAUSIBLE_RANGE_NS}`, used by the CLI; the Python API keeps its own copy
   and a shared test table asserts both agree.
-- JSON output gains `ts_unit` (`s`, `ms`, `us`, `ns` or `text`).
+- JSON output of `run` and `check-multi` gains `ts_unit` (`s`, `ms`, `us`, `ns` or `text`).
 
 ## Behaviour
 
@@ -36,19 +37,41 @@ CI or upload it in the browser.
 
 ## Acceptance criteria
 
-- [ ] Under `auto`, an integer column with median \|value\| below 1e11 is read as seconds in
+- [x] Under `auto`, an integer column with median \|value\| below 1e11 is read as seconds in
       every row: a stray cell that per-cell inference would have read as milliseconds
       (e.g. 1 700 000 000 000) is read as seconds too, falls outside the plausible range and
       exits 2 naming its row.
-- [ ] A declared wrong unit that lands outside the range exits 2 with the message.
-- [ ] The shared table of (value, unit) → ns cases passes in Rust and in `api/tests`.
-- [ ] `ts_unit` appears in the CLI JSON output.
+- [x] A declared wrong unit that lands outside the range exits 2 with the message.
+- [x] The shared table of (value, unit) → ns cases passes in Rust and in `api/tests`.
+- [x] `ts_unit` appears in the CLI JSON output.
 
 ## Test cases
 
-Unit (`time::tests`): `infer_thresholds`, `range_check`. CLI (`tabayyun-cli` tests):
-`column_unit_is_uniform`, `wrong_unit_exits_2`. API: `tests/test_ts_unit.py` reads the shared
-table from `core/tabayyun-core/tests/data/epoch_cases.json`.
+Unit (`time::tests`): `infer_thresholds`, `range_check`, `column_takes_one_unit_from_its_median`.
+CLI (`tabayyun-cli/tests/ts_unit.rs`): `column_unit_is_uniform`, `wrong_unit_exits_2`,
+`ts_unit_in_output`, `mixed_text_and_integers_exit_2`, `parquet_integer_seconds`. API:
+`tests/test_ts_unit.py` reads the shared table from
+`core/tabayyun-core/tests/data/epoch_cases.json` (`test_thresholds_match_the_core`,
+`test_conversion_matches_the_core`).
+
+## Implementation edits
+
+Recorded on 2026-09-24; approved with the plan.
+
+- The spec named CLI commands `check` and `profile`; the CLI has `run` (with `--profile`),
+  `check-multi` and `cache write`, which all read files, so `--ts-unit` is on those three.
+- Parquet: an `Int64` timestamp column was read as raw nanoseconds, the same 1970 trap as CSV
+  integers before ADR-0014; it now follows the same rule. Typed timestamp columns keep their
+  own unit, reported as `ts_unit`.
+- Exit code 2 is shared with clap's usage errors: both mean the input is wrong, and the
+  message says which. Other errors still exit 1.
+- The ingest-time column follows the same rule with its own inference, as in the API. An empty
+  integer column reads as nanoseconds, as the API's does.
+- The median is exact in Rust (lower middle for an even count) and approximate in the API
+  (`pc.approximate_median`); they can only differ for a column whose median sits on a
+  threshold, which the range check then catches.
+- The API test that scraped the thresholds from the CLI's `parse_ts` source is replaced by
+  the shared table; `parse_ts` is now `parse_text_ts` and no longer reads integers.
 
 ## Out of scope
 

@@ -48,6 +48,9 @@ All notable changes to this project are documented here. The format follows
 - `tby.physical_range` reports one finding per episode of nearby excursions with the exact
   count, and one summary above 20 episodes, instead of one finding per excursion (spec 016).
   Open findings of the old shape do not merge with the new ones.
+- The CLI reads epoch-integer timestamps in one unit per column (`--ts-unit`, inferred from the
+  median otherwise) and exits 2 on instants outside 1971–2199, as the API does; integer Parquet
+  timestamp columns are no longer taken as nanoseconds (spec 017, ADR-0014).
 - `TABAYYUN_CACHE_DIR` is now `TABAYYUN_CACHE_URL` (the old name is still accepted).
 - Checks are Rust kernels without Polars in the core (ADR-0015 supersedes ADR-0002).
 

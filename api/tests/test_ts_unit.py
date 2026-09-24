@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import re
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pyarrow as pa
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -15,7 +16,10 @@ from tabayyun.settings import Settings
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
 FACTOR = {"s": 1, "ms": 1_000, "us": 1_000_000, "ns": 1_000_000_000}
-CLI_MAIN = Path(__file__).resolve().parents[2] / "core" / "tabayyun-cli" / "src" / "main.rs"
+# Shared with `tabayyun_core::time` tests (spec 017): the CLI and the API read epoch integers alike.
+EPOCH_CASES = (
+    Path(__file__).resolve().parents[2] / "core" / "tabayyun-core" / "tests" / "data" / "epoch_cases.json"
+)
 
 
 def epoch_csv(unit: str, *, hours: int = 48, start: datetime = START) -> bytes:
@@ -72,15 +76,27 @@ def test_pre_1971_epoch_integers_need_text():
         core.read_csv(epoch_csv("s", start=datetime(1970, 6, 1, tzinfo=UTC)), "ts", "value", None)
 
 
-def test_thresholds_match_the_cli():
-    """The API infers units with the same magnitude thresholds as `tabayyun` (CLI parse_ts)."""
-    source = CLI_MAIN.read_text()
-    body = source[source.index("fn parse_ts") :]
-    thresholds = [int(t.replace("_", "")) for t in re.findall(r"x if x < ([\d_]+)", body)[:3]]
-    assert thresholds == [100_000_000_000, 100_000_000_000_000, 100_000_000_000_000_000]
-    for limit, below, at in zip(thresholds, ["s", "ms", "us"], ["ms", "us", "ns"], strict=True):
-        assert core.infer_epoch_unit(limit - 1) == below
-        assert core.infer_epoch_unit(limit) == at
+def _cases() -> dict:
+    """The (median → unit) and (value, unit → ns) table shared with the Rust core."""
+    return json.loads(EPOCH_CASES.read_text())
+
+
+def test_thresholds_match_the_core():
+    """The API infers units with the core's thresholds, boundaries included (shared table)."""
+    for case in _cases()["infer"]:
+        assert core.infer_epoch_unit(case["median_abs"]) == case["unit"], case
+
+
+def test_conversion_matches_the_core():
+    """Each shared (value, unit) case converts to the same ns, or is refused in both."""
+    for case in _cases()["convert"]:
+        column = pa.array([case["value"]], type=pa.int64())
+        if case["ns"] is None:
+            with pytest.raises(core.TimestampUnitError):
+                core.epoch_to_ns(column, "ts", case["unit"])
+        else:
+            ns, unit = core.epoch_to_ns(column, "ts", case["unit"])
+            assert (ns.to_pylist(), unit) == ([case["ns"]], case["unit"]), case
 
 
 async def test_stateless_endpoint_accepts_ts_unit():
