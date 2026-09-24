@@ -68,9 +68,13 @@ Entry points (links that build the URL):
   - It reuses S9-5's M4 kernel and cache reads, one call instead of eight.
 - `GET /api/series-groups/{id}/residual?from=&to=&width_px=`
   - For a `balance` group, or any group with exactly two members.
-  - The members are aligned on spec 008's grid. The residual r = Σin − Σout (balance) or
-    A − B (pair) is computed per bin from raw aligned values, then M4-downsampled on the
-    same bins as the chart.
+  - The members are aligned on spec 008's grid: each member's value in a grid bin is the
+    mean of its usable (good or uncertain), finite raw samples there, NaN when there are
+    none (the same `align` as the checks).
+  - The residual r = Σin − Σout (balance) or A − B (pair) is computed only for grid bins
+    where every member has a value, as `tby.balance_residual` does. Incomplete bins are
+    skipped and do not suppress the others. The result is then M4-downsampled on the same
+    bins as the chart.
   - Response:
     ```
     {kind: "balance" | "pair", grid_ns,
@@ -80,7 +84,8 @@ Entry points (links that build the URL):
     ```
   - `band` is `loss_min·Σin` and `loss_max·Σin` from the group's params, or the
     `tby.balance_residual` defaults, as per-bin minimum and maximum. It is null for pairs.
-  - `missing` lists members without data in the window.
+  - `missing` lists members with no usable, finite raw sample anywhere in the window. When it
+    is not empty, `ts` and `residual` are empty.
 - Findings for the view come from the existing `GET /api/findings?series_id=…&since=&until=`,
   one call per series. Cross-series findings are attached to a member (specs 009–011), so
   these calls return them too.
@@ -129,8 +134,8 @@ grid bin, plus Σin per bin for the band. It is pure, and uses the same `align` 
 5. **Residual lane.** With `group` set to a balance or a two-member group, a lane under the
    plot shows the residual with a zero line. For balances it also shows the loss band as a
    uPlot band.
-   - If a member is missing in the window, the lane says which member, and no residual is
-     drawn.
+   - If a member has no usable value anywhere in the window (`missing`), the lane names it
+     and no residual is drawn. Gaps in single bins only leave gaps in the residual line.
    - Groups of other kinds with three or more members get no residual lane.
 6. **Findings.**
    - Each series' findings in the window are shaded in its lane, in the series colour.
@@ -202,7 +207,10 @@ grid bin, plus Σin per bin for the band. It is pure, and uses the same `align` 
   - `chart_rejects_count_and_unknown_ids`;
   - `residual_balance_band_and_episode`;
   - `residual_pair_no_band`;
-  - `residual_missing_member`.
+  - `residual_missing_member` (a member without usable data in the window empties the
+    residual and is listed);
+  - `residual_skips_incomplete_bins` (a gap in one member leaves a gap in the residual, the
+    other bins keep their values; bad-quality samples do not count).
 - **Web** (Vitest, `web/src/__tests__/compare.*.test.ts`):
   - `axis_groups_by_unit` (1, 2 and 3 units);
   - `normalise_modes` (range with and without limits, z, index refusal on x₀ ≤ 0 and on a
