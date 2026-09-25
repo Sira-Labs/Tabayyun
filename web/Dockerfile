@@ -12,4 +12,8 @@ RUN pnpm build
 FROM caddy:2-alpine AS web
 COPY deploy/caddy/Caddyfile /etc/caddy/Caddyfile
 COPY --from=build /app/dist /srv
+# /version.json names the commit this image was built from; the release workflow reads it to
+# confirm a deploy went live. After the SPA build so a new commit keeps the build cached.
+ARG TABAYYUN_COMMIT=unknown
+RUN printf '{"commit":"%s"}\n' "$TABAYYUN_COMMIT" > /srv/version.json
 EXPOSE 80

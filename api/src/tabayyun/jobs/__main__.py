@@ -28,7 +28,13 @@ async def main() -> None:
         await engine.dispose()
     if revision is None:
         raise SystemExit("worker: database unreachable, not starting")
-    log.info("worker.start", version=__version__, revision=revision, concurrency=settings.worker_concurrency)
+    log.info(
+        "worker.start",
+        version=__version__,
+        commit=settings.commit,
+        revision=revision,
+        concurrency=settings.worker_concurrency,
+    )
     try:
         async with app.open_async():
             await app.run_worker_async(concurrency=settings.worker_concurrency)

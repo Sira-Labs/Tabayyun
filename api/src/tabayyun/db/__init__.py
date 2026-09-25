@@ -88,6 +88,28 @@ async def check_db(engine: AsyncEngine) -> str:
     return DB_OK
 
 
+async def worker_commits(engine: AsyncEngine, application_name: str) -> list[str] | None:
+    """Commits of the workers connected to this database, or None when it does not answer.
+
+    Read from the `<application_name>/<commit>` names the worker sets on its connections
+    (`tabayyun.jobs.worker_application_name`); a worker without a commit is not listed.
+    """
+    try:
+        async with asyncio.timeout(DB_HEALTH_TIMEOUT_S), engine.connect() as conn:
+            rows = await conn.execute(
+                text(
+                    "SELECT DISTINCT application_name FROM pg_stat_activity "
+                    "WHERE datname = current_database() AND application_name LIKE :prefix"
+                ),
+                {"prefix": f"{application_name}/%"},
+            )
+            names = rows.scalars().all()
+    except (SQLAlchemyError, OSError, TimeoutError) as exc:
+        log.warning("db.workers_unknown", error=_error_line(exc))
+        return None
+    return sorted(name.split("/", 1)[1] for name in names)
+
+
 async def current_revision(engine: AsyncEngine) -> str | None:
     """Alembic revision stamped in the database, or None when it has never been migrated."""
     from alembic.runtime.migration import MigrationContext

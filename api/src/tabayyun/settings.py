@@ -14,6 +14,11 @@ class Settings(BaseSettings):
 
     env: str = Field(default="dev", description="dev | test | prod")
     log_level: str = "INFO"
+    commit: str | None = Field(
+        default=None,
+        description="Git commit the image was built from; the image build sets it, and the "
+        "release workflow compares it after a deploy.",
+    )
     database_url: str = Field(
         default="postgresql+psycopg://tabayyun:tabayyun@localhost:5432/tabayyun",
         description="SQLAlchemy async URL. Override in every non-dev environment.",

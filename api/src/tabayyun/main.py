@@ -13,7 +13,8 @@ import structlog
 from fastapi import FastAPI
 
 from tabayyun import __version__
-from tabayyun.db import DB_OK, check_db, guard_schema, make_engine, make_session_factory
+from tabayyun.db import DB_OK, check_db, guard_schema, make_engine, make_session_factory, worker_commits
+from tabayyun.jobs.names import WORKER_APPLICATION_NAME
 from tabayyun.routers import checks, datasets, findings, groups, runs, series, sources
 from tabayyun.services import runs as runs_service
 from tabayyun.services.cache import RunCache
@@ -32,7 +33,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         """Startup: schema guard; shutdown: dispose the engine."""
-        log.info("api.start", env=settings.env, version=__version__)
+        log.info("api.start", env=settings.env, version=__version__, commit=settings.commit)
         # Exits with code 3 on a schema mismatch; an unreachable database only degrades /healthz.
         app.state.schema_revision = await guard_schema(engine)
         yield
@@ -72,9 +73,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok", "db": db, "queue": queue}
 
     @app.get("/api/version", tags=["ops"])
-    async def version() -> dict[str, str | None]:
-        """Build version, environment and the schema revision seen at startup."""
-        return {"version": __version__, "env": settings.env, "schema_revision": app.state.schema_revision}
+    async def version() -> dict[str, Any]:
+        """Build version and commit, environment, the schema revision seen at startup, and the
+        commits of the connected workers (null when the database does not answer)."""
+        return {
+            "version": __version__,
+            "commit": settings.commit,
+            "env": settings.env,
+            "schema_revision": app.state.schema_revision,
+            "workers": await worker_commits(engine, WORKER_APPLICATION_NAME),
+        }
 
     return app
 

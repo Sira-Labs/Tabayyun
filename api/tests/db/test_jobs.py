@@ -5,11 +5,14 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from httpx import ASGITransport, AsyncClient
+
 from tabayyun.db import make_engine, make_session_factory
 from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Run, Upload
 from tabayyun.jobs import app as jobs_app
-from tabayyun.jobs import libpq_conninfo
+from tabayyun.jobs import libpq_conninfo, make_app, worker_application_name
 from tabayyun.jobs.names import REAP_STALE_RUNS_TASK, RUN_CHECKS_TASK
+from tabayyun.main import create_app
 from tabayyun.services import runs as runs_service
 from tabayyun.settings import Settings
 
@@ -65,6 +68,26 @@ def test_libpq_conninfo_strips_the_sqlalchemy_driver():
         libpq_conninfo("postgresql+psycopg://u:p%40ss@db:5432/tabayyun")
         == "postgresql://u:p%40ss@db:5432/tabayyun"
     )
+
+
+def test_worker_application_name_carries_the_commit():
+    """The worker names its connections after the commit it runs, when it knows it."""
+    assert worker_application_name("c0ffee1") == "tabayyun-worker/c0ffee1"
+    assert worker_application_name(None) == "tabayyun-worker"
+
+
+async def test_version_lists_the_commits_of_connected_workers(db_url):
+    """A connected worker's commit shows up in /api/version (the release workflow checks it)."""
+    worker = make_app(Settings(env="test", database_url=db_url, commit="c0ffee1"))
+    api = create_app(Settings(env="test", database_url=db_url))
+    try:
+        async with worker.open_async():
+            await worker.connector.execute_query_one_async("SELECT 1 AS one")
+            async with AsyncClient(transport=ASGITransport(app=api), base_url="http://test") as c:
+                workers = (await c.get("/api/version")).json()["workers"]
+        assert "c0ffee1" in workers
+    finally:
+        await api.state.engine.dispose()
 
 
 def test_unused_uuid_helper_is_valid():

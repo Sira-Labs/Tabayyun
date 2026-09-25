@@ -130,8 +130,20 @@ repository → Settings → Secrets and variables → Actions:
 | secret | `CAPROVER_APP_TOKEN_WEB` | app token from the web app's Deployment tab |
 | variable | `CAPROVER_APP_WORKER` | `tabayyun-worker` (optional, default) |
 | secret | `CAPROVER_APP_TOKEN_WORKER` | app token from the worker app; the worker deploy step is skipped while it is unset |
+| variable | `CAPROVER_WEB_URL` | public URL of the web app, e.g. `https://tabayyun.example.com`; enables the rollout check below |
 
-The job is skipped until `CAPROVER_SERVER` exists. Images are public on GHCR, so CapRover
+The job is skipped until `CAPROVER_SERVER` exists.
+
+CapRover accepts a deploy before it pulls the image, so the deploy steps succeed even when
+the pull fails (a private package, a wrong image name) or the new container never starts.
+With `CAPROVER_WEB_URL` set, the job then waits up to ten minutes until
+`<url>/version.json` (web image) and `<url>/api/version` (api image) both report the
+commit being released, and fails otherwise; the app's deployment log in CapRover then shows
+why. Both images carry the commit they were built from (`TABAYYUN_COMMIT`). The worker has no
+HTTP endpoint: it names its database connections `tabayyun-worker/<commit>`, and
+`/api/version` lists the commits of the connected workers under `workers`. When the worker
+was deployed, the check also waits for the released commit to appear there. It shows that a
+worker on that commit is connected, not that the old one has stopped. Images are public on GHCR, so CapRover
 needs no registry credentials; if the repository ever becomes private, add the registry
 under CapRover → Cluster → Docker Registries first.
 
