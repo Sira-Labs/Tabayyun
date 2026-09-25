@@ -71,7 +71,8 @@ async def check_login(engine: AsyncEngine, env: str) -> list[str] | None:
 
 
 def ensure_app_login(owner_url: str, app_url: str) -> str | None:
-    """Create or update the app URL's user as a LOGIN member of `tabayyun_app`.
+    """Create or update the app URL's user as a LOGIN member of `tabayyun_app` (or, when the
+    URL names `tabayyun_app` itself, let that role log in).
 
     Returns the user name it provisioned, or None when the app URL uses the owner's user (a
     single dev login: nothing to create). Idempotent: an existing user gets the URL's
@@ -97,7 +98,8 @@ def ensure_app_login(owner_url: str, app_url: str) -> str | None:
             conn.execute(
                 sql.SQL("CREATE ROLE {} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD {}").format(user, password)
             )
-        conn.execute(sql.SQL("GRANT {} TO {}").format(sql.Identifier(APP_ROLE), user))
+        if app.username != APP_ROLE:  # the role itself may be the login: no self-membership
+            conn.execute(sql.SQL("GRANT {} TO {}").format(sql.Identifier(APP_ROLE), user))
     log.info("db.app_login_ready", user=app.username)
     return app.username
 

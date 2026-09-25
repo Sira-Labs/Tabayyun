@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 from structlog.testing import capture_logs
 
 from tabayyun.db import make_engine
@@ -81,3 +82,23 @@ def test_ensure_app_login_needs_a_password(db_url, fresh_schema):
     fresh_schema("auto")
     with pytest.raises(ValueError, match="password"):
         ensure_app_login(db_url, "postgresql+psycopg://someone@localhost/tabayyun")
+
+
+def test_the_app_role_itself_can_be_the_login(db_url, fresh_schema):
+    """`tabayyun_app` as the login name works: it logs in and holds the grants directly."""
+    fresh_schema("auto")
+    url = make_url(db_url).set(username="tabayyun_app", password="app-role-login-for-tests")
+    as_role = url.render_as_string(hide_password=False)
+    assert ensure_app_login(db_url, as_role) == "tabayyun_app"
+    engine = create_engine(as_role)
+    try:
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT count(*) FROM runs")).scalar() == 0
+    finally:
+        engine.dispose()
+    owner = create_engine(db_url)
+    try:
+        with owner.begin() as conn:
+            conn.execute(text("ALTER ROLE tabayyun_app NOLOGIN PASSWORD NULL"))
+    finally:
+        owner.dispose()
