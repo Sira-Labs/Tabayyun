@@ -1,7 +1,7 @@
 name: release
 
-# Builds the production images on every push to main and on version tags, publishes them to
-# the GitHub Container Registry, and (optionally) deploys to a Docker host over SSH.
+# Builds the production images on every push to main and on version tags, scans them with
+# Trivy, publishes them to the GitHub Container Registry, and (optionally) deploys them.
 on:
   push:
     branches: [main]
@@ -16,6 +16,8 @@ env:
   # GHCR names must be lowercase; github.repository_owner is "Sira-Labs", so the organisation
   # is spelled out here.
   IMAGE_PREFIX: ghcr.io/sira-labs/tabayyun
+  # Pinned by digest, run as a plain container: no third-party action sees the registry token.
+  TRIVY_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
 
 jobs:
   images:
@@ -53,6 +55,22 @@ jobs:
             type=semver,pattern={{version}}
             type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable={{is_default_branch}}
+      # Build into the local image store and scan first; the push below reuses the cache, so
+      # nothing reaches GHCR (or a deploy) with a fixable critical CVE.
+      - name: build for the scan
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          load: true
+          tags: scan/tabayyun-${{ matrix.name }}:ci
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      - name: Trivy scan (fixable critical CVEs fail the job)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$HOME/.cache/trivy:/root/.cache/trivy" "$TRIVY_IMAGE" image --quiet \
+            --exit-code 1 --severity CRITICAL --ignore-unfixed "scan/tabayyun-${{ matrix.name }}:ci"
       - uses: docker/build-push-action@v7
         with:
           context: .
@@ -61,7 +79,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
           provenance: true
           sbom: true
 

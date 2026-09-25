@@ -1,7 +1,8 @@
 # Deployment
 
 Two images are built by `.github/workflows/release.yml` on every push to `main` and on
-`v*` tags, and published to the GitHub Container Registry with provenance and SBOM:
+`v*` tags, scanned with Trivy (a fixable CRITICAL finding stops the run before anything is
+pushed or deployed), and published to the GitHub Container Registry with provenance and SBOM:
 
 | Image | Contents |
 |---|---|
