@@ -43,7 +43,8 @@ parent row. A policy that joins to a parent would run a subquery per row, which 
 the hypertables.
 
 RLS on every tenant table (the tables above, `orgs`, `workspaces` and every table with
-`TenantMixin`): `ENABLE` and `FORCE ROW LEVEL SECURITY`, with one policy per table:
+`TenantMixin`): `ENABLE ROW LEVEL SECURITY` (not `FORCE`, see Implementation edits), with
+one policy per table:
 
 ```sql
 CREATE POLICY tenant ON <table>
@@ -58,7 +59,7 @@ with an RLS violation.
 Roles: the migration creates `tabayyun_app` (NOLOGIN, NOSUPERUSER, NOBYPASSRLS). The role
 gets DML on the schema's tables, USAGE on its sequences, the Procrastinate tables and
 functions it needs, and default privileges so later migrations need no new grants. The login
-role the API and the worker use is a member of `tabayyun_app` (see Behaviour 2).
+the API and the worker use is a member of `tabayyun_app`, or the role itself (see Behaviour 1).
 
 The stale-run reaper is the only job that works across orgs. It calls
 `tabayyun_reap_stale_runs(older_than interval) RETURNS integer`, a `SECURITY DEFINER`
@@ -84,18 +85,23 @@ class Action(StrEnum): READ, WRITE, MANAGE      # viewer: read; editor: +write; 
 
 @dataclass(frozen=True)
 class Principal: user_id: UUID; org_id: UUID
+@dataclass(frozen=True)
+class Scope: org_id: UUID; workspace_id: UUID       # what a service call reads and writes
 
 async def workspace_role(session, principal, workspace_id) -> WorkspaceRole | None
-async def authorize(session, principal, action, workspace_id) -> None   # NotVisible | Forbidden
+async def authorize(session, principal, action, workspace_id) -> WorkspaceRole
+    # raises NotVisibleError | ForbiddenError
 def visible_workspaces(principal) -> Select[tuple[UUID]]               # the visible_ids() of ADR-0007
-async def tenant_transaction(factory, org_id) -> AsyncIterator[AsyncSession]
+def require(action) -> Depends                   # ReadScope, WriteScope, ManageScope for routes
+# tabayyun.db
+def for_org(factory, org_id) -> async_sessionmaker   # sessions whose transactions set app.org_id
 ```
 
 The effective workspace role is the highest of: the principal's direct workspace membership;
 the roles of their teams in that workspace; and `admin` when their org role is `owner` or
 `admin`. An org `member` without a workspace grant sees nothing in that workspace.
-`NotVisible` maps to 404, and `Forbidden` (the workspace is visible, the action is not
-allowed) maps to 403.
+`NotVisibleError` maps to 404, and `ForbiddenError` (the workspace is visible, the action is
+not allowed) maps to 403.
 
 ## Behaviour
 
@@ -115,40 +121,46 @@ allowed) maps to 403.
    transaction-local, so a pooled connection never carries it into the next request. The
    principal comes from a `get_principal` dependency; until 013 it returns the bootstrap
    user in the default org.
-4. Every service entry point that takes a workspace calls `authorize()` before it reads or
-   writes; list endpoints filter with `visible_workspaces()`. Existing routes keep their
-   shapes and status codes for the bootstrap principal.
-5. Enqueueing a run passes `org_id` in the job arguments. `run_checks` opens
-   `tenant_transaction(factory, org_id)` for every database step. A job queued before this
+4. Every route authorizes its action in the request's workspace through `require()` and
+   hands the service a `Scope`; services read and write only that scope's workspace. The
+   workspace is the default one until the picker of spec 014, which lists workspaces with
+   `visible_workspaces()`. Existing routes keep their shapes and status codes for the
+   bootstrap principal.
+5. Enqueueing a run passes `org_id` in the job arguments. `run_checks` executes with
+   `for_org(factory, org_id)`, so every database step runs in that org. A job queued before this
    release has no `org_id` and runs in the default org, which held all data before 0004.
 6. `reap_stale_runs` calls the `SECURITY DEFINER` function and returns its count.
 7. Cross-tenant access: an id from another org is not found through any route (404),
    because the row is invisible, not because of an explicit check. A write that names
    another org's workspace fails `authorize()` with 404.
 8. An RLS violation (Postgres `42501` from a policy) is logged as `db.rls_violation` with the
-   table and the request id, and answers 500. It indicates a bug, not a user error.
+   method, the path and the error, and answers 500. It indicates a bug, not a user error.
+   (There is no request id yet; the observability pass adds one.)
+9. The schema guard treats a login that may not read `alembic_version` (a schema from
+   before 0004, for example after a downgrade) as a mismatch: exit code 3.
 
 ## Acceptance criteria
 
-- [ ] Migration 0004 upgrades a database holding data from 0003 and downgrades cleanly,
+- [x] Migration 0004 upgrades a database holding data from 0003 and downgrades cleanly,
       in both TimescaleDB modes; every row keeps its org after the backfill.
-- [ ] Connected as the app role without `app.org_id`, every tenant table returns zero
+- [x] Connected as the app role without `app.org_id`, every tenant table returns zero
       rows and rejects inserts.
-- [ ] With org A's context, org B's rows are invisible and cannot be inserted, updated or
+- [x] With org A's context, org B's rows are invisible and cannot be inserted, updated or
       deleted in every tenant table, hypertables included.
-- [ ] Every existing route answers 404 for an id from another org (parametrised test over
+- [x] Every existing route answers 404 for an id from another org (parametrised test over
       the routes with path ids).
-- [ ] `authorize()` truth table: every combination of org role, direct workspace role and
+- [x] `authorize()` truth table: every combination of org role, direct workspace role and
       team role against `read`, `write` and `manage`.
-- [ ] A worker job for org B only touches org B's rows; a job without `org_id` runs in
+- [x] A worker job for org B only touches org B's rows; a job without `org_id` runs in
       the default org.
-- [ ] The reaper still reaps stale runs across orgs, and the app role cannot run the
+- [x] The reaper still reaps stale runs across orgs, and the app role cannot run the
       update it performs directly.
-- [ ] Startup check: a superuser or owner login logs `db.rls_bypassed`, as an error in prod
+- [x] Startup check: a superuser or owner login logs `db.rls_bypassed`, as an error in prod
       and a warning in dev; the app role logs nothing.
-- [ ] `deploy/README.md`, `deploy/caprover.md` and the compose files document the two URLs;
-      the live system runs with the app role (verified with `SELECT current_user`).
-- [ ] Baseline boxes ticked in `02-security-baseline.md`: single `authorize()` path, RLS on
+- [x] `deploy/README.md`, `deploy/caprover.md` and the compose files document the two URLs.
+- [ ] The live system runs with the app role (verified with `pg_stat_activity`): after the
+      owner switches the CapRover env vars (`deploy/caprover.md`, "Database logins").
+- [x] Baseline boxes ticked in `02-security-baseline.md`: single `authorize()` path, RLS on
       all tenant tables, API role not table owner, context per request and per job.
 
 ## Test cases
@@ -157,16 +169,39 @@ Unit (`api/tests`): `test_authz_roles.py`, the role-resolution truth table on in
 membership rows; `test_settings.py`, the migration URL fallback.
 
 Integration (`api/tests/db`, need `TABAYYUN_TEST_DATABASE_URL`):
-- `test_rls_policies.py`: context missing, own org, other org, for every tenant table
-  (listed from the metadata so a new table without RLS fails the test).
-- `test_rls_routes.py`: two orgs with data; every GET, PATCH and DELETE with a path id
-  across orgs → 404; lists show only the principal's org.
-- `test_migration_0004.py`: upgrade with data, backfill, downgrade, both Timescale modes.
-- `test_app_role.py`: the startup check against a superuser, an owner and the app role.
-- `test_jobs.py`: a run for org B through the worker; the reaper across two orgs.
+- `test_rls.py`: one seed fills every tenant table for two orgs. Policies per table: no
+  context, other org, own org (listed from the metadata, so a new table without RLS fails);
+  TimescaleDB chunks read directly; every route with a path id as the other org → 404 (the
+  list of routes is checked against the OpenAPI paths); lists; viewer, team editor, member
+  without a grant, disabled admin; `visible_workspaces`.
+- `test_migrations.py::test_0004_backfills_org_ids_and_downgrades`: data at 0003 in a second
+  org, upgrade, backfill, downgrade, both Timescale modes.
+- `test_app_role.py`: the startup check against the owner and the app login, logs per
+  environment, login provisioning (idempotent, the role itself as the login).
+- `test_jobs.py`: a job for org B and a legacy job without an org; the reaper across two
+  orgs while the app login alone sees nothing.
+- `test_app.py`: an RLS violation is logged and answers 500.
 
-The DB fixtures gain an app-role URL. Tests connect as `tabayyun_app` members, never as
-the owner, so RLS is exercised rather than bypassed.
+The DB fixtures gain an app login (`tests/tenancy.py`). The app under test connects as that
+login, never as the owner, so RLS is exercised rather than bypassed; the owner only seeds and
+inspects.
+
+## Implementation edits
+
+- `ENABLE`, not `FORCE`, row-level security. `FORCE` would subject the owner too, which
+  breaks the reaper's `SECURITY DEFINER` function whenever the owner is not a superuser; the
+  app login is kept off the owner by the startup check instead.
+- TimescaleDB chunks bypassed the policies when named directly (found while testing: 2 rows
+  visible without context). Migration 0004 enables RLS without a policy on every chunk, and
+  the `tabayyun_chunk_rls` event trigger does so for every new chunk; queries through the
+  hypertable still apply its policy. Revoking the chunk schema instead also broke those
+  queries.
+- The login may be `tabayyun_app` itself (the deploy docs use that name); the migrate
+  command then skips the self-grant.
+- `authz.deps.get_session` replaces `db.get_session`: the request session needs the
+  principal's org, so it depends on `get_principal`.
+- Routes pass a `Scope` to services instead of calling `authorize()` inside each service;
+  the worker builds the scope from the run row.
 
 ## Out of scope
 

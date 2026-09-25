@@ -29,8 +29,8 @@ mkdir -p ~/tabayyun && cd ~/tabayyun
 curl -fsSL https://raw.githubusercontent.com/Sira-Labs/Tabayyun/main/deploy/compose.yaml -o compose.yaml
 curl -fsSL https://raw.githubusercontent.com/Sira-Labs/Tabayyun/main/deploy/.env.example -o .env
 # edit .env: POSTGRES_PASSWORD and TABAYYUN_SESSION_SECRET (both mandatory, generate with
-# `openssl rand -base64 36`), TABAYYUN_DOMAIN for automatic TLS; OIDC values stay empty
-# until the auth router ships
+# `openssl rand -base64 36`), TABAYYUN_APP_DB_PASSWORD (`openssl rand -hex 24`),
+# TABAYYUN_DOMAIN for automatic TLS; OIDC values stay empty until the auth router ships
 docker compose up -d
 ```
 
@@ -102,3 +102,24 @@ when the database is at a different revision than the migrations it ships with, 
 controls whether findings, metrics and scores become hypertables: `on` requires the
 extension, `off` never uses it (Apache-2-only mode, ADR-0003). Take a `pg_dump` before
 upgrading a production database.
+
+## Database logins and row-level security
+
+Every tenant table has a row-level security policy keyed by the org of the transaction
+(spec 007, ADR-0007), so the api and the worker must not log in as a role that bypasses it:
+
+| Setting | Login | Used by |
+|---|---|---|
+| `TABAYYUN_MIGRATION_DATABASE_URL` | the table owner (in the bundles, the database superuser `tabayyun`) | the api's migration step only |
+| `TABAYYUN_DATABASE_URL` | `tabayyun_app` (the role itself, or any login that is a member of it): no superuser, no `BYPASSRLS`, not owner | every request and job of the api and the worker |
+
+The migration step creates or updates the app login with the password in
+`TABAYYUN_DATABASE_URL`, so switching needs only the two URLs. Without
+`TABAYYUN_MIGRATION_DATABASE_URL` migrations use `TABAYYUN_DATABASE_URL` (a single dev login).
+At startup the api and the worker check their login: a superuser, a `BYPASSRLS` role or the
+table owner logs `db.rls_bypassed` (an error in prod; spec 015 turns it into a refusal to
+start). A write refused by a policy is a bug and logs `db.rls_violation`.
+
+Pitfalls: a pooler in transaction mode is fine (the org is set per transaction with
+`set_config(..., true)`), but never set `app.org_id` at session level. TimescaleDB chunks get
+RLS through the `tabayyun_chunk_rls` event trigger; creating it needs a superuser owner.
