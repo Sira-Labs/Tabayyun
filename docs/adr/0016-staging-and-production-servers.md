@@ -35,6 +35,8 @@ ADR adopts it for Tabayyun.
     is on `main`, and staging serves it on web, api and worker.
   - A promotion runs only after the owner's approval: the `production` environment's
     required reviewer.
+  - `sha-<short>` tags are immutable: re-running a release for the same commit does not
+    move them. So the digest that promotion resolves is the one staging deployed.
 - **Release guard:** deploy jobs bind an environment. `staging` allows `main` and `v*` tags;
   `production` allows `main` and has the owner as required reviewer. The CapRover tokens,
   `DEPLOY_SSH_KEY` and server variables live on those environments, not at repository

@@ -21,10 +21,19 @@ Arqam ADR-0020):
 | **Staging and tools** (the current server) | `tabayyun-db-stg`, `tabayyun-api-stg`, `tabayyun-worker-stg`, `tabayyun-web-stg`; GlitchTip and uptime checks for both servers | `tabayyun-stg.siralabs.org` | test data only |
 | **Production** (new server in Germany) | `tabayyun-db`, `tabayyun-api`, `tabayyun-worker`, `tabayyun-web`, its own `rustfs`, and Keycloak once it serves real users | `tabayyun.siralabs.org` | real people's data, and only there |
 
-Sections 1–4 below set up one server's apps; on staging every app name gets the `-stg`
-suffix and its own database and bucket (`tabayyun-stg-cache`). `srv-captain--rustfs`
-resolves only inside one CapRover, so each server runs its own RustFS and the endpoint name
-stays the same.
+Sections 1–4 below set up one server's apps with the production names. On staging every app
+name gets the `-stg` suffix, and so does every internal address that names an app:
+
+| Setting | Production | Staging |
+|---|---|---|
+| `TABAYYUN_MIGRATION_DATABASE_URL`, `TABAYYUN_DATABASE_URL` host | `srv-captain--tabayyun-db` | `srv-captain--tabayyun-db-stg` |
+| `TABAYYUN_API_UPSTREAM` (web app) | `srv-captain--tabayyun-api:8000` | `srv-captain--tabayyun-api-stg:8000` |
+| `TABAYYUN_CACHE_URL` bucket | `s3://tabayyun-cache` | `s3://tabayyun-stg-cache` |
+| Persistent directory label of the db | `tabayyun-pgdata` | `tabayyun-stg-pgdata` |
+
+A staging app that keeps an unsuffixed address talks to the old apps on the same server.
+`srv-captain--rustfs` resolves only inside one CapRover, so each server runs its own RustFS
+and that endpoint name stays the same.
 
 Rules:
 
@@ -187,7 +196,12 @@ Two workflows (ADR-0016):
   digests (`tag@sha256:…`) to the production apps and waits until production serves the
   commit.
 
-Both wait-until-live checks are `.github/scripts/wait-live.sh`: CapRover accepts a deploy
+`sha-<short>` tags are immutable: a re-run of `release.yml` for the same commit leaves them
+on the digest staging got, so promotion and a compose host pulling by that tag get exactly
+the tested images.
+
+Both wait-until-live checks are `.github/scripts/wait-live.sh`, and both fail when their
+environment has no `CAPROVER_WEB_URL`: CapRover accepts a deploy
 before it pulls the image, so without the check a failed pull or a container that never
 starts would leave the run green. It polls `<url>/version.json` (web image) and
 `<url>/api/version` (api image) for the commit, and waits for a connected worker on that
@@ -220,11 +234,19 @@ tags.
    on `tabayyun-web-stg`. Set up the two environments above; the next push to `main`
    deploys staging.
 2. Order the production server, install CapRover (strong dashboard password, 2FA, SSH by
-   key only, firewall open for 80, 443 and 22), create the production apps and RustFS with
-   production secrets, and point `tabayyun.siralabs.org` at it.
-3. Run promote.yml for the commit staging runs.
-4. Delete the old `tabayyun-db`, `tabayyun-api`, `tabayyun-worker` and `tabayyun-web` apps
-   on the current server once production serves (their data is test data).
+   key only, firewall open for 80, 443 and 22), and create the production apps and RustFS
+   with production secrets. Leave `tabayyun.siralabs.org` on the old server for now.
+3. Set the `production` environment's `CAPROVER_WEB_URL` to the new web app's temporary
+   CapRover address (`https://tabayyun-web.<new server's root domain>`) and run promote.yml
+   for the commit staging runs; it verifies production there.
+4. Point `tabayyun.siralabs.org` at the new server, connect it on `tabayyun-web` (Enable and
+   Force HTTPS), set `CAPROVER_WEB_URL=https://tabayyun.siralabs.org` on `production`, and
+   check `GET /api/version` on the public domain.
+5. Remove the old install from the current server: delete the old `tabayyun-db`,
+   `tabayyun-api`, `tabayyun-worker` and `tabayyun-web` apps together with their volumes
+   (CapRover asks when deleting an app; afterwards `docker volume ls | grep tabayyun` should
+   list only `-stg` volumes), and the old `tabayyun-cache` bucket and its objects from RustFS
+   (RustFS itself stays: staging uses it). The data is test data, but it should not linger.
 
 Images are public on GHCR, so neither server needs registry credentials; if the repository
 ever becomes private, add the registry under CapRover → Cluster → Docker Registries first.

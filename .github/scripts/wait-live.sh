@@ -7,12 +7,13 @@
 # connected worker on the commit (the worker names its database connections after it).
 #
 #   URL=https://tabayyun-stg.siralabs.org WANT=<full sha> CHECK_WORKER=true wait-live.sh
-# URL unset: prints a notice and succeeds. TIMEOUT (seconds, default 600) and INTERVAL (15).
+# A deploy without a URL to check fails: set CAPROVER_WEB_URL on the environment.
+# TIMEOUT (seconds, default 600; 0 = look once) and INTERVAL (15).
 set -euo pipefail
 
 if [ -z "${URL:-}" ]; then
-  echo "::notice::no public URL configured; not checking that the deploy went live"
-  exit 0
+  echo "::error::CAPROVER_WEB_URL is not set on this environment: cannot confirm that the deploy went live"
+  exit 1
 fi
 URL="${URL%/}"
 : "${WANT:?WANT (the commit to wait for) is required}"

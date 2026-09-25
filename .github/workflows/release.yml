@@ -125,9 +125,19 @@ jobs:
         env:
           IMAGE: ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}
           META: ${{ steps.meta.outputs.json }}
+        # `sha-<short>` tags are immutable: a re-run for the same commit builds a new digest but
+        # leaves the existing sha tag where staging deployed it, so promote.yml, which resolves
+        # the sha tag, always gets the digest staging ran. Branch, version and latest tags move.
         run: |
-          # shellcheck disable=SC2046 # one "-t <tag>" pair per tag
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$META") "$IMAGE"
+          args=()
+          while read -r tag; do
+            if [[ "$tag" == *:sha-* ]] && docker buildx imagetools inspect "$tag" >/dev/null 2>&1; then
+              echo "::notice::$tag already exists and is not moved (sha tags are immutable)"
+              continue
+            fi
+            args+=(-t "$tag")
+          done < <(jq -r '.tags[]' <<< "$META")
+          docker buildx imagetools create "${args[@]}" "$IMAGE"
 
   # main and v* tags deploy to staging only (ADR-0016). Production gets the staging-tested
   # digest through promote.yml, behind the `production` environment's required reviewer.
@@ -154,6 +164,8 @@ jobs:
           if [ -n "$WORKER_TOKEN" ]; then echo "worker=true" >> "$GITHUB_OUTPUT"; else echo "worker=false" >> "$GITHUB_OUTPUT"; echo "CAPROVER_APP_TOKEN_WORKER not set; skipping worker deploy"; fi
       - uses: actions/checkout@v7
         if: steps.gate.outputs.on == 'true'
+        with:
+          persist-credentials: false
       - name: deploy api
         if: steps.gate.outputs.on == 'true'
         uses: caprover/deploy-from-github@v2
