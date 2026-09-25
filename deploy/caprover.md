@@ -22,6 +22,13 @@ Internet ──▶ CapRover nginx (TLS) ──▶ tabayyun-web (Caddy :80) ─�
     inside the database URL, while base64 may contain `/` or `+`.
   - Persistent directory: path in app `/var/lib/postgresql/data`, label `tabayyun-pgdata`
   - Do not map a host port; the API reaches it as `srv-captain--tabayyun-db:5432`.
+- Check before the first real data: App Configs must show the persistent directory above.
+  Without it the data lives in the container and a restart (any Save & Update) starts an
+  empty database. CapRover cannot add persistent data to an existing app: delete and
+  recreate it with the box ticked.
+- `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` only apply when the data directory
+  is created. Changing them later changes nothing in the database (the owner keeps its
+  password), so leave them as they were; to change a password, `ALTER ROLE` in `psql`.
 
 ## 2. API app: `tabayyun-api`
 
@@ -110,7 +117,10 @@ log in as `tabayyun_app` rather than the database superuser (`deploy/README.md`,
 logins and row-level security"). The api's migration step creates the `tabayyun_app` login
 with the password from `TABAYYUN_DATABASE_URL`; nothing needs doing in the database itself.
 
-Switching an existing install (once, after the release with migration 0004 is live):
+Switching an existing install (once, **after** the release with migration 0004 is live:
+`GET /api/version` shows `"schema_revision": "0004"`). Switching earlier locks the running
+release out, because only 0004 creates the `tabayyun_app` login. Both apps must carry the
+same app password, and `tabayyun-db` is not touched:
 
 1. Generate the app password: `openssl rand -hex 24` (hex, because it sits in a URL).
 2. `tabayyun-api` → App Configs: add `TABAYYUN_MIGRATION_DATABASE_URL` with the current

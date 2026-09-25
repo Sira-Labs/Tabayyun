@@ -158,8 +158,9 @@ not allowed) maps to 403.
 - [x] Startup check: a superuser or owner login logs `db.rls_bypassed`, as an error in prod
       and a warning in dev; the app role logs nothing.
 - [x] `deploy/README.md`, `deploy/caprover.md` and the compose files document the two URLs.
-- [ ] The live system runs with the app role (verified with `pg_stat_activity`): after the
-      owner switches the CapRover env vars (`deploy/caprover.md`, "Database logins").
+- [x] The live system runs with the app role: after a fresh database (25 Sep), the api
+      starts as `tabayyun_app` without `db.rls_bypassed`; `/api/version` shows schema 0004
+      and a connected worker on the release commit.
 - [x] Baseline boxes ticked in `02-security-baseline.md`: single `authorize()` path, RLS on
       all tenant tables, API role not table owner, context per request and per job.
 
