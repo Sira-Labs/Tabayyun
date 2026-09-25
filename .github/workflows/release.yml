@@ -16,7 +16,8 @@ env:
   # GHCR names must be lowercase; github.repository_owner is "Sira-Labs", so the organisation
   # is spelled out here.
   IMAGE_PREFIX: ghcr.io/sira-labs/tabayyun
-  # Pinned by digest, run as a plain container: no third-party action sees the registry token.
+  # Pinned by digest, run as a plain container on a saved image file: no third-party action
+  # sees the registry token, and the scanner gets no Docker socket.
   TRIVY_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
 
 jobs:
@@ -55,32 +56,39 @@ jobs:
             type=semver,pattern={{version}}
             type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable={{is_default_branch}}
-      # Build into the local image store and scan first; the push below reuses the cache, so
-      # nothing reaches GHCR (or a deploy) with a fixable critical CVE.
-      - name: build for the scan
+      # Pushed by digest only: the image is in GHCR but has no tag yet, so no deploy can pick
+      # it up before the scan below has passed.
+      - id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.dockerfile }}
-          load: true
-          tags: scan/tabayyun-${{ matrix.name }}:ci
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.IMAGE_PREFIX }}-${{ matrix.name }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
-      - name: Trivy scan (fixable critical CVEs fail the job)
-        run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-            -v "$HOME/.cache/trivy:/root/.cache/trivy" "$TRIVY_IMAGE" image --quiet \
-            --exit-code 1 --severity CRITICAL --ignore-unfixed "scan/tabayyun-${{ matrix.name }}:ci"
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.name }}
           provenance: true
           sbom: true
+      # Scans exactly the pushed image, saved to a file: the scanner gets no Docker socket.
+      - name: Trivy scan (fixable critical CVEs fail the job)
+        env:
+          IMAGE: ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}
+        run: |
+          docker pull -q "$IMAGE"
+          docker tag "$IMAGE" scan/image:ci
+          mkdir -p "$RUNNER_TEMP/scan"
+          docker save scan/image:ci -o "$RUNNER_TEMP/scan/image.tar"
+          docker run --rm -v "$RUNNER_TEMP/scan:/scan:ro" -v "$HOME/.cache/trivy:/root/.cache/trivy" \
+            "$TRIVY_IMAGE" image --quiet --exit-code 1 --severity CRITICAL --ignore-unfixed \
+            --input /scan/image.tar
+      # Only a scanned image gets tags; every tag points at that digest, attestations included.
+      - name: tag the scanned image
+        env:
+          IMAGE: ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}
+          META: ${{ steps.meta.outputs.json }}
+        run: |
+          # shellcheck disable=SC2046 # one "-t <tag>" pair per tag
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$META") "$IMAGE"
 
   deploy:
     name: deploy to docker host

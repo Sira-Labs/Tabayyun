@@ -1,8 +1,9 @@
 # Deployment
 
 Two images are built by `.github/workflows/release.yml` on every push to `main` and on
-`v*` tags, scanned with Trivy (a fixable CRITICAL finding stops the run before anything is
-pushed or deployed), and published to the GitHub Container Registry with provenance and SBOM:
+`v*` tags and published to the GitHub Container Registry with provenance and SBOM. Each image
+is pushed by digest, scanned with Trivy, and tagged only when no fixable CRITICAL finding is
+left, so a failed scan leaves an untagged digest that nothing deploys:
 
 | Image | Contents |
 |---|---|
