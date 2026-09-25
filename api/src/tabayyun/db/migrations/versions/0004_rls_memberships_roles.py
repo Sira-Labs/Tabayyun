@@ -4,8 +4,8 @@
 - `org_id` on the child tables that lacked it (uploads, metrics, scores, coverage,
   dataset_series, series_group_members), backfilled from the parent row before NOT NULL.
 - The `tabayyun_app` role (NOLOGIN; logins are made members of it by the migrate command)
-  with DML on the schema and default privileges for later migrations; `alembic_version` is
-  read-only to it.
+  with DML on the schema and default privileges for later migrations; `alembic_version` and
+  `users` (no RLS, it spans orgs) are read-only to it.
 - One RLS policy per tenant table keyed by `app.org_id`. RLS is enabled, not forced: the
   owner runs migrations and the reaper function, and the app login must not be the owner
   (the startup check in `tabayyun.db.roles` reports it when it is).
@@ -200,6 +200,9 @@ def _create_app_role() -> None:
     op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {APP_ROLE}")
     op.execute(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {APP_ROLE}")
     op.execute(f"REVOKE INSERT, UPDATE, DELETE ON alembic_version FROM {APP_ROLE}")
+    # `users` spans orgs and has no RLS: the app login reads it only. Spec 013 adds a controlled
+    # write path for logins.
+    op.execute(f"REVOKE INSERT, UPDATE, DELETE ON users FROM {APP_ROLE}")
     # Tables and sequences later migrations create (as this owner) get the same grants.
     op.execute(
         f"ALTER DEFAULT PRIVILEGES IN SCHEMA public "

@@ -196,6 +196,8 @@ inspects.
   the `tabayyun_chunk_rls` event trigger does so for every new chunk; queries through the
   hypertable still apply its policy. Revoking the chunk schema instead also broke those
   queries.
+- `users` is read-only to `tabayyun_app` (review finding): it has no RLS, so a write would
+  reach users of every org. Spec 013 brings the controlled write path for logins.
 - The login may be `tabayyun_app` itself (the deploy docs use that name); the migrate
   command then skips the self-grant.
 - `authz.deps.get_session` replaces `db.get_session`: the request session needs the

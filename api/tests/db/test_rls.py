@@ -453,3 +453,18 @@ async def test_visible_workspaces(seed, user, org, expected):
     finally:
         await engine.dispose()
     assert ids == expected
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "INSERT INTO users (id, email, display_name) VALUES (gen_random_uuid(), 'x@example.test', 'x')",
+        "UPDATE users SET display_name = 'renamed'",
+        "DELETE FROM users WHERE email = 'b@example.test'",
+    ],
+)
+def test_users_are_read_only_to_the_app_login(seed, sql):
+    """`users` spans orgs and has no RLS, so the app login may read it but not write it."""
+    with pytest.raises(DBAPIError) as excinfo:
+        _as_app(seed, DEFAULT_ORG_ID, sql)
+    assert _sqlstate(excinfo.value) == INSUFFICIENT_PRIVILEGE
