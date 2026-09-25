@@ -1,7 +1,9 @@
 # Deployment
 
 Two images are built by `.github/workflows/release.yml` on every push to `main` and on
-`v*` tags and published to the GitHub Container Registry with provenance and SBOM. Each image
+`v*` tags and published to the GitHub Container Registry with provenance and SBOM. Only
+`main` and `v*` tags on commits that are on `main` publish and deploy: a manual run on any
+other branch does nothing, and a tag outside `main` fails the run. Tag releases from `main`. Each image
 is pushed by digest, scanned with Trivy, and tagged only when no fixable CRITICAL finding is
 left, so a failed scan leaves an untagged digest that nothing deploys:
 
