@@ -61,6 +61,15 @@ async def test_version(app):
     assert r.status_code == 200
     assert r.json()["env"] == "test"
     assert "schema_revision" in r.json()
+    assert r.json()["commit"] is None
+
+
+async def test_version_reports_the_build_commit():
+    """/api/version reports the commit the image was built from (TABAYYUN_COMMIT)."""
+    app = create_app(Settings(env="test", commit="ce4c37fbfc9efff2d44289d05fc6c42049be2f5c"))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get("/api/version")
+    assert r.json()["commit"] == "ce4c37fbfc9efff2d44289d05fc6c42049be2f5c"
 
 
 def test_prod_refuses_placeholders():

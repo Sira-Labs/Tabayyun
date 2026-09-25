@@ -32,7 +32,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         """Startup: schema guard; shutdown: dispose the engine."""
-        log.info("api.start", env=settings.env, version=__version__)
+        log.info("api.start", env=settings.env, version=__version__, commit=settings.commit)
         # Exits with code 3 on a schema mismatch; an unreachable database only degrades /healthz.
         app.state.schema_revision = await guard_schema(engine)
         yield
@@ -73,8 +73,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/version", tags=["ops"])
     async def version() -> dict[str, str | None]:
-        """Build version, environment and the schema revision seen at startup."""
-        return {"version": __version__, "env": settings.env, "schema_revision": app.state.schema_revision}
+        """Build version and commit, environment and the schema revision seen at startup."""
+        return {
+            "version": __version__,
+            "commit": settings.commit,
+            "env": settings.env,
+            "schema_revision": app.state.schema_revision,
+        }
 
     return app
 

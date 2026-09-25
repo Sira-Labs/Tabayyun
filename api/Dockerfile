@@ -33,6 +33,10 @@ RUN useradd --system --uid 10001 --create-home tabayyun \
  && mkdir -p /data/cache && chown -R tabayyun /data
 USER tabayyun
 ENV TABAYYUN_ENV=prod TABAYYUN_CACHE_URL=/data/cache
+# The commit this image was built from, reported by /api/version; declared last so a new
+# commit does not invalidate the cached layers above.
+ARG TABAYYUN_COMMIT=unknown
+ENV TABAYYUN_COMMIT=${TABAYYUN_COMMIT}
 EXPOSE 8000
 # api role: probes /healthz; worker role: healthy while the process runs (no HTTP).
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD ["tabayyun-api", "healthcheck"]
