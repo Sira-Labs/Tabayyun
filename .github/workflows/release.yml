@@ -183,23 +183,32 @@ jobs:
           image: ${{ env.IMAGE_PREFIX }}-api:${{ needs.images.outputs.tag }}
       # CapRover accepts a deploy before it pulls the image, so a failed pull (a private package,
       # a wrong name) or a container that never starts would otherwise leave this job green.
-      # Waits until the public URL serves this commit from both the web and the api image.
-      # The worker has no HTTP endpoint; it runs the api image, so a pulled api image covers it.
+      # Waits until the public URL serves this commit from the web and the api image and, when
+      # the worker was deployed, until /api/version lists a connected worker on this commit
+      # (the worker has no HTTP endpoint; it names its database connections after its commit).
       - name: wait until the new version is live
         if: steps.gate.outputs.on == 'true'
         env:
           URL: ${{ vars.CAPROVER_WEB_URL }}
           WANT: ${{ github.sha }}
+          CHECK_WORKER: ${{ steps.gate.outputs.worker }}
         run: |
           if [ -z "$URL" ]; then echo "::notice::CAPROVER_WEB_URL not set; not checking that the deploy went live"; exit 0; fi
           URL="${URL%/}"
           deadline=$((SECONDS + 600))
           while :; do
             web=$(curl -fsS -m 10 "$URL/version.json" 2>/dev/null | jq -r '.commit // empty' 2>/dev/null || true)
-            api=$(curl -fsS -m 10 "$URL/api/version" 2>/dev/null | jq -r '.commit // empty' 2>/dev/null || true)
-            if [ "$web" = "$WANT" ] && [ "$api" = "$WANT" ]; then echo "web and api run $WANT"; exit 0; fi
+            version=$(curl -fsS -m 10 "$URL/api/version" 2>/dev/null || true)
+            api=$(jq -r '.commit // empty' <<< "$version" 2>/dev/null || true)
+            workers=$(jq -r '(.workers // []) | join(",")' <<< "$version" 2>/dev/null || true)
+            worker_ok=true
+            if [ "$CHECK_WORKER" = "true" ] && [[ ",$workers," != *",$WANT,"* ]]; then worker_ok=false; fi
+            if [ "$web" = "$WANT" ] && [ "$api" = "$WANT" ] && [ "$worker_ok" = "true" ]; then
+              if [ "$CHECK_WORKER" = "true" ]; then echo "web, api and worker run $WANT"; else echo "web and api run $WANT"; fi
+              exit 0
+            fi
             if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "::error::after 10 minutes $URL serves web '${web:-?}' and api '${api:-?}', not $WANT; see the apps' deployment logs in CapRover"
+              echo "::error::after 10 minutes $URL serves web '${web:-?}', api '${api:-?}', workers '${workers:-none}', not $WANT; see the apps' deployment logs in CapRover"
               exit 1
             fi
             sleep 15

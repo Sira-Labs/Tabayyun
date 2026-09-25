@@ -197,6 +197,8 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
       before pulling, so the first org release stayed on the old version (packages still
       private) with a green job. Images now carry `TABAYYUN_COMMIT` (`/api/version`,
       web `/version.json`); with `CAPROVER_WEB_URL` set the job waits for that commit to be live.
+      - Worker (no HTTP): its connections' `application_name` is `tabayyun-worker/<commit>`;
+        `/api/version` lists them from `pg_stat_activity` (no migration, no heartbeat table).
 
 ## Sprint 8 — login, tenants and RBAC (forecast end 29 Sep – 1 Oct)
 
