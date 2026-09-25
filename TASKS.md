@@ -203,7 +203,9 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
 ## Sprint 8 — login, tenants and RBAC (forecast end 29 Sep – 1 Oct)
 
 - [x] **007 Row-level security, memberships and roles** — `docs/specs/007-rls-memberships-roles.md`
-      (25 Sep). One live step left: the owner switches the CapRover logins (`deploy/caprover.md`).
+      (25 Sep). Live on the app login the same day, on a fresh database: the switch was made
+      before 0004 was live and a `POSTGRES_*` change restarted a db app without persistent
+      data; `deploy/caprover.md` now warns about both.
       - RLS is enabled, not forced: the owner runs migrations and the reaper function; the app
         login is kept off the owner by the startup check (`db.rls_bypassed`).
       - TimescaleDB chunks named directly bypassed the policies; RLS without a policy on every
