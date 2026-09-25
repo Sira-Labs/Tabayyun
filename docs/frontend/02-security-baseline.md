@@ -11,9 +11,9 @@ review item, or an ops runbook entry.
 - [ ] API tokens (for integrations) are random, hashed at rest, scoped to a workspace and role, expiring, revocable.
 
 ## Authorization
-- [ ] Single `authorize()` path; deny by default; `visible_ids()` for lists.
-- [ ] Postgres RLS on all tenant tables; API DB role is not table owner; context set per request and per job.
-- [ ] Cross-tenant tests for every endpoint; inaccessible → 404.
+- [x] Single `authorize()` path; deny by default; `visible_ids()` for lists. (Spec 007: `tabayyun.authz`, `visible_workspaces()`.)
+- [x] Postgres RLS on all tenant tables; API DB role is not table owner; context set per request and per job. (Spec 007; the live install switches logins per `deploy/caprover.md`, and spec 015 refuses an owner login in prod.)
+- [x] Cross-tenant tests for every endpoint; inaccessible → 404. (Spec 007: `api/tests/db/test_rls.py`.)
 - [ ] UUIDv7 identifiers; no sequential IDs exposed.
 
 ## Input handling

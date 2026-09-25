@@ -44,6 +44,7 @@ def missing_ranges(covered: list[tuple[int, int]], start_ns: int, end_ns: int) -
 async def record(
     session: AsyncSession,
     *,
+    org_id: uuid.UUID,
     series_id: uuid.UUID,
     start_ns: int,
     end_ns: int,
@@ -58,6 +59,7 @@ async def record(
     """
     stmt = insert(Coverage).values(
         series_id=series_id,
+        org_id=org_id,
         layer=layer,
         range_start=ns_to_datetime(start_ns),
         range_end=ns_to_datetime_ceil(end_ns),

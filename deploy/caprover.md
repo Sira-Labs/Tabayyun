@@ -32,7 +32,8 @@ Internet ──▶ CapRover nginx (TLS) ──▶ tabayyun-web (Caddy :80) ─�
     | Name | Value |
     |---|---|
     | `TABAYYUN_ENV` | `prod` |
-    | `TABAYYUN_DATABASE_URL` | `postgresql+psycopg://tabayyun:<password>@srv-captain--tabayyun-db:5432/tabayyun` |
+    | `TABAYYUN_MIGRATION_DATABASE_URL` | `postgresql+psycopg://tabayyun:<password>@srv-captain--tabayyun-db:5432/tabayyun` (the owner; migrations only) |
+    | `TABAYYUN_DATABASE_URL` | `postgresql+psycopg://tabayyun_app:<app password>@srv-captain--tabayyun-db:5432/tabayyun` (the app login, see "Database logins" below) |
     | `TABAYYUN_SESSION_SECRET` | a generated value, e.g. the output of `openssl rand -base64 48` |
     | `TABAYYUN_CACHE_URL` | `/data/cache` (the image default; the older name `TABAYYUN_CACHE_DIR` still works) |
     | `TABAYYUN_TIMESCALE` | optional; `auto` (default) uses TimescaleDB when the extension exists, `off` never does |
@@ -57,7 +58,7 @@ which the live system uses.
 | Name | Value |
 |---|---|
 | `TABAYYUN_ROLE` | `worker` |
-| the api variables | identical to the api app (`TABAYYUN_ENV`, `TABAYYUN_DATABASE_URL`, `TABAYYUN_SESSION_SECRET`) |
+| the api variables | identical to the api app (`TABAYYUN_ENV`, `TABAYYUN_DATABASE_URL` with the app login, `TABAYYUN_SESSION_SECRET`); the worker never needs `TABAYYUN_MIGRATION_DATABASE_URL` |
 | `TABAYYUN_CACHE_URL` and `TABAYYUN_S3_*` | see section 3a; without them the cache is `/data/cache` inside the container (tick persistent data with that path to keep it) |
 | `TABAYYUN_WORKER_CONCURRENCY` | optional, default `2` |
 
@@ -101,6 +102,27 @@ share it. The live system runs RustFS (Apache-2.0); MinIO community builds ended
    bucket gains `raw/<source id>/<bucket>/<yyyy>/<mm>/part-*.parquet`. A store problem never
    fails a run: `stats.cache` then carries `"written": false` and the error, and the worker
    logs `cache.write_failed`.
+
+## Database logins (spec 007)
+
+Row-level security keeps each org's rows apart, and only works when the api and the worker
+log in as `tabayyun_app` rather than the database superuser (`deploy/README.md`, "Database
+logins and row-level security"). The api's migration step creates the `tabayyun_app` login
+with the password from `TABAYYUN_DATABASE_URL`; nothing needs doing in the database itself.
+
+Switching an existing install (once, after the release with migration 0004 is live):
+
+1. Generate the app password: `openssl rand -hex 24` (hex, because it sits in a URL).
+2. `tabayyun-api` → App Configs: add `TABAYYUN_MIGRATION_DATABASE_URL` with the current
+   `TABAYYUN_DATABASE_URL` value (the owner), then change `TABAYYUN_DATABASE_URL` to
+   `postgresql+psycopg://tabayyun_app:<app password>@srv-captain--tabayyun-db:5432/tabayyun`.
+   Save & Update: the api migrates as the owner, creates the login, then serves as it.
+3. `tabayyun-worker` → App Configs: the same new `TABAYYUN_DATABASE_URL`. Save & Update.
+4. Check: neither app logs `db.rls_bypassed` any more, and
+   `SELECT usename FROM pg_stat_activity WHERE datname = 'tabayyun'` in the db app's
+   terminal shows `tabayyun_app` for both.
+
+Until the switch, both apps keep serving and log `db.rls_bypassed` as an error on start.
 
 ## 4. Web app: `tabayyun-web`
 

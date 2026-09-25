@@ -202,7 +202,15 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
 
 ## Sprint 8 — login, tenants and RBAC (forecast end 29 Sep – 1 Oct)
 
-- [ ] 007 Row-level security, memberships and roles (ADR-0007)
+- [x] **007 Row-level security, memberships and roles** — `docs/specs/007-rls-memberships-roles.md`
+      (25 Sep). One live step left: the owner switches the CapRover logins (`deploy/caprover.md`).
+      - RLS is enabled, not forced: the owner runs migrations and the reaper function; the app
+        login is kept off the owner by the startup check (`db.rls_bypassed`).
+      - TimescaleDB chunks named directly bypassed the policies; RLS without a policy on every
+        chunk, new ones through the `tabayyun_chunk_rls` event trigger.
+      - Warn-first rollout (owner's choice): prod logs an error on a bypassing login; spec 015
+        turns it into exit code 4.
+      - Routes authorize and pass a `Scope`; the workspace is the default one until spec 014.
 - [ ] 013 Keycloak realm and OIDC BFF
 - [ ] 014 Tenant APIs and admin panel v1
 - [ ] 015 Security baseline pass 1

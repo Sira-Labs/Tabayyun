@@ -10,7 +10,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tabayyun.db import get_session
+from tabayyun.authz import ReadScope, WriteScope, get_session
 from tabayyun.db.models import SeriesGroup
 from tabayyun.services import groups as groups_service
 
@@ -121,12 +121,15 @@ def _members_in(members: list[MemberBody]) -> list[groups_service.MemberIn]:
 
 @router.post("", response_model=GroupOut, status_code=201)
 async def create_group(
-    body: Annotated[GroupCreate, Body()], session: Annotated[AsyncSession, Depends(get_session)]
+    body: Annotated[GroupCreate, Body()],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    scope: WriteScope,
 ) -> GroupOut:
     """Create a group; 422 names the invalid field, 409 when the name is taken."""
     try:
         group = await groups_service.create_group(
             session,
+            scope,
             name=body.name,
             kind=body.kind,
             members=_members_in(body.members),
@@ -143,6 +146,7 @@ async def create_group(
 @router.get("", response_model=GroupList)
 async def list_groups(
     session: Annotated[AsyncSession, Depends(get_session)],
+    scope: ReadScope,
     series_id: str | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     cursor: str | None = None,
@@ -156,7 +160,7 @@ async def list_groups(
             raise HTTPException(status_code=422, detail="series_id is not a UUID") from exc
     try:
         rows, next_cursor = await groups_service.list_groups(
-            session, series_id=parsed, limit=limit, cursor=cursor
+            session, scope, series_id=parsed, limit=limit, cursor=cursor
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -165,9 +169,11 @@ async def list_groups(
 
 
 @router.get("/{group_id}", response_model=GroupOut)
-async def get_group(group_id: str, session: Annotated[AsyncSession, Depends(get_session)]) -> GroupOut:
+async def get_group(
+    group_id: str, session: Annotated[AsyncSession, Depends(get_session)], scope: ReadScope
+) -> GroupOut:
     """One group with its members."""
-    group = await groups_service.get_group(session, _parse_id(group_id))
+    group = await groups_service.get_group(session, scope, _parse_id(group_id))
     if group is None:
         raise HTTPException(status_code=404, detail="series group not found")
     return await _out(session, group)
@@ -178,6 +184,7 @@ async def patch_group(
     group_id: str,
     patch: Annotated[GroupPatch, Body()],
     session: Annotated[AsyncSession, Depends(get_session)],
+    scope: WriteScope,
 ) -> GroupOut:
     """Partial update of name, members and params; members are validated against the kind."""
     changes: dict[str, Any] = {}
@@ -190,7 +197,9 @@ async def patch_group(
             )
         changes[field] = _members_in(value) if field == "members" else value
     try:
-        group = await groups_service.patch_group(session, _parse_id(group_id), changes, now=datetime.now(UTC))
+        group = await groups_service.patch_group(
+            session, scope, _parse_id(group_id), changes, now=datetime.now(UTC)
+        )
     except groups_service.GroupError as exc:
         raise _unprocessable(exc) from exc
     except groups_service.GroupNameTakenError as exc:
@@ -201,8 +210,10 @@ async def patch_group(
 
 
 @router.delete("/{group_id}", status_code=204)
-async def delete_group(group_id: str, session: Annotated[AsyncSession, Depends(get_session)]) -> Response:
+async def delete_group(
+    group_id: str, session: Annotated[AsyncSession, Depends(get_session)], scope: WriteScope
+) -> Response:
     """Delete a group; findings it produced stay."""
-    if not await groups_service.delete_group(session, _parse_id(group_id)):
+    if not await groups_service.delete_group(session, scope, _parse_id(group_id)):
         raise HTTPException(status_code=404, detail="series group not found")
     return Response(status_code=204)

@@ -12,6 +12,7 @@ import structlog
 
 from tabayyun import __version__
 from tabayyun.db import guard_schema, make_engine
+from tabayyun.db.roles import check_login
 from tabayyun.jobs import app, runtime
 from tabayyun.settings import get_settings
 
@@ -24,6 +25,7 @@ async def main() -> None:
     engine = make_engine(settings)
     try:
         revision = await guard_schema(engine)
+        await check_login(engine, settings.env)
     finally:
         await engine.dispose()
     if revision is None:

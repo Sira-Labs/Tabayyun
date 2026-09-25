@@ -10,7 +10,7 @@ from httpx import ASGITransport, AsyncClient
 
 from tabayyun.main import create_app
 from tabayyun.services.datasets import DatasetError, parse_last, resolve_window, window_policy
-from tabayyun.settings import Settings
+from tenancy import app_settings
 
 HOUR0 = datetime(2026, 1, 1, tzinfo=UTC)
 WEEK = {"start": "2026-01-01T00:00:00Z", "end": "2026-01-08T00:00:00Z"}
@@ -19,7 +19,7 @@ WEEK = {"start": "2026-01-01T00:00:00Z", "end": "2026-01-08T00:00:00Z"}
 @pytest.fixture
 def app(db_url, fresh_schema):
     fresh_schema("auto")
-    return create_app(Settings(env="test", database_url=db_url, inline_jobs=True))
+    return create_app(app_settings(db_url, inline_jobs=True))
 
 
 @pytest.fixture

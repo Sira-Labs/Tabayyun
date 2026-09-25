@@ -22,10 +22,13 @@ services:
     image: ghcr.io/sira-labs/tabayyun-api:${TABAYYUN_TAG:?set TABAYYUN_TAG (a version or sha-<short>)}
     restart: unless-stopped
     env_file: .env
-    # The image migrates the schema (python -m tabayyun.db.migrate upgrade head) on every start before serving.
+    # The image migrates the schema (python -m tabayyun.db.migrate upgrade head) on every start
+    # before serving: as the table owner, which then provisions the app login the api and the
+    # worker run as (tabayyun_app, row-level security, spec 007).
     environment:
       TABAYYUN_ENV: prod
-      TABAYYUN_DATABASE_URL: postgresql+psycopg://tabayyun:${POSTGRES_PASSWORD}@postgres:5432/tabayyun
+      TABAYYUN_MIGRATION_DATABASE_URL: postgresql+psycopg://tabayyun:${POSTGRES_PASSWORD}@postgres:5432/tabayyun
+      TABAYYUN_DATABASE_URL: postgresql+psycopg://tabayyun_app:${TABAYYUN_APP_DB_PASSWORD:?set TABAYYUN_APP_DB_PASSWORD in .env}@postgres:5432/tabayyun
       TABAYYUN_TIMESCALE: ${TABAYYUN_TIMESCALE:-auto}
     volumes:
       - cache:/data/cache
@@ -42,7 +45,7 @@ services:
     environment:
       TABAYYUN_ENV: prod
       TABAYYUN_ROLE: worker
-      TABAYYUN_DATABASE_URL: postgresql+psycopg://tabayyun:${POSTGRES_PASSWORD}@postgres:5432/tabayyun
+      TABAYYUN_DATABASE_URL: postgresql+psycopg://tabayyun_app:${TABAYYUN_APP_DB_PASSWORD:?set TABAYYUN_APP_DB_PASSWORD in .env}@postgres:5432/tabayyun
       TABAYYUN_TIMESCALE: ${TABAYYUN_TIMESCALE:-auto}
     volumes:
       - cache:/data/cache

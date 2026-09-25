@@ -17,7 +17,8 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tabayyun import core
-from tabayyun.db import get_session
+from tabayyun.authz import ReadScope, Scope, WriteScope, get_session
+from tabayyun.db import for_org
 from tabayyun.services import dataset_runs
 from tabayyun.services import runs as runs_service
 from tabayyun.services import series as series_service
@@ -71,7 +72,7 @@ class DatasetRunCreate(BaseModel):
 
 
 async def _create_dataset_run(
-    request: Request, background: BackgroundTasks, session: AsyncSession
+    request: Request, background: BackgroundTasks, session: AsyncSession, scope: Scope
 ) -> RunCreated:
     """Queue a run of a dataset over its window resolved at `now` (default: the current time)."""
     try:
@@ -92,7 +93,7 @@ async def _create_dataset_run(
             status_code=422, detail=[{"loc": ["body", "now"], "msg": str(exc), "type": "value_error"}]
         ) from exc
     try:
-        run = await dataset_runs.create_dataset_run(session, body.dataset_id, now=now)
+        run = await dataset_runs.create_dataset_run(session, scope, body.dataset_id, now=now)
     except dataset_runs.DatasetNotFoundError as exc:
         raise HTTPException(status_code=404, detail="dataset not found") from exc
     except DatasetError as exc:  # the window resolved at `now` lies outside the core's range
@@ -103,12 +104,12 @@ async def _create_dataset_run(
         await session.commit()
         background.add_task(
             dataset_runs.execute_dataset_run,
-            request.app.state.session_factory,
+            for_org(request.app.state.session_factory, scope.org_id),
             run.id,
             request.app.state.run_cache,
         )
     else:
-        await runs_service.enqueue_run(session, run.id)
+        await runs_service.enqueue_run(session, run.id, scope.org_id)
     return RunCreated(id=str(run.id), status=run.status, created_at=run.created_at)
 
 
@@ -117,6 +118,7 @@ async def create_run(
     request: Request,
     background: BackgroundTasks,
     session: Annotated[AsyncSession, Depends(get_session)],
+    scope: WriteScope,
     file: Annotated[
         UploadFile | None,
         File(description="CSV with a timestamp column and a value column (multipart uploads)"),
@@ -134,7 +136,7 @@ async def create_run(
 ) -> RunCreated:
     """Store the upload (or, with a JSON body, the dataset run), queue the run; 202 with its id."""
     if request.headers.get("content-type", "").split(";")[0].strip() == "application/json":
-        return await _create_dataset_run(request, background, session)
+        return await _create_dataset_run(request, background, session, scope)
     if file is None:
         raise HTTPException(
             status_code=422, detail=[{"loc": ["body", "file"], "msg": "Field required", "type": "missing"}]
@@ -165,7 +167,7 @@ async def create_run(
     except UploadError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     # The form's limits must fit the stored series (spec 004); checked again by the worker.
-    stored = await series_service.find_upload_series(session, series_id)
+    stored = await series_service.find_upload_series(session, scope, series_id)
     overrides = series_service.upload_overrides(params.unit, physical_min, physical_max)
     try:
         series_service.merged_for_run(stored, overrides)
@@ -176,6 +178,7 @@ async def create_run(
         ) from exc
     run = await runs_service.create_run(
         session,
+        scope,
         data=data,
         filename=file.filename or "upload.csv",
         content_type=file.content_type,
@@ -186,10 +189,13 @@ async def create_run(
         # inline worker sees the run. The dependency's exit then finds nothing left to commit.
         await session.commit()
         background.add_task(
-            runs_service.execute_run, request.app.state.session_factory, run.id, request.app.state.run_cache
+            runs_service.execute_run,
+            for_org(request.app.state.session_factory, scope.org_id),
+            run.id,
+            request.app.state.run_cache,
         )
     else:
-        await runs_service.enqueue_run(session, run.id)
+        await runs_service.enqueue_run(session, run.id, scope.org_id)
     return RunCreated(id=str(run.id), status=run.status, created_at=run.created_at)
 
 
@@ -202,9 +208,11 @@ def _parse_id(run_id: str) -> uuid.UUID:
 
 
 @router.get("/{run_id}", response_model=RunOut)
-async def get_run(run_id: str, session: Annotated[AsyncSession, Depends(get_session)]) -> RunOut:
+async def get_run(
+    run_id: str, session: Annotated[AsyncSession, Depends(get_session)], scope: ReadScope
+) -> RunOut:
     """One run; 404 for unknown ids and ids outside the caller's workspace."""
-    run = await runs_service.get_run(session, _parse_id(run_id))
+    run = await runs_service.get_run(session, scope, _parse_id(run_id))
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
     return RunOut(**runs_service.run_to_dict(run))
@@ -213,12 +221,13 @@ async def get_run(run_id: str, session: Annotated[AsyncSession, Depends(get_sess
 @router.get("", response_model=RunList)
 async def list_runs(
     session: Annotated[AsyncSession, Depends(get_session)],
+    scope: ReadScope,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: str | None = None,
 ) -> RunList:
     """Runs newest first with a keyset cursor."""
     try:
-        runs, next_cursor = await runs_service.list_runs(session, limit=limit, cursor=cursor)
+        runs, next_cursor = await runs_service.list_runs(session, scope, limit=limit, cursor=cursor)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return RunList(items=[RunOut(**runs_service.run_to_dict(r)) for r in runs], next_cursor=next_cursor)

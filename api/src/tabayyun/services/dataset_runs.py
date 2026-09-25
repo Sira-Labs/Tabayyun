@@ -34,7 +34,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tabayyun import core
-from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, DatasetSeries, Run, Score, Series
+from tabayyun.authz.scope import Scope
+from tabayyun.db.models import DatasetSeries, Run, Score, Series
 from tabayyun.services import coverage as coverage_service
 from tabayyun.services import datasets as datasets_service
 from tabayyun.services import findings as findings_service
@@ -73,6 +74,7 @@ class Member:
 class Plan:
     """What a dataset run reads and checks, loaded when the run starts."""
 
+    scope: Scope
     dataset_id: uuid.UUID
     start_ns: int
     end_ns: int
@@ -86,19 +88,21 @@ class Plan:
 # Creation (request path)
 
 
-async def create_dataset_run(session: AsyncSession, dataset_id: uuid.UUID, *, now: datetime) -> Run:
+async def create_dataset_run(
+    session: AsyncSession, scope: Scope, dataset_id: uuid.UUID, *, now: datetime
+) -> Run:
     """Queue a run of the dataset over its window resolved at `now`, in the caller's transaction.
 
     Raises DatasetNotFoundError, or DatasetError when that window lies outside the core's range.
     """
-    dataset = await datasets_service.get_dataset(session, dataset_id)
+    dataset = await datasets_service.get_dataset(session, scope, dataset_id)
     if dataset is None:
         raise DatasetNotFoundError(str(dataset_id))
     start, end = datasets_service.resolve_window(dataset.window_policy, now)
     datasets_service.check_core_range(datetime_to_ns(start), datetime_to_ns(end))
     run = Run(
-        org_id=DEFAULT_ORG_ID,
-        workspace_id=DEFAULT_WORKSPACE_ID,
+        org_id=scope.org_id,
+        workspace_id=scope.workspace_id,
         dataset_id=dataset.id,
         trigger=DATASET_TRIGGER,
         status="queued",
@@ -145,6 +149,7 @@ async def _plan(session: AsyncSession, run: Run) -> Plan | None:
         for s in rows
     ]
     plan = Plan(
+        scope=Scope(org_id=run.org_id, workspace_id=run.workspace_id),
         dataset_id=run.dataset_id,
         start_ns=start_ns,
         end_ns=end_ns,
@@ -152,7 +157,7 @@ async def _plan(session: AsyncSession, run: Run) -> Plan | None:
         members=members,
     )
     in_dataset = {m.id for m in members}
-    groups = await groups_service.groups_within(session, list(in_dataset))
+    groups = await groups_service.groups_within(session, plan.scope, list(in_dataset))
     group_members = await groups_service.members_of(session, [g.id for g in groups])
     for group in groups:
         listed = group_members[group.id]
@@ -315,6 +320,7 @@ async def _persist(
             session.add(
                 Score(
                     series_id=m.id,
+                    org_id=plan.scope.org_id,
                     run_id=run_id,
                     layer="raw",
                     method_version=rep.score.method_version,
@@ -325,7 +331,7 @@ async def _persist(
                 )
             )
             outcome = await findings_service.persist_report(
-                session, run_id=run_id, series_id=m.id, report=rep, now=finished_at
+                session, plan.scope, run_id=run_id, series_id=m.id, report=rep, now=finished_at
             )
             totals["n_samples"] += rep.n_samples
             totals["n_findings"] += len(rep.findings)

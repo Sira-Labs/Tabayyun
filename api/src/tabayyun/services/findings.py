@@ -28,9 +28,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tabayyun import core
+from tabayyun.authz.scope import Scope
 from tabayyun.db.models import (
-    DEFAULT_ORG_ID,
-    DEFAULT_WORKSPACE_ID,
     FINDING_STATUSES,
     Finding,
     Metric,
@@ -128,6 +127,7 @@ def _overlap_ratio(a: tuple[datetime, datetime], b: tuple[datetime, datetime]) -
 
 async def _best_candidate(
     session: AsyncSession,
+    scope: Scope,
     *,
     run_id: uuid.UUID,
     series_id: uuid.UUID,
@@ -139,7 +139,7 @@ async def _best_candidate(
     stmt = (
         select(Finding)
         .where(
-            Finding.workspace_id == DEFAULT_WORKSPACE_ID,
+            Finding.workspace_id == scope.workspace_id,
             Finding.series_id == series_id,
             Finding.check_id == incoming.check_id,
             Finding.status.in_(ABSORBING_STATUSES),
@@ -216,7 +216,7 @@ async def _merge(
 
 
 def _metric_rows(
-    run_id: uuid.UUID, series_id: uuid.UUID, metrics: Iterable[dict[str, Any]]
+    org_id: uuid.UUID, run_id: uuid.UUID, series_id: uuid.UUID, metrics: Iterable[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     """One row per (check, name, stored ts); null values (NaN in the core) are skipped.
 
@@ -237,6 +237,7 @@ def _metric_rows(
         latest_ns[key] = ts_ns
         rows[key] = {
             "series_id": series_id,
+            "org_id": org_id,
             "run_id": run_id,
             "check_id": metric["check_id"],
             "name": metric["name"],
@@ -248,6 +249,7 @@ def _metric_rows(
 
 async def persist_report(
     session: AsyncSession,
+    scope: Scope,
     *,
     run_id: uuid.UUID,
     series_id: uuid.UUID,
@@ -259,7 +261,7 @@ async def persist_report(
         text("SELECT pg_advisory_xact_lock(:ns, hashtext(:series))"),
         {"ns": FINDINGS_LOCK_NAMESPACE, "series": str(series_id)},
     )
-    rows = _metric_rows(run_id, series_id, report.metrics)
+    rows = _metric_rows(scope.org_id, run_id, series_id, report.metrics)
     if rows:
         stmt = pg_insert(Metric).values(rows)
         # Re-running the same data rewrites the same (series, check, name, ts) points.
@@ -273,13 +275,13 @@ async def persist_report(
     for incoming in report.findings:
         window = _window(incoming)
         existing = await _best_candidate(
-            session, run_id=run_id, series_id=series_id, incoming=incoming, window=window
+            session, scope, run_id=run_id, series_id=series_id, incoming=incoming, window=window
         )
         if existing is None:
             session.add(
                 Finding(
-                    org_id=DEFAULT_ORG_ID,
-                    workspace_id=DEFAULT_WORKSPACE_ID,
+                    org_id=scope.org_id,
+                    workspace_id=scope.workspace_id,
                     series_id=series_id,
                     check_id=incoming.check_id,
                     dimension=incoming.dimension,
@@ -333,10 +335,10 @@ def finding_to_dict(finding: Finding) -> dict[str, Any]:
 
 
 async def list_findings(
-    session: AsyncSession, *, filters: FindingFilter, limit: int, cursor: str | None
+    session: AsyncSession, scope: Scope, *, filters: FindingFilter, limit: int, cursor: str | None
 ) -> tuple[list[Finding], str | None]:
     """Findings newest window first, keyset-paginated on `(window_start desc, id desc)`."""
-    stmt = select(Finding).where(Finding.workspace_id == DEFAULT_WORKSPACE_ID)
+    stmt = select(Finding).where(Finding.workspace_id == scope.workspace_id)
     if filters.series_id is not None:
         stmt = stmt.where(Finding.series_id == filters.series_id)
     if filters.check_id is not None:
@@ -364,22 +366,28 @@ async def list_findings(
 
 
 async def get_finding(
-    session: AsyncSession, finding_id: uuid.UUID, *, for_update: bool = False
+    session: AsyncSession, scope: Scope, finding_id: uuid.UUID, *, for_update: bool = False
 ) -> Finding | None:
-    """The finding in the default workspace, or None."""
-    stmt = select(Finding).where(Finding.id == finding_id, Finding.workspace_id == DEFAULT_WORKSPACE_ID)
+    """The finding in the scope's workspace, or None."""
+    stmt = select(Finding).where(Finding.id == finding_id, Finding.workspace_id == scope.workspace_id)
     if for_update:
         stmt = stmt.with_for_update()
     return (await session.execute(stmt)).scalars().first()
 
 
 async def change_status(
-    session: AsyncSession, finding_id: uuid.UUID, *, status: str, reason: str | None, now: datetime
+    session: AsyncSession,
+    scope: Scope,
+    finding_id: uuid.UUID,
+    *,
+    status: str,
+    reason: str | None,
+    now: datetime,
 ) -> Finding:
     """Apply one lifecycle transition; raises FindingNotFoundError or TransitionError."""
     if status not in FINDING_STATUSES:
         raise ValueError(f"unknown status {status!r}")
-    finding = await get_finding(session, finding_id, for_update=True)
+    finding = await get_finding(session, scope, finding_id, for_update=True)
     if finding is None:
         raise FindingNotFoundError(str(finding_id))
     if status not in TRANSITIONS[finding.status]:

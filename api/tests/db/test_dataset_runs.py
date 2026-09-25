@@ -9,10 +9,12 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from tabayyun.db import for_org
+from tabayyun.db.models import DEFAULT_ORG_ID
 from tabayyun.main import create_app
 from tabayyun.services import dataset_runs, execution
 from tabayyun.services.timeconv import datetime_to_ns
-from tabayyun.settings import Settings
+from tenancy import app_settings
 
 HOUR0 = datetime(2026, 1, 1, tzinfo=UTC)
 HOUR_NS = 3600 * 10**9
@@ -23,7 +25,7 @@ WINDOW = {"start": HOUR0.isoformat(), "end": (HOUR0 + timedelta(hours=96)).isofo
 def app(db_url, fresh_schema, tmp_path):
     """App on a fresh schema with inline jobs and a local cache."""
     fresh_schema("auto")
-    return create_app(Settings(env="test", database_url=db_url, inline_jobs=True, cache_url=str(tmp_path)))
+    return create_app(app_settings(db_url, inline_jobs=True, cache_url=str(tmp_path)))
 
 
 @pytest.fixture
@@ -210,19 +212,20 @@ async def test_request_errors(client, setup):
 async def test_worker_dispatches_dataset_runs(db_url, fresh_schema, tmp_path):
     """Queued (not inline) dataset runs are executed by the job through `execution.execute`."""
     fresh_schema("auto")
-    inline = create_app(Settings(env="test", database_url=db_url, inline_jobs=True, cache_url=str(tmp_path)))
+    inline = create_app(app_settings(db_url, inline_jobs=True, cache_url=str(tmp_path)))
     async with AsyncClient(transport=ASGITransport(app=inline), base_url="http://test") as c:
         series_id = await _upload(c, "pt-w", _csv(24))
         body = {"name": "W", "series_ids": [series_id], "window": {"last": "24h"}}
         dataset_id = (await c.post("/api/datasets", json=body)).json()["id"]
     await inline.state.engine.dispose()
-    queued = create_app(Settings(env="test", database_url=db_url, inline_jobs=False, cache_url=str(tmp_path)))
+    queued = create_app(app_settings(db_url, inline_jobs=False, cache_url=str(tmp_path)))
     async with AsyncClient(transport=ASGITransport(app=queued), base_url="http://test") as c:
         now = (HOUR0 + timedelta(hours=24)).isoformat()
         r = await c.post("/api/runs", json={"dataset_id": dataset_id, "now": now})
         run_id = uuid.UUID(r.json()["id"])
         assert (await c.get(f"/api/runs/{run_id}")).json()["status"] == "queued"
-        await execution.execute(queued.state.session_factory, run_id, queued.state.run_cache)
+        factory = for_org(queued.state.session_factory, DEFAULT_ORG_ID)
+        await execution.execute(factory, run_id, queued.state.run_cache)
         run = (await c.get(f"/api/runs/{run_id}")).json()
     await queued.state.engine.dispose()
     assert run["status"] == "succeeded", run

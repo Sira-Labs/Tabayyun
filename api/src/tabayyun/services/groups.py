@@ -20,9 +20,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tabayyun.authz.scope import Scope
 from tabayyun.db.models import (
-    DEFAULT_ORG_ID,
-    DEFAULT_WORKSPACE_ID,
     Series,
     SeriesGroup,
     SeriesGroupMember,
@@ -93,13 +92,13 @@ def validate_params(params: dict[str, Any]) -> None:
         raise GroupError("params", f"must be at most {MAX_PARAMS_BYTES} bytes as JSON")
 
 
-async def _check_series_exist(session: AsyncSession, members: Sequence[MemberIn]) -> None:
+async def _check_series_exist(session: AsyncSession, scope: Scope, members: Sequence[MemberIn]) -> None:
     """Every member series exists in the workspace; the first missing one is named."""
     ids = [m.series_id for m in members]
     found = set(
         (
             await session.execute(
-                select(Series.id).where(Series.workspace_id == DEFAULT_WORKSPACE_ID, Series.id.in_(ids))
+                select(Series.id).where(Series.workspace_id == scope.workspace_id, Series.id.in_(ids))
             )
         ).scalars()
     )
@@ -108,21 +107,27 @@ async def _check_series_exist(session: AsyncSession, members: Sequence[MemberIn]
         raise GroupError("members", f"series {missing} not found")
 
 
-async def _name_taken(session: AsyncSession, name: str, exclude: uuid.UUID | None = None) -> bool:
+async def _name_taken(
+    session: AsyncSession, scope: Scope, name: str, exclude: uuid.UUID | None = None
+) -> bool:
     """Whether another group in the workspace has `name`."""
     stmt = select(SeriesGroup.id).where(
-        SeriesGroup.workspace_id == DEFAULT_WORKSPACE_ID, SeriesGroup.name == name
+        SeriesGroup.workspace_id == scope.workspace_id, SeriesGroup.name == name
     )
     if exclude is not None:
         stmt = stmt.where(SeriesGroup.id != exclude)
     return (await session.execute(stmt.limit(1))).first() is not None
 
 
-async def _replace_members(session: AsyncSession, group_id: uuid.UUID, members: Sequence[MemberIn]) -> None:
+async def _replace_members(
+    session: AsyncSession, scope: Scope, group_id: uuid.UUID, members: Sequence[MemberIn]
+) -> None:
     """Store `members` in declaration order, replacing the previous list."""
     await session.execute(delete(SeriesGroupMember).where(SeriesGroupMember.group_id == group_id))
     session.add_all(
-        SeriesGroupMember(group_id=group_id, series_id=m.series_id, role=m.role, position=i)
+        SeriesGroupMember(
+            group_id=group_id, org_id=scope.org_id, series_id=m.series_id, role=m.role, position=i
+        )
         for i, m in enumerate(members)
     )
 
@@ -139,6 +144,7 @@ async def _flush_or_conflict(session: AsyncSession) -> None:
 
 async def create_group(
     session: AsyncSession,
+    scope: Scope,
     *,
     name: str,
     kind: str,
@@ -149,12 +155,12 @@ async def create_group(
     """Validate and store a new group in the caller's transaction."""
     validate_members(kind, members)
     validate_params(params)
-    await _check_series_exist(session, members)
-    if await _name_taken(session, name):
+    await _check_series_exist(session, scope, members)
+    if await _name_taken(session, scope, name):
         raise GroupNameTakenError
     group = SeriesGroup(
-        org_id=DEFAULT_ORG_ID,
-        workspace_id=DEFAULT_WORKSPACE_ID,
+        org_id=scope.org_id,
+        workspace_id=scope.workspace_id,
         name=name,
         kind=kind,
         params=params,
@@ -163,16 +169,16 @@ async def create_group(
     )
     session.add(group)
     await _flush_or_conflict(session)
-    await _replace_members(session, group.id, members)
+    await _replace_members(session, scope, group.id, members)
     await session.flush()
     log.info("group.created", group_id=str(group.id), kind=kind, n_members=len(members))
     return group
 
 
-async def get_group(session: AsyncSession, group_id: uuid.UUID) -> SeriesGroup | None:
+async def get_group(session: AsyncSession, scope: Scope, group_id: uuid.UUID) -> SeriesGroup | None:
     """One group of the workspace, or None."""
     group = await session.get(SeriesGroup, group_id)
-    return group if group is not None and group.workspace_id == DEFAULT_WORKSPACE_ID else None
+    return group if group is not None and group.workspace_id == scope.workspace_id else None
 
 
 async def members_of(
@@ -192,10 +198,10 @@ async def members_of(
 
 
 async def list_groups(
-    session: AsyncSession, *, series_id: uuid.UUID | None, limit: int, cursor: str | None
+    session: AsyncSession, scope: Scope, *, series_id: uuid.UUID | None, limit: int, cursor: str | None
 ) -> tuple[list[SeriesGroup], str | None]:
     """Groups newest first, optionally those containing `series_id`; keyset pagination."""
-    stmt = select(SeriesGroup).where(SeriesGroup.workspace_id == DEFAULT_WORKSPACE_ID)
+    stmt = select(SeriesGroup).where(SeriesGroup.workspace_id == scope.workspace_id)
     if series_id is not None:
         stmt = stmt.where(
             SeriesGroup.id.in_(
@@ -219,14 +225,14 @@ async def list_groups(
 
 
 async def patch_group(
-    session: AsyncSession, group_id: uuid.UUID, changes: dict[str, Any], *, now: datetime
+    session: AsyncSession, scope: Scope, group_id: uuid.UUID, changes: dict[str, Any], *, now: datetime
 ) -> SeriesGroup | None:
     """Update any of name, members and params; the kind is fixed. None when not found."""
-    group = await get_group(session, group_id)
+    group = await get_group(session, scope, group_id)
     if group is None:
         return None
     if "name" in changes and changes["name"] != group.name:
-        if await _name_taken(session, changes["name"], exclude=group.id):
+        if await _name_taken(session, scope, changes["name"], exclude=group.id):
             raise GroupNameTakenError
         group.name = changes["name"]
     if "params" in changes:
@@ -235,16 +241,16 @@ async def patch_group(
     if "members" in changes:
         members: list[MemberIn] = changes["members"]
         validate_members(group.kind, members)
-        await _check_series_exist(session, members)
-        await _replace_members(session, group.id, members)
+        await _check_series_exist(session, scope, members)
+        await _replace_members(session, scope, group.id, members)
     group.updated_at = now
     await _flush_or_conflict(session)
     return group
 
 
-async def delete_group(session: AsyncSession, group_id: uuid.UUID) -> bool:
+async def delete_group(session: AsyncSession, scope: Scope, group_id: uuid.UUID) -> bool:
     """Delete a group and its members; False when not found."""
-    group = await get_group(session, group_id)
+    group = await get_group(session, scope, group_id)
     if group is None:
         return False
     await session.delete(group)
@@ -253,12 +259,14 @@ async def delete_group(session: AsyncSession, group_id: uuid.UUID) -> bool:
     return True
 
 
-async def groups_within(session: AsyncSession, series_ids: Sequence[uuid.UUID]) -> list[SeriesGroup]:
+async def groups_within(
+    session: AsyncSession, scope: Scope, series_ids: Sequence[uuid.UUID]
+) -> list[SeriesGroup]:
     """Groups of the workspace that have at least one member among `series_ids`."""
     rows = await session.execute(
         select(SeriesGroup)
         .where(
-            SeriesGroup.workspace_id == DEFAULT_WORKSPACE_ID,
+            SeriesGroup.workspace_id == scope.workspace_id,
             SeriesGroup.id.in_(
                 select(SeriesGroupMember.group_id).where(SeriesGroupMember.series_id.in_(series_ids))
             ),

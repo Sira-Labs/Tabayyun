@@ -19,7 +19,8 @@ import structlog
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Dataset, DatasetSeries, Series
+from tabayyun.authz.scope import Scope
+from tabayyun.db.models import Dataset, DatasetSeries, Series
 from tabayyun.services.pagination import decode_keyset, encode_keyset
 from tabayyun.services.timeconv import (
     CORE_NS_MAX,
@@ -119,7 +120,9 @@ def resolve_window(policy: dict[str, Any], now: datetime) -> tuple[datetime, dat
     return parse_time(policy["start"]), parse_time(policy["end"])
 
 
-async def _validated_series(session: AsyncSession, series_ids: Sequence[uuid.UUID]) -> list[uuid.UUID]:
+async def _validated_series(
+    session: AsyncSession, scope: Scope, series_ids: Sequence[uuid.UUID]
+) -> list[uuid.UUID]:
     """1–500 distinct series that exist in the workspace."""
     n = len(series_ids)
     if not MIN_SERIES <= n <= MAX_SERIES:
@@ -130,9 +133,7 @@ async def _validated_series(session: AsyncSession, series_ids: Sequence[uuid.UUI
     found = set(
         (
             await session.execute(
-                select(Series.id).where(
-                    Series.workspace_id == DEFAULT_WORKSPACE_ID, Series.id.in_(series_ids)
-                )
+                select(Series.id).where(Series.workspace_id == scope.workspace_id, Series.id.in_(series_ids))
             )
         ).scalars()
     )
@@ -143,14 +144,17 @@ async def _validated_series(session: AsyncSession, series_ids: Sequence[uuid.UUI
 
 
 async def _replace_series(
-    session: AsyncSession, dataset_id: uuid.UUID, series_ids: Sequence[uuid.UUID]
+    session: AsyncSession, scope: Scope, dataset_id: uuid.UUID, series_ids: Sequence[uuid.UUID]
 ) -> None:
     await session.execute(delete(DatasetSeries).where(DatasetSeries.dataset_id == dataset_id))
-    session.add_all(DatasetSeries(dataset_id=dataset_id, series_id=s) for s in series_ids)
+    session.add_all(
+        DatasetSeries(dataset_id=dataset_id, org_id=scope.org_id, series_id=s) for s in series_ids
+    )
 
 
 async def create_dataset(
     session: AsyncSession,
+    scope: Scope,
     *,
     name: str,
     series_ids: Sequence[uuid.UUID],
@@ -159,10 +163,10 @@ async def create_dataset(
 ) -> Dataset:
     """Validate and store a dataset in the caller's transaction."""
     policy = window_policy(window)
-    ids = await _validated_series(session, series_ids)
+    ids = await _validated_series(session, scope, series_ids)
     dataset = Dataset(
-        org_id=DEFAULT_ORG_ID,
-        workspace_id=DEFAULT_WORKSPACE_ID,
+        org_id=scope.org_id,
+        workspace_id=scope.workspace_id,
         name=name,
         selection={},
         window_policy=policy,
@@ -170,16 +174,16 @@ async def create_dataset(
     )
     session.add(dataset)
     await session.flush()
-    await _replace_series(session, dataset.id, ids)
+    await _replace_series(session, scope, dataset.id, ids)
     await session.flush()
     log.info("dataset.created", dataset_id=str(dataset.id), n_series=len(ids), window=policy)
     return dataset
 
 
-async def get_dataset(session: AsyncSession, dataset_id: uuid.UUID) -> Dataset | None:
+async def get_dataset(session: AsyncSession, scope: Scope, dataset_id: uuid.UUID) -> Dataset | None:
     """One dataset of the workspace, or None."""
     dataset = await session.get(Dataset, dataset_id)
-    return dataset if dataset is not None and dataset.workspace_id == DEFAULT_WORKSPACE_ID else None
+    return dataset if dataset is not None and dataset.workspace_id == scope.workspace_id else None
 
 
 async def series_of(
@@ -199,10 +203,10 @@ async def series_of(
 
 
 async def list_datasets(
-    session: AsyncSession, *, limit: int, cursor: str | None
+    session: AsyncSession, scope: Scope, *, limit: int, cursor: str | None
 ) -> tuple[list[Dataset], str | None]:
     """Datasets newest first with keyset pagination."""
-    stmt = select(Dataset).where(Dataset.workspace_id == DEFAULT_WORKSPACE_ID)
+    stmt = select(Dataset).where(Dataset.workspace_id == scope.workspace_id)
     if cursor is not None:
         ts, last_id = decode_keyset(cursor)
         stmt = stmt.where((Dataset.created_at < ts) | ((Dataset.created_at == ts) & (Dataset.id < last_id)))
@@ -218,25 +222,26 @@ async def list_datasets(
 
 
 async def patch_dataset(
-    session: AsyncSession, dataset_id: uuid.UUID, changes: dict[str, Any]
+    session: AsyncSession, scope: Scope, dataset_id: uuid.UUID, changes: dict[str, Any]
 ) -> Dataset | None:
     """Update any of name, series_ids and window; None when not found."""
-    dataset = await get_dataset(session, dataset_id)
+    dataset = await get_dataset(session, scope, dataset_id)
     if dataset is None:
         return None
     if "window" in changes:
         dataset.window_policy = window_policy(changes["window"])
     if "series_ids" in changes:
-        await _replace_series(session, dataset.id, await _validated_series(session, changes["series_ids"]))
+        series_ids = await _validated_series(session, scope, changes["series_ids"])
+        await _replace_series(session, scope, dataset.id, series_ids)
     if "name" in changes:
         dataset.name = changes["name"]
     await session.flush()
     return dataset
 
 
-async def delete_dataset(session: AsyncSession, dataset_id: uuid.UUID) -> bool:
+async def delete_dataset(session: AsyncSession, scope: Scope, dataset_id: uuid.UUID) -> bool:
     """Delete a dataset and its series list; its runs stay with `dataset_id` null."""
-    dataset = await get_dataset(session, dataset_id)
+    dataset = await get_dataset(session, scope, dataset_id)
     if dataset is None:
         return False
     await session.delete(dataset)

@@ -23,7 +23,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tabayyun import core
-from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Finding, Score, Series, Source
+from tabayyun.authz.scope import Scope
+from tabayyun.db.models import Finding, Score, Series, Source
 
 log = structlog.get_logger()
 
@@ -123,17 +124,17 @@ def _values(series: Series | None) -> dict[str, Any]:
 # Upload series (worker and request paths)
 
 
-async def uploads_source_id(session: AsyncSession) -> uuid.UUID | None:
+async def uploads_source_id(session: AsyncSession, scope: Scope) -> uuid.UUID | None:
     """Id of the workspace's Uploads source, or None before the first upload."""
     stmt = select(Source.id).where(
-        Source.workspace_id == DEFAULT_WORKSPACE_ID, Source.name == UPLOADS_SOURCE_NAME
+        Source.workspace_id == scope.workspace_id, Source.name == UPLOADS_SOURCE_NAME
     )
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
-async def find_upload_series(session: AsyncSession, external_id: str) -> Series | None:
+async def find_upload_series(session: AsyncSession, scope: Scope, external_id: str) -> Series | None:
     """The stored upload series with this external id, without creating anything."""
-    source_id = await uploads_source_id(session)
+    source_id = await uploads_source_id(session, scope)
     if source_id is None:
         return None
     stmt = select(Series).where(Series.source_id == source_id, Series.external_id == external_id)
@@ -171,7 +172,7 @@ def meta_for_core(external_id: str, values: Mapping[str, Any]) -> core.SeriesMet
 
 
 async def upsert_upload_series(
-    session: AsyncSession, external_id: str, overrides: Mapping[str, Any], *, now: datetime
+    session: AsyncSession, scope: Scope, external_id: str, overrides: Mapping[str, Any], *, now: datetime
 ) -> Series:
     """Create the Uploads source and the series on first use, then save the upload's metadata.
 
@@ -183,8 +184,8 @@ async def upsert_upload_series(
         pg_insert(Source)
         .values(
             id=uuid.uuid4(),
-            org_id=DEFAULT_ORG_ID,
-            workspace_id=DEFAULT_WORKSPACE_ID,
+            org_id=scope.org_id,
+            workspace_id=scope.workspace_id,
             type="upload",
             name=UPLOADS_SOURCE_NAME,
             config={},
@@ -192,13 +193,13 @@ async def upsert_upload_series(
         )
         .on_conflict_do_nothing(index_elements=["workspace_id", "name"])
     )
-    source_id = await uploads_source_id(session)
+    source_id = await uploads_source_id(session, scope)
     await session.execute(
         pg_insert(Series)
         .values(
             id=uuid.uuid4(),
-            org_id=DEFAULT_ORG_ID,
-            workspace_id=DEFAULT_WORKSPACE_ID,
+            org_id=scope.org_id,
+            workspace_id=scope.workspace_id,
             source_id=source_id,
             external_id=external_id,
             name=external_id,
@@ -227,20 +228,20 @@ async def upsert_upload_series(
 # Reads
 
 
-async def list_sources(session: AsyncSession) -> list[tuple[Source, int]]:
+async def list_sources(session: AsyncSession, scope: Scope) -> list[tuple[Source, int]]:
     """Sources of the workspace with their series counts, by name."""
     n_series = select(func.count()).select_from(Series).where(Series.source_id == Source.id).scalar_subquery()
     stmt = (
         select(Source, n_series)
-        .where(Source.workspace_id == DEFAULT_WORKSPACE_ID)
+        .where(Source.workspace_id == scope.workspace_id)
         .order_by(Source.name, Source.id)
     )
     return [(source, int(count)) for source, count in (await session.execute(stmt)).all()]
 
 
-async def get_series(session: AsyncSession, series_id: uuid.UUID) -> Series | None:
-    """The series in the default workspace, or None."""
-    stmt = select(Series).where(Series.id == series_id, Series.workspace_id == DEFAULT_WORKSPACE_ID)
+async def get_series(session: AsyncSession, scope: Scope, series_id: uuid.UUID) -> Series | None:
+    """The series in the scope's workspace, or None."""
+    stmt = select(Series).where(Series.id == series_id, Series.workspace_id == scope.workspace_id)
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
@@ -306,6 +307,7 @@ def _like_pattern(q: str) -> str:
 
 async def list_series(
     session: AsyncSession,
+    scope: Scope,
     *,
     q: str | None,
     source_id: uuid.UUID | None,
@@ -314,7 +316,7 @@ async def list_series(
     cursor: str | None,
 ) -> tuple[list[Series], str | None]:
     """Series by name, keyset-paginated on `(name, id)`; `q` matches name or external id."""
-    stmt = select(Series).where(Series.workspace_id == DEFAULT_WORKSPACE_ID)
+    stmt = select(Series).where(Series.workspace_id == scope.workspace_id)
     if q:
         pattern = _like_pattern(q)
         stmt = stmt.where(
@@ -337,12 +339,12 @@ async def list_series(
 
 
 async def patch_series(
-    session: AsyncSession, series_id: uuid.UUID, changes: Mapping[str, Any], *, now: datetime
+    session: AsyncSession, scope: Scope, series_id: uuid.UUID, changes: Mapping[str, Any], *, now: datetime
 ) -> Series | None:
     """Apply a partial update after validating the merged result; None when not found."""
     stmt = (
         select(Series)
-        .where(Series.id == series_id, Series.workspace_id == DEFAULT_WORKSPACE_ID)
+        .where(Series.id == series_id, Series.workspace_id == scope.workspace_id)
         .with_for_update()
     )
     series = (await session.execute(stmt)).scalar_one_or_none()

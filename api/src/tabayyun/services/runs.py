@@ -26,7 +26,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from tabayyun import core
-from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Run, Score, Upload
+from tabayyun.authz.scope import Scope
+from tabayyun.db.models import Run, Score, Upload
 from tabayyun.jobs.names import RUN_CHECKS_TASK, RUNS_QUEUE
 from tabayyun.services import coverage as coverage_service
 from tabayyun.services import findings as findings_service
@@ -47,6 +48,9 @@ DEFER_JOB_SQL = text(
     "SELECT procrastinate_defer_jobs_v1(ARRAY[ROW(:queue, :task, 0, NULL, NULL, CAST(:args AS jsonb), NULL)"
     "::procrastinate_job_to_defer_v1])"
 )
+
+
+REAP_SQL = text("SELECT tabayyun_reap_stale_runs(:older_than)")
 
 
 class UploadError(Exception):
@@ -126,13 +130,19 @@ def error_line(exc: BaseException) -> str:
 
 
 async def create_run(
-    session: AsyncSession, *, data: bytes, filename: str, content_type: str | None, params: RunParams
+    session: AsyncSession,
+    scope: Scope,
+    *,
+    data: bytes,
+    filename: str,
+    content_type: str | None,
+    params: RunParams,
 ) -> Run:
     """Insert the upload and the queued run in the caller's transaction."""
     now = utc_now()
     run = Run(
-        org_id=DEFAULT_ORG_ID,
-        workspace_id=DEFAULT_WORKSPACE_ID,
+        org_id=scope.org_id,
+        workspace_id=scope.workspace_id,
         trigger="upload",
         status="queued",
         now_ns=params.now_ns,
@@ -144,6 +154,7 @@ async def create_run(
     session.add(
         Upload(
             run_id=run.id,
+            org_id=scope.org_id,
             filename=filename,
             content_type=content_type,
             size_bytes=len(data),
@@ -157,20 +168,23 @@ async def create_run(
     return run
 
 
-async def enqueue_run(session: AsyncSession, run_id: uuid.UUID) -> None:
-    """Defer the job on the session's connection: same transaction as the run row."""
+async def enqueue_run(session: AsyncSession, run_id: uuid.UUID, org_id: uuid.UUID) -> None:
+    """Defer the job on the session's connection: same transaction as the run row.
+
+    The job carries the run's org: the worker needs it to see the run at all (spec 007).
+    """
+    args = {"run_id": str(run_id), "org_id": str(org_id)}
     await session.execute(
-        DEFER_JOB_SQL,
-        {"queue": RUNS_QUEUE, "task": RUN_CHECKS_TASK, "args": json.dumps({"run_id": str(run_id)})},
+        DEFER_JOB_SQL, {"queue": RUNS_QUEUE, "task": RUN_CHECKS_TASK, "args": json.dumps(args)}
     )
 
 
 # Reads
 
 
-async def get_run(session: AsyncSession, run_id: uuid.UUID) -> Run | None:
-    """The run in the default workspace, or None."""
-    stmt = select(Run).where(Run.id == run_id, Run.workspace_id == DEFAULT_WORKSPACE_ID)
+async def get_run(session: AsyncSession, scope: Scope, run_id: uuid.UUID) -> Run | None:
+    """The run in the scope's workspace, or None."""
+    stmt = select(Run).where(Run.id == run_id, Run.workspace_id == scope.workspace_id)
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
@@ -184,11 +198,13 @@ def decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
     return decode_keyset(cursor)
 
 
-async def list_runs(session: AsyncSession, *, limit: int, cursor: str | None) -> tuple[list[Run], str | None]:
+async def list_runs(
+    session: AsyncSession, scope: Scope, *, limit: int, cursor: str | None
+) -> tuple[list[Run], str | None]:
     """Newest first, keyset-paginated on `(created_at desc, id desc)`."""
     stmt = (
         select(Run)
-        .where(Run.workspace_id == DEFAULT_WORKSPACE_ID)
+        .where(Run.workspace_id == scope.workspace_id)
         .order_by(Run.created_at.desc(), Run.id.desc())
         .limit(limit + 1)
     )
@@ -259,13 +275,14 @@ async def execute_run(
             return
         run.status = "running"
         run.started_at = utc_now()
+        scope = Scope(org_id=run.org_id, workspace_id=run.workspace_id)
         upload = await session.get(Upload, run_id)
         payload = None if upload is None else (upload.data, RunParams.from_json(upload.params))
         # Stored metadata is read, not created: a run that fails leaves no series behind.
         stored = (
             None
             if payload is None
-            else await series_service.find_upload_series(session, payload[1].series_id)
+            else await series_service.find_upload_series(session, scope, payload[1].series_id)
         )
     run_log.info("run.started")
 
@@ -332,12 +349,13 @@ async def execute_run(
                 run_log.warning("run.completion_skipped", reason="run no longer running")
                 return
             series = await series_service.upsert_upload_series(
-                session, params.series_id, overrides, now=finished_at
+                session, scope, params.series_id, overrides, now=finished_at
             )
             cache_target = (series.id, series.source_id)
             session.add(
                 Score(
                     series_id=series.id,
+                    org_id=scope.org_id,
                     run_id=run_id,
                     layer="raw",
                     method_version=report.score.method_version,
@@ -348,7 +366,7 @@ async def execute_run(
                 )
             )
             outcome = await findings_service.persist_report(
-                session, run_id=run_id, series_id=series.id, report=report, now=finished_at
+                session, scope, run_id=run_id, series_id=series.id, report=report, now=finished_at
             )
             stats = {
                 "n_series": 1,
@@ -383,6 +401,7 @@ async def execute_run(
             factory,
             run_id,
             cache,
+            org_id=scope.org_id,
             series_id=cache_target[0],
             source_id=cache_target[1],
             table=table,
@@ -404,6 +423,7 @@ async def _cache_upload(
     run_id: uuid.UUID,
     cache: RunCache,
     *,
+    org_id: uuid.UUID,
     series_id: uuid.UUID,
     source_id: uuid.UUID,
     table: Any,
@@ -436,6 +456,7 @@ async def _cache_upload(
             if written is not None and written.rows:
                 await coverage_service.record(
                     session,
+                    org_id=org_id,
                     series_id=series_id,
                     start_ns=written.start_ns,
                     end_ns=written.end_ns,
@@ -456,20 +477,14 @@ async def _cache_upload(
 async def reap_stale_runs(
     factory: async_sessionmaker[AsyncSession], *, stale_after: timedelta = STALE_AFTER
 ) -> int:
-    """Mark runs `running` for longer than `stale_after` as failed with `worker lost`."""
-    cutoff = utc_now() - stale_after
+    """Mark runs `running` for longer than `stale_after` as failed with `worker lost`.
+
+    The one job that spans orgs: the owner's `tabayyun_reap_stale_runs` function does the work
+    (migration 0004), so the app login needs no tenant context and no way around RLS.
+    """
     async with factory() as session, session.begin():
-        result = await session.execute(
-            update(Run)
-            .where(Run.status == "running", Run.started_at < cutoff)
-            .values(status="failed", error=WORKER_LOST, finished_at=utc_now())
-        )
-        await session.execute(
-            delete(Upload).where(
-                Upload.run_id.in_(select(Run.id).where(Run.status == "failed", Run.error == WORKER_LOST))
-            )
-        )
-    return int(getattr(result, "rowcount", 0) or 0)
+        reaped = await session.scalar(REAP_SQL, {"older_than": stale_after})
+    return int(reaped or 0)
 
 
 async def queue_counts(engine: AsyncEngine) -> dict[str, int] | None:

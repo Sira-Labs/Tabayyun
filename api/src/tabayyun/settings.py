@@ -21,7 +21,13 @@ class Settings(BaseSettings):
     )
     database_url: str = Field(
         default="postgresql+psycopg://tabayyun:tabayyun@localhost:5432/tabayyun",
-        description="SQLAlchemy async URL. Override in every non-dev environment.",
+        description="SQLAlchemy async URL of the app login (a member of tabayyun_app, spec 007) that "
+        "the api and the worker use. Override in every non-dev environment.",
+    )
+    migration_database_url: str | None = Field(
+        default=None,
+        description="URL of the table owner, used only by `python -m tabayyun.db.migrate`; unset "
+        "means `database_url` (a single dev login).",
     )
     db_pool_size: int = Field(default=5, ge=1, description="Connection pool size per process.")
     db_pool_max_overflow: int = Field(default=10, ge=0, description="Extra connections beyond the pool size.")
@@ -57,6 +63,11 @@ class Settings(BaseSettings):
     oidc_client_secret: SecretStr | None = None
     session_secret: SecretStr | None = Field(default=None, description="Key for session-store signing.")
 
+    @property
+    def migration_url(self) -> str:
+        """The owner URL migrations run with: `migration_database_url`, else `database_url`."""
+        return self.migration_database_url or self.database_url
+
     def require_secrets_in_prod(self) -> None:
         """Refuse to start in prod with placeholder or missing secrets.
 
@@ -70,6 +81,11 @@ class Settings(BaseSettings):
             problems.append("TABAYYUN_SESSION_SECRET")
         if "tabayyun:tabayyun@" in self.database_url or _is_placeholder(self.database_url):
             problems.append("TABAYYUN_DATABASE_URL")
+        if self.migration_database_url and (
+            "tabayyun:tabayyun@" in self.migration_database_url
+            or _is_placeholder(self.migration_database_url)
+        ):
+            problems.append("TABAYYUN_MIGRATION_DATABASE_URL")
         if self.oidc_client_secret and _is_placeholder(self.oidc_client_secret.get_secret_value()):
             problems.append("TABAYYUN_OIDC_CLIENT_SECRET")
         if self.s3_secret_access_key and _is_placeholder(self.s3_secret_access_key.get_secret_value()):

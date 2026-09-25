@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tabayyun.db import get_session
+from tabayyun.authz import ReadScope, get_session
 from tabayyun.services import series as series_service
 
 router = APIRouter(prefix="/api/sources", tags=["sources"])
@@ -33,9 +33,11 @@ class SourceList(BaseModel):
 
 
 @router.get("", response_model=SourceList)
-async def list_sources(session: Annotated[AsyncSession, Depends(get_session)]) -> SourceList:
+async def list_sources(
+    session: Annotated[AsyncSession, Depends(get_session)], scope: ReadScope
+) -> SourceList:
     """The workspace's sources with their series counts."""
-    rows = await series_service.list_sources(session)
+    rows = await series_service.list_sources(session, scope)
     return SourceList(
         items=[
             SourceOut(id=str(s.id), type=s.type, name=s.name, n_series=n, created_at=s.created_at)

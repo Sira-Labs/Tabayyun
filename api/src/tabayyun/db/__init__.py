@@ -1,23 +1,30 @@
 """Database access: engine factory, request-scoped sessions, health check and the schema
-revision guard (spec 001).
+revision guard (spec 001), and the tenant context of every transaction (spec 007).
 
 One async engine per process is created by `create_app()` and disposed at shutdown. Request
 handlers receive a session through `get_session`; every session is one transaction that
 commits when the handler returns and rolls back on any exception.
+
+Row-level security (ADR-0007) keys every tenant table on the `app.org_id` setting. A session
+made by `for_org` carries its org in `Session.info`; whenever it begins a transaction on a
+connection, `_set_org_context` sets `app.org_id` for that transaction only (`is_local`), so a
+pooled connection never carries one request's org into the next. A session without an org
+sees no tenant rows and cannot write any.
 """
 
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
 import structlog
 from fastapi import Request
-from sqlalchemy import MetaData, text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import Connection, MetaData, event, text
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, Session, SessionTransaction
 
 from tabayyun.settings import Settings
 
@@ -41,6 +48,12 @@ DB_DEGRADED = "degraded"
 
 # Exit code when the database schema does not match the migrations shipped with the code.
 SCHEMA_MISMATCH_EXIT_CODE = 3
+
+# Postgres SQLSTATE of "permission denied".
+INSUFFICIENT_PRIVILEGE = "42501"
+
+# `Session.info` key holding the org whose rows the session's transactions may touch.
+ORG_INFO_KEY = "tabayyun.org_id"
 
 
 def _error_line(exc: BaseException) -> str:
@@ -70,10 +83,24 @@ def make_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession
     return async_sessionmaker(engine, expire_on_commit=False)
 
 
-async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
-    """FastAPI dependency: one transaction per request, committed on success."""
+def for_org(factory: async_sessionmaker[AsyncSession], org_id: uuid.UUID) -> async_sessionmaker[AsyncSession]:
+    """A session factory like `factory` whose transactions run in `org_id`'s tenant context."""
+    kw = {**factory.kw, "info": {**factory.kw.get("info", {}), ORG_INFO_KEY: str(org_id)}}
+    return async_sessionmaker(class_=factory.class_, **kw)
+
+
+@event.listens_for(Session, "after_begin")
+def _set_org_context(session: Session, transaction: SessionTransaction, connection: Connection) -> None:
+    """Set `app.org_id` for the transaction just begun, when the session names an org."""
+    org_id = session.info.get(ORG_INFO_KEY)
+    if org_id is not None:
+        connection.exec_driver_sql("SELECT set_config('app.org_id', %s, true)", (org_id,))
+
+
+async def open_session(request: Request, org_id: uuid.UUID) -> AsyncIterator[AsyncSession]:
+    """One transaction in `org_id`'s tenant context, committed on success (see `get_session`)."""
     factory: async_sessionmaker[AsyncSession] = request.app.state.session_factory
-    async with factory() as session, session.begin():
+    async with for_org(factory, org_id)() as session, session.begin():
         yield session
 
 
@@ -128,13 +155,21 @@ async def guard_schema(engine: AsyncEngine) -> str | None:
     Returns the head revision when the database matches. Returns None when the database is
     unreachable: the process keeps running and `/healthz` reports `degraded` so a database
     restart does not crash-loop the API. Any revision mismatch (behind, ahead or never
-    migrated) logs both revisions and exits with code 3.
+    migrated) logs both revisions and exits with code 3, as does a login that may not read the
+    revision (a schema from before its grants, spec 007).
     """
     from tabayyun.db.migrate import head_revision
 
     head = head_revision()
     try:
         current = await current_revision(engine)
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) == INSUFFICIENT_PRIVILEGE:
+            # The app login may not read the revision: the schema predates its grants (0004).
+            log.error("db.schema_unreadable", error=_error_line(exc), head=head)
+            raise SystemExit(SCHEMA_MISMATCH_EXIT_CODE) from exc
+        log.warning("db.schema_unverified", error=_error_line(exc), head=head)
+        return None
     except (SQLAlchemyError, OSError) as exc:
         log.warning("db.schema_unverified", error=_error_line(exc), head=head)
         return None

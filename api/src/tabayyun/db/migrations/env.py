@@ -13,7 +13,7 @@ from tabayyun.settings import Settings
 
 config = context.config
 if not config.get_main_option("sqlalchemy.url"):
-    config.set_main_option("sqlalchemy.url", Settings().database_url.replace("%", "%%"))
+    config.set_main_option("sqlalchemy.url", Settings().migration_url.replace("%", "%%"))
 
 target_metadata = Base.metadata
 

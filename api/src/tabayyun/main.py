@@ -10,10 +10,13 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DBAPIError
 
 from tabayyun import __version__
 from tabayyun.db import DB_OK, check_db, guard_schema, make_engine, make_session_factory, worker_commits
+from tabayyun.db.roles import check_login, is_rls_violation
 from tabayyun.jobs.names import WORKER_APPLICATION_NAME
 from tabayyun.routers import checks, datasets, findings, groups, runs, series, sources
 from tabayyun.services import runs as runs_service
@@ -36,6 +39,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         log.info("api.start", env=settings.env, version=__version__, commit=settings.commit)
         # Exits with code 3 on a schema mismatch; an unreachable database only degrades /healthz.
         app.state.schema_revision = await guard_schema(engine)
+        await check_login(engine, settings.env)
         yield
         log.info("api.stop")
         await engine.dispose()
@@ -63,6 +67,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(sources.router)
     app.include_router(groups.router)
     app.include_router(datasets.router)
+
+    @app.exception_handler(DBAPIError)
+    async def rls_violation(request: Request, exc: DBAPIError) -> JSONResponse:
+        """A row refused by row-level security is a bug (a write outside the request's org, spec
+        007): log it for alerting and answer 500. Other database errors take the default path."""
+        if not is_rls_violation(exc):
+            raise exc
+        log.error("db.rls_violation", method=request.method, path=request.url.path, error=str(exc.orig))
+        return JSONResponse(status_code=500, content={"detail": "internal error"})
 
     @app.get("/healthz", tags=["ops"])
     async def healthz() -> dict[str, Any]:

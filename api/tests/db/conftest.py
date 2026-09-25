@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, make_url, text
 
 from tabayyun.db import migrate
 from tabayyun.settings import Settings
+from tenancy import app_url
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
@@ -57,12 +58,13 @@ def timescale_available(db_url: str) -> bool:
 
 @pytest.fixture
 def fresh_schema(db_url: str) -> Callable[[str], None]:
-    """Callable that empties the schema and migrates to head with the given TimescaleDB mode."""
+    """Callable that empties the schema, migrates to head with the given TimescaleDB mode and
+    provisions the app login the tests run as (`tenancy.APP_LOGIN`)."""
 
     def _fresh(mode: str = "auto") -> None:
         """Downgrade to base and upgrade to head with the given TimescaleDB mode."""
         assert_test_database(db_url)
         migrate.downgrade(db_url, "base", timescale=mode)
-        migrate.upgrade(db_url, "head", timescale=mode)
+        migrate.upgrade(db_url, "head", timescale=mode, app_database_url=app_url(db_url))
 
     return _fresh

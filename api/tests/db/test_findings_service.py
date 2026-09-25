@@ -9,13 +9,15 @@ import pytest
 from sqlalchemy import select, update
 
 from tabayyun import core
-from tabayyun.db import make_engine, make_session_factory
+from tabayyun.authz import Scope
+from tabayyun.db import for_org, make_engine, make_session_factory
 from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Finding, Metric, Run
 from tabayyun.services import findings as findings_service
 from tabayyun.services import series as series_service
 from tabayyun.services.timeconv import datetime_to_ns
-from tabayyun.settings import Settings
+from tenancy import app_settings
 
+SCOPE = Scope(org_id=DEFAULT_ORG_ID, workspace_id=DEFAULT_WORKSPACE_ID)
 T0 = 1_700_000_000 * 10**9
 MINUTE = 60 * 10**9
 GAP_EVIDENCE = {"gap_start": 0, "gap_end": 0, "gap_duration_ns": 0}
@@ -87,6 +89,7 @@ class Ctx:
         async with self.factory() as session, session.begin():
             outcome = await findings_service.persist_report(
                 session,
+                SCOPE,
                 run_id=run_id,
                 series_id=self.series_id,
                 report=_report(findings, metrics),
@@ -110,10 +113,10 @@ class Ctx:
 async def ctx(db_url, fresh_schema):
     """Fresh schema, a session factory and one series in the Uploads source."""
     fresh_schema("auto")
-    engine = make_engine(Settings(env="test", database_url=db_url))
-    factory = make_session_factory(engine)
+    engine = make_engine(app_settings(db_url))
+    factory = for_org(make_session_factory(engine), DEFAULT_ORG_ID)
     async with factory() as session, session.begin():
-        series = await series_service.upsert_upload_series(session, "demo", {}, now=datetime.now(UTC))
+        series = await series_service.upsert_upload_series(session, SCOPE, "demo", {}, now=datetime.now(UTC))
     yield Ctx(factory, series.id)
     await engine.dispose()
 
