@@ -102,11 +102,14 @@ jobs:
           echo "web_image=$IMAGE_PREFIX-web:$TAG@$WEB_DIGEST" >> "$GITHUB_OUTPUT"
           if [ -n "$SERVER" ]; then echo "caprover=true" >> "$GITHUB_OUTPUT"; else echo "caprover=false" >> "$GITHUB_OUTPUT"; fi
           if [ -n "$HOST" ]; then echo "host=true" >> "$GITHUB_OUTPUT"; else echo "host=false" >> "$GITHUB_OUTPUT"; fi
-          # The compose bundle always starts a worker; on CapRover it is deployed when its token is set.
-          if [ -n "$WORKER_TOKEN" ] || [ -n "$HOST" ]; then echo "worker=true" >> "$GITHUB_OUTPUT"; else echo "worker=false" >> "$GITHUB_OUTPUT"; fi
-          if [ -n "$WORKER_TOKEN" ]; then echo "caprover_worker=true" >> "$GITHUB_OUTPUT"; else echo "caprover_worker=false" >> "$GITHUB_OUTPUT"; fi
           if [ -z "$SERVER" ] && [ -z "$HOST" ]; then
             echo "::error::neither CAPROVER_SERVER nor DEPLOY_HOST is set on environment 'production'"
+            exit 1
+          fi
+          # Staging must serve the commit on its worker too (job `staged`), so production always
+          # gets that worker: the compose bundle starts one, and on CapRover its token is required.
+          if [ -n "$SERVER" ] && [ -z "$WORKER_TOKEN" ]; then
+            echo "::error::CAPROVER_APP_TOKEN_WORKER is not set on environment 'production': the worker would keep running the old version"
             exit 1
           fi
       - uses: actions/checkout@v7
@@ -131,7 +134,7 @@ jobs:
           token: ${{ secrets.CAPROVER_APP_TOKEN_WEB }}
           image: ${{ steps.gate.outputs.web_image }}
       - name: deploy worker
-        if: steps.gate.outputs.caprover == 'true' && steps.gate.outputs.caprover_worker == 'true'
+        if: steps.gate.outputs.caprover == 'true'
         uses: caprover/deploy-from-github@v2
         with:
           server: ${{ vars.CAPROVER_SERVER }}
@@ -176,5 +179,5 @@ jobs:
         env:
           URL: ${{ vars.CAPROVER_WEB_URL }}
           WANT: ${{ needs.staged.outputs.commit }}
-          CHECK_WORKER: ${{ steps.gate.outputs.worker }}
+          CHECK_WORKER: "true"
         run: .github/scripts/wait-live.sh
