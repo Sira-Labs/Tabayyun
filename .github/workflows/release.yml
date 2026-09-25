@@ -12,6 +12,12 @@ on:
 permissions:
   contents: read
 
+# Runs for the same commit (a push to main and a v* tag on it, or a re-run) go one at a time,
+# so the check that keeps sha-<short> tags immutable cannot race another run.
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
   # GHCR names must be lowercase; github.repository_owner is "Sira-Labs", so the organisation

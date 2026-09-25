@@ -140,6 +140,9 @@ share it. The live system runs RustFS (Apache-2.0); MinIO community builds ended
    | `TABAYYUN_S3_ALLOW_HTTP` | `true` |
    | `TABAYYUN_S3_ACCESS_KEY_ID` / `TABAYYUN_S3_SECRET_ACCESS_KEY` | the limited key from step 2 |
 
+   On staging, create bucket `tabayyun-stg-cache` and a separate key whose policy names
+   `tabayyun-stg-cache` in both resources (the same JSON with the bucket name replaced), and
+   use it on the `-stg` apps. Staging and production never share a key or a bucket.
 4. Check: upload a CSV on `/runs/new`; the run's `stats.cache` shows `"written": true` and the
    bucket gains `raw/<source id>/<bucket>/<yyyy>/<mm>/part-*.parquet`. A store problem never
    fails a run: `stats.cache` then carries `"written": false` and the error, and the worker
@@ -197,8 +200,9 @@ Two workflows (ADR-0016):
   commit.
 
 `sha-<short>` tags are immutable: a re-run of `release.yml` for the same commit leaves them
-on the digest staging got, so promotion and a compose host pulling by that tag get exactly
-the tested images.
+on the digest staging got, and runs for the same commit are serialised so two cannot create
+the tag at once. Promotion resolves that tag to digests and deploys by digest, on CapRover
+(`tag@sha256:…`) and on a compose host (`TABAYYUN_API_IMAGE`, `TABAYYUN_WEB_IMAGE`).
 
 Both wait-until-live checks are `.github/scripts/wait-live.sh`, and both fail when their
 environment has no `CAPROVER_WEB_URL`: CapRover accepts a deploy

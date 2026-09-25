@@ -155,16 +155,19 @@ jobs:
         uses: appleboy/ssh-action@v1.2.5
         env:
           TABAYYUN_TAG: ${{ needs.staged.outputs.tag }}
+          TABAYYUN_API_IMAGE: ${{ steps.gate.outputs.api_image }}
+          TABAYYUN_WEB_IMAGE: ${{ steps.gate.outputs.web_image }}
         with:
           host: ${{ vars.DEPLOY_HOST }}
           username: ${{ vars.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: TABAYYUN_TAG
+          envs: TABAYYUN_TAG,TABAYYUN_API_IMAGE,TABAYYUN_WEB_IMAGE
           script: |
             set -euo pipefail
             cd ~/tabayyun
-            export TABAYYUN_TAG
-            echo "deploying image tag $TABAYYUN_TAG"
+            # The digest-pinned images take precedence over the tag in compose.yaml.
+            export TABAYYUN_TAG TABAYYUN_API_IMAGE TABAYYUN_WEB_IMAGE
+            echo "deploying $TABAYYUN_API_IMAGE and $TABAYYUN_WEB_IMAGE"
             docker compose -f compose.yaml pull
             docker compose -f compose.yaml up -d --remove-orphans
             docker image prune -f

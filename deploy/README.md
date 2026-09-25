@@ -46,7 +46,8 @@ promoted from staging with `promote.yml` (Actions → promote → Run workflow o
 commit staging runs), behind the `production` environment's required reviewer. The CapRover
 setup of both environments is in `caprover.md`, section 5. For a plain Docker host as the
 production target, `promote.yml` ships the compose file over SSH and runs
-`docker compose pull && up -d` with the promoted `sha-<short>` tag; configure the GitHub
+`docker compose pull && up -d` with the promoted images pinned by digest
+(`TABAYYUN_API_IMAGE`, `TABAYYUN_WEB_IMAGE`; manual installs use `TABAYYUN_TAG`); configure the GitHub
 **environment** `production` with:
 
 | Kind | Name | Value |

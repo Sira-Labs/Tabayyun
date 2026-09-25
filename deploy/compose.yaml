@@ -1,11 +1,12 @@
 # Production bundle: images published by .github/workflows/release.yml.
 #   cp .env.example .env   # fill secrets, choose TABAYYUN_TAG
 #   docker compose -f deploy/compose.yaml up -d
-# TABAYYUN_TAG is required: the CD job exports the sha-<short> tag of the images it just
-# built, so a deployment always runs exactly those images; manual installs set a version.
+# TABAYYUN_TAG is required: manual installs set a version or a sha-<short> tag. promote.yml
+# instead sets TABAYYUN_API_IMAGE and TABAYYUN_WEB_IMAGE to the digest-pinned images staging
+# ran (ADR-0016); when set they take precedence over the tag.
 services:
   web:
-    image: ghcr.io/sira-labs/tabayyun-web:${TABAYYUN_TAG:?set TABAYYUN_TAG (a version or sha-<short>)}
+    image: ${TABAYYUN_WEB_IMAGE:-ghcr.io/sira-labs/tabayyun-web:${TABAYYUN_TAG:?set TABAYYUN_TAG (a version or sha-<short>)}}
     restart: unless-stopped
     ports:
       - "80:80"
@@ -19,7 +20,7 @@ services:
         condition: service_healthy
 
   api:
-    image: ghcr.io/sira-labs/tabayyun-api:${TABAYYUN_TAG:?set TABAYYUN_TAG (a version or sha-<short>)}
+    image: ${TABAYYUN_API_IMAGE:-ghcr.io/sira-labs/tabayyun-api:${TABAYYUN_TAG:?set TABAYYUN_TAG (a version or sha-<short>)}}
     restart: unless-stopped
     env_file: .env
     # The image migrates the schema (python -m tabayyun.db.migrate upgrade head) on every start
@@ -39,7 +40,7 @@ services:
   worker:
     # Same image and environment as the api; TABAYYUN_ROLE=worker runs the job worker
     # instead of the server. Scale with `docker compose up -d --scale worker=2`.
-    image: ghcr.io/sira-labs/tabayyun-api:${TABAYYUN_TAG:?set TABAYYUN_TAG (a version or sha-<short>)}
+    image: ${TABAYYUN_API_IMAGE:-ghcr.io/sira-labs/tabayyun-api:${TABAYYUN_TAG:?set TABAYYUN_TAG (a version or sha-<short>)}}
     restart: unless-stopped
     env_file: .env
     environment:
