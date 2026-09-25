@@ -84,7 +84,10 @@ id=$(gh api repos/Sira-Labs/Tabayyun/rulesets --jq '.[] | select(.name=="protect
 gh api -X PUT "repos/Sira-Labs/Tabayyun/rulesets/$id" --input .github/rulesets/protect-main.json
 ```
 
-Until the ruleset is active, the CI and review-thread gates above are convention, not
+`.github/rulesets/protect-release-tags.json` lets only organisation admins create, move or
+delete `v*` tags (a tag on `main` publishes a release, ADR-0016); import it the same way.
+
+Until the rulesets are active, the CI, review-thread and tag gates above are convention, not
 enforcement. Recommended repository settings (Settings → General): automatically delete head branches,
 allow auto-merge, always suggest updating pull request branches, rebase merging off.
 Settings → Code security: private vulnerability reporting, Dependabot alerts and security
