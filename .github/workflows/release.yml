@@ -21,8 +21,43 @@ env:
   TRIVY_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
 
 jobs:
+  # Only main and v* tags on commits that are on main publish and deploy: every deploy job
+  # targets production. "Run workflow" on another branch stops here with a notice, and a v*
+  # tag on a commit outside main fails here, before anything is published.
+  source:
+    name: release source
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      release: ${{ steps.check.outputs.release }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: check
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          case "$REF" in
+            refs/heads/main)
+              echo "release=true" >> "$GITHUB_OUTPUT" ;;
+            refs/tags/v*)
+              if git merge-base --is-ancestor HEAD origin/main; then
+                echo "release=true" >> "$GITHUB_OUTPUT"
+              else
+                echo "::error::$REF points at $(git rev-parse --short HEAD), which is not on main; tag releases from main only"
+                exit 1
+              fi ;;
+            *)
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::$REF is neither main nor a v* tag: nothing is published or deployed" ;;
+          esac
+
   images:
     name: build and publish images
+    needs: source
+    if: needs.source.outputs.release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
