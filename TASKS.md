@@ -200,6 +200,27 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
       - Worker (no HTTP): its connections' `application_name` is `tabayyun-worker/<commit>`;
         `/api/version` lists them from `pg_stat_activity` (no migration, no heartbeat table).
 
+## Production server (ADR-0016, Sīra family decision 25 Sep 2026)
+
+- [x] Release guard: publish and deploy only from `main` and `v*` tags on `main` (PR #59);
+      `main` deploys to the `-stg` apps (`deploy-staging`, environment `staging`); production
+      only through `promote.yml` (environment `production`, owner as required reviewer), which
+      deploys the digests staging runs. Tag ruleset in `.github/rulesets/protect-release-tags.json`.
+- [ ] Owner: environments `staging` (`main`, `v*`) and `production` (`main`, required
+      reviewer), `CAPROVER_*` and `DEPLOY_*` values moved into them and deleted at repository
+      level, tag ruleset imported (`deploy/caprover.md`, section 5).
+- [ ] Owner: `-stg` apps on the current server (persistent data on `tabayyun-db-stg`), DNS
+      `tabayyun-stg.siralabs.org`.
+- [ ] Owner: production server in Germany (CapRover, 2FA, SSH by key, firewall 80/443/22),
+      Hetzner DPA, backup location in another Hetzner location, production apps and RustFS
+      with their own secrets, `tabayyun.siralabs.org` moved; first `promote.yml` run; old
+      `tabayyun-*` apps on the current server deleted.
+- [ ] Production backups: WAL archiving on weekly full and daily delta base backups, nightly
+      `pg_dump -Fc`, versioned copy of the cache bucket, all encrypted to another location
+      (`deploy/caprover.md`, section 7); first timed restore drill into a throwaway database
+      on the production server.
+- [ ] Production Keycloak before the first real user; error reporting to GlitchTip.
+
 ## Sprint 8 — login, tenants and RBAC (forecast end 29 Sep – 1 Oct)
 
 - [x] **007 Row-level security, memberships and roles** — `docs/specs/007-rls-memberships-roles.md`
