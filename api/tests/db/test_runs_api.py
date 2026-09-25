@@ -9,11 +9,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 
 from synth_csv import faulty_csv
-from tabayyun.db.models import Run, Score, Upload
+from tabayyun.db.models import DEFAULT_ORG_ID, Run, Score, Upload
 from tabayyun.jobs.names import RUN_CHECKS_TASK, RUNS_QUEUE
 from tabayyun.main import create_app
 from tabayyun.services import runs as runs_service
-from tabayyun.settings import Settings
+from tenancy import app_settings, org_session
 
 FAULTS = ["gap", "flatline", "nans", "negative"]
 
@@ -22,7 +22,7 @@ FAULTS = ["gap", "flatline", "nans", "negative"]
 def app(db_url, fresh_schema):
     """App on a fresh schema, executing jobs inline in the request's background task."""
     fresh_schema("auto")
-    return create_app(Settings(env="test", database_url=db_url, inline_jobs=True))
+    return create_app(app_settings(db_url, inline_jobs=True))
 
 
 @pytest.fixture
@@ -79,7 +79,7 @@ async def test_run_succeeds_inline_and_matches_stateless_endpoint(client):
 async def test_score_row_persisted(client, app):
     """The worker writes one raw-layer score row for the series."""
     body = await _post_run(client, faulty_csv(FAULTS))
-    async with app.state.session_factory() as session:
+    async with org_session(app) as session:
         scores = list(
             (await session.execute(select(Score).where(Score.run_id == uuid.UUID(body["id"])))).scalars()
         )
@@ -134,7 +134,7 @@ async def test_get_run_unknown_404(client):
 async def test_upload_deleted_after_terminal_state(client, app):
     """The raw bytes are dropped once the run is terminal; the run keeps its stats."""
     body = await _post_run(client, faulty_csv(FAULTS))
-    async with app.state.session_factory() as session:
+    async with org_session(app) as session:
         assert await session.get(Upload, uuid.UUID(body["id"])) is None
         run = await session.get(Run, uuid.UUID(body["id"]))
     assert run is not None and run.status == "succeeded" and run.stats["n_samples"] > 0
@@ -143,13 +143,13 @@ async def test_upload_deleted_after_terminal_state(client, app):
 async def test_enqueue_is_transactional_with_the_run(db_url, fresh_schema):
     """Without inline jobs the run row and the Procrastinate job land in one transaction."""
     fresh_schema("auto")
-    app = create_app(Settings(env="test", database_url=db_url, inline_jobs=False))
+    app = create_app(app_settings(db_url, inline_jobs=False))
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             body = await _post_run(c, faulty_csv([]))
             run = (await c.get(f"/api/runs/{body['id']}")).json()
         assert run["status"] == "queued"
-        async with app.state.session_factory() as session:
+        async with org_session(app) as session:
             jobs = (
                 await session.execute(
                     text("SELECT queue_name, task_name, args, status::text FROM procrastinate_jobs")
@@ -158,7 +158,7 @@ async def test_enqueue_is_transactional_with_the_run(db_url, fresh_schema):
         assert len(jobs) == 1
         queue, task, args, status = jobs[0]
         assert (queue, task, status) == (RUNS_QUEUE, RUN_CHECKS_TASK, "todo")
-        assert args == {"run_id": body["id"]}
+        assert args == {"run_id": body["id"], "org_id": str(DEFAULT_ORG_ID)}
     finally:
         await app.state.engine.dispose()
 
@@ -182,7 +182,7 @@ async def test_late_completion_does_not_overwrite_a_reaped_run(client, app, monk
         import asyncio
 
         async def reap():
-            async with app.state.session_factory() as session, session.begin():
+            async with org_session(app) as session, session.begin():
                 await session.execute(
                     update(Run)
                     .where(Run.status == "running")
@@ -197,7 +197,7 @@ async def test_late_completion_does_not_overwrite_a_reaped_run(client, app, monk
     body = await _post_run(client, faulty_csv([]))
     run = (await client.get(f"/api/runs/{body['id']}")).json()
     assert run["status"] == "failed" and run["error"] == runs_service.WORKER_LOST
-    async with app.state.session_factory() as session:
+    async with org_session(app) as session:
         scores = list(
             (await session.execute(select(Score).where(Score.run_id == uuid.UUID(body["id"])))).scalars()
         )

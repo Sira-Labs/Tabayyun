@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tabayyun import core
-from tabayyun.db import get_session
+from tabayyun.authz import ReadScope, Scope, WriteScope, get_session
 from tabayyun.db.models import Series
 from tabayyun.services import findings as findings_service
 from tabayyun.services import series as series_service
@@ -133,6 +133,7 @@ def _parse_series_id(series_id: str) -> uuid.UUID:
 @router.get("", response_model=SeriesList)
 async def list_series(
     session: Annotated[AsyncSession, Depends(get_session)],
+    scope: ReadScope,
     q: Annotated[str | None, Query(max_length=256)] = None,
     source_id: str | None = None,
     kind: SeriesKind | None = None,
@@ -148,7 +149,7 @@ async def list_series(
             raise HTTPException(status_code=422, detail="source_id is not a UUID") from exc
     try:
         rows, next_cursor = await series_service.list_series(
-            session, q=q or None, source_id=parsed_source, kind=kind, limit=limit, cursor=cursor
+            session, scope, q=q or None, source_id=parsed_source, kind=kind, limit=limit, cursor=cursor
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -159,9 +160,11 @@ async def list_series(
 
 
 @router.get("/{series_id}", response_model=SeriesOut)
-async def get_series(series_id: str, session: Annotated[AsyncSession, Depends(get_session)]) -> SeriesOut:
+async def get_series(
+    series_id: str, session: Annotated[AsyncSession, Depends(get_session)], scope: ReadScope
+) -> SeriesOut:
     """One series with its metadata, latest score and counts."""
-    series = await series_service.get_series(session, _parse_series_id(series_id))
+    series = await series_service.get_series(session, scope, _parse_series_id(series_id))
     if series is None:
         raise HTTPException(status_code=404, detail="series not found")
     stats = await series_service.series_stats(session, [series.id])
@@ -173,12 +176,13 @@ async def patch_series(
     series_id: str,
     patch: Annotated[SeriesPatch, Body()],
     session: Annotated[AsyncSession, Depends(get_session)],
+    scope: WriteScope,
 ) -> SeriesOut:
     """Partial update; the merged metadata is validated and 422 names the offending field."""
     changes = patch.model_dump(include=patch.model_fields_set)
     try:
         series = await series_service.patch_series(
-            session, _parse_series_id(series_id), changes, now=datetime.now(UTC)
+            session, scope, _parse_series_id(series_id), changes, now=datetime.now(UTC)
         )
     except series_service.MetadataError as exc:
         raise HTTPException(
@@ -226,13 +230,13 @@ class ScoreList(BaseModel):
     items: list[ScoreOut]
 
 
-async def _series_id_or_404(session: AsyncSession, series_id: str) -> uuid.UUID:
+async def _series_id_or_404(session: AsyncSession, scope: Scope, series_id: str) -> uuid.UUID:
     """Parse the series id and check it exists in the workspace; 404 otherwise."""
     try:
         parsed = uuid.UUID(series_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="series not found") from exc
-    if await series_service.get_series(session, parsed) is None:
+    if await series_service.get_series(session, scope, parsed) is None:
         raise HTTPException(status_code=404, detail="series not found")
     return parsed
 
@@ -251,13 +255,14 @@ def _time_or_422(value: str | None, name: str) -> datetime | None:
 async def list_metrics(
     series_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    scope: ReadScope,
     name: Annotated[str | None, Query(max_length=128)] = None,
     since: str | None = None,
     until: str | None = None,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> MetricList:
     """Metric points newest first, optionally one metric name and a `[since, until)` range."""
-    parsed = await _series_id_or_404(session, series_id)
+    parsed = await _series_id_or_404(session, scope, series_id)
     rows = await findings_service.list_metrics(
         session,
         parsed,
@@ -280,11 +285,12 @@ async def list_metrics(
 async def list_scores(
     series_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    scope: ReadScope,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     run_id: str | None = None,
 ) -> ScoreList:
     """Score rows newest first; `run_id` selects the rows one run wrote."""
-    parsed = await _series_id_or_404(session, series_id)
+    parsed = await _series_id_or_404(session, scope, series_id)
     parsed_run: uuid.UUID | None = None
     if run_id is not None:
         try:

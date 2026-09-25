@@ -10,7 +10,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tabayyun.db import get_session
+from tabayyun.authz import ReadScope, WriteScope, get_session
 from tabayyun.db.models import Dataset
 from tabayyun.services import datasets as datasets_service
 
@@ -104,12 +104,15 @@ def _unprocessable(exc: datasets_service.DatasetError) -> HTTPException:
 
 @router.post("", response_model=DatasetOut, status_code=201)
 async def create_dataset(
-    body: Annotated[DatasetCreate, Body()], session: Annotated[AsyncSession, Depends(get_session)]
+    body: Annotated[DatasetCreate, Body()],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    scope: WriteScope,
 ) -> DatasetOut:
     """Create a dataset; 422 names the invalid field."""
     try:
         dataset = await datasets_service.create_dataset(
             session,
+            scope,
             name=body.name,
             series_ids=body.series_ids,
             window=body.window.model_dump(),
@@ -123,12 +126,13 @@ async def create_dataset(
 @router.get("", response_model=DatasetList)
 async def list_datasets(
     session: Annotated[AsyncSession, Depends(get_session)],
+    scope: ReadScope,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     cursor: str | None = None,
 ) -> DatasetList:
     """Datasets newest first."""
     try:
-        rows, next_cursor = await datasets_service.list_datasets(session, limit=limit, cursor=cursor)
+        rows, next_cursor = await datasets_service.list_datasets(session, scope, limit=limit, cursor=cursor)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     series = await datasets_service.series_of(session, [d.id for d in rows])
@@ -136,9 +140,11 @@ async def list_datasets(
 
 
 @router.get("/{dataset_id}", response_model=DatasetOut)
-async def get_dataset(dataset_id: str, session: Annotated[AsyncSession, Depends(get_session)]) -> DatasetOut:
+async def get_dataset(
+    dataset_id: str, session: Annotated[AsyncSession, Depends(get_session)], scope: ReadScope
+) -> DatasetOut:
     """One dataset with its series."""
-    dataset = await datasets_service.get_dataset(session, _parse_id(dataset_id))
+    dataset = await datasets_service.get_dataset(session, scope, _parse_id(dataset_id))
     if dataset is None:
         raise HTTPException(status_code=404, detail="dataset not found")
     return await _out(session, dataset)
@@ -149,6 +155,7 @@ async def patch_dataset(
     dataset_id: str,
     patch: Annotated[DatasetPatch, Body()],
     session: Annotated[AsyncSession, Depends(get_session)],
+    scope: WriteScope,
 ) -> DatasetOut:
     """Partial update of name, series and window."""
     changes: dict[str, Any] = {}
@@ -161,7 +168,7 @@ async def patch_dataset(
             )
         changes[field] = value.model_dump() if field == "window" else value
     try:
-        dataset = await datasets_service.patch_dataset(session, _parse_id(dataset_id), changes)
+        dataset = await datasets_service.patch_dataset(session, scope, _parse_id(dataset_id), changes)
     except datasets_service.DatasetError as exc:
         raise _unprocessable(exc) from exc
     if dataset is None:
@@ -170,8 +177,10 @@ async def patch_dataset(
 
 
 @router.delete("/{dataset_id}", status_code=204)
-async def delete_dataset(dataset_id: str, session: Annotated[AsyncSession, Depends(get_session)]) -> Response:
+async def delete_dataset(
+    dataset_id: str, session: Annotated[AsyncSession, Depends(get_session)], scope: WriteScope
+) -> Response:
     """Delete a dataset; its past runs stay, with `dataset_id` cleared."""
-    if not await datasets_service.delete_dataset(session, _parse_id(dataset_id)):
+    if not await datasets_service.delete_dataset(session, scope, _parse_id(dataset_id)):
         raise HTTPException(status_code=404, detail="dataset not found")
     return Response(status_code=204)

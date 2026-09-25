@@ -10,7 +10,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from tabayyun.main import create_app
-from tabayyun.settings import Settings
+from tenancy import app_settings
 
 HOUR0 = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -19,7 +19,7 @@ HOUR0 = datetime(2026, 1, 1, tzinfo=UTC)
 def app(db_url, fresh_schema):
     """App on a fresh schema, executing jobs inline in the request's background task."""
     fresh_schema("auto")
-    return create_app(Settings(env="test", database_url=db_url, inline_jobs=True))
+    return create_app(app_settings(db_url, inline_jobs=True))
 
 
 @pytest.fixture

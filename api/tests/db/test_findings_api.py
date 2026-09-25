@@ -14,7 +14,7 @@ from synth_csv import faulty_csv
 from tabayyun.db.models import Finding
 from tabayyun.main import create_app
 from tabayyun.services.findings import TRANSITIONS
-from tabayyun.settings import Settings
+from tenancy import app_settings, org_session
 
 FAULTS = ["gap", "flatline", "nans", "negative"]
 STATUSES = ["open", "acked", "muted", "resolved"]
@@ -25,7 +25,7 @@ HOUR0 = datetime(2026, 1, 1, tzinfo=UTC)
 def app(db_url, fresh_schema):
     """App on a fresh schema, executing jobs inline in the request's background task."""
     fresh_schema("auto")
-    return create_app(Settings(env="test", database_url=db_url, inline_jobs=True))
+    return create_app(app_settings(db_url, inline_jobs=True))
 
 
 @pytest.fixture
@@ -66,7 +66,7 @@ async def _all_findings(client, **params: str) -> list[dict]:
 
 async def _set_status(app, finding_id: str, status: str) -> None:
     """Force a finding's status directly in the database."""
-    async with app.state.session_factory() as session, session.begin():
+    async with org_session(app) as session, session.begin():
         await session.execute(
             update(Finding).where(Finding.id == uuid.UUID(finding_id)).values(status=status)
         )
@@ -265,7 +265,7 @@ async def test_metrics_and_scores_endpoints(client, app):
         "items"
     ]
     assert named and all(p["name"] == "completeness" for p in named)
-    async with app.state.session_factory() as session:
+    async with org_session(app) as session:
         assert (await session.execute(select(Finding.series_id).limit(1))).scalar_one() == uuid.UUID(
             series_id
         )

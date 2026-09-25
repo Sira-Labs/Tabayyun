@@ -98,3 +98,24 @@ def test_prod_refuses_s3_without_credentials_or_with_placeholders(monkeypatch):
     with pytest.raises(RuntimeError, match="TABAYYUN_S3_SECRET_ACCESS_KEY"):
         placeholder = _prod(cache_url="s3://c", s3_access_key_id="key", s3_secret_access_key="change-me")
         placeholder.require_secrets_in_prod()
+
+
+def test_migration_url_falls_back_to_the_app_url(monkeypatch):
+    """Migrations use TABAYYUN_MIGRATION_DATABASE_URL when set, else the app's URL (spec 007)."""
+    monkeypatch.delenv("TABAYYUN_MIGRATION_DATABASE_URL", raising=False)
+    app = "postgresql+psycopg://tabayyun_app:pw@db/tabayyun"
+    owner = "postgresql+psycopg://tabayyun:pw@db/tabayyun"
+    assert Settings(database_url=app).migration_url == app
+    assert Settings(database_url=app, migration_database_url=owner).migration_url == owner
+
+
+def test_prod_refuses_a_placeholder_migration_url():
+    """A placeholder owner URL is refused in prod like the app URL."""
+    s = Settings(
+        env="prod",
+        session_secret="9f1c2a7d4e8b6c0f3a5d7e9b1c2d4f6a8b0c2d4e",
+        database_url="postgresql+psycopg://tabayyun_app:s3cr3t-long-enough-value@db/tabayyun",
+        migration_database_url="postgresql+psycopg://tabayyun:tabayyun@db/tabayyun",
+    )
+    with pytest.raises(RuntimeError, match="TABAYYUN_MIGRATION_DATABASE_URL"):
+        s.require_secrets_in_prod()

@@ -2,8 +2,9 @@
 
 Conventions:
 - Primary keys are UUIDs generated in Python; timestamps are `timestamptz`.
-- Every tenant table carries `org_id` and `workspace_id` so that spec 007 attaches one
-  row-level security policy per table.
+- Every tenant table carries `org_id` (tables that belong to one workspace also
+  `workspace_id`); spec 007 attaches one row-level security policy per table, keyed by
+  `org_id` (ADR-0007). `users` is the one table without it: a user spans orgs.
 - Enumerated columns are text with named CHECK constraints rather than Postgres enum types,
   so a later spec extends the values with a plain migration.
 - `findings`, `metrics` and `scores` become TimescaleDB hypertables when available; their
@@ -39,9 +40,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from tabayyun.db import Base
 
-# Fixed identifiers of the seed tenant, used until spec 007 brings real memberships.
+# Fixed identifiers of the seed tenant and of the bootstrap user who owns it (spec 007);
+# requests act as that user until login arrives (spec 013).
 DEFAULT_ORG_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 DEFAULT_WORKSPACE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
+BOOTSTRAP_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000003")
 
 SOURCE_TYPES = ("upload", "csv_dir", "pi_web_api", "opc_ua")
 SERIES_KINDS = ("measurement", "counter", "setpoint", "status")
@@ -50,6 +53,8 @@ RUN_STATUSES = ("queued", "running", "succeeded", "failed")
 FINDING_STATUSES = ("open", "acked", "muted", "resolved")
 GROUP_KINDS = ("related", "redundant", "balance")
 MEMBER_ROLES = ("member", "input", "output")
+ORG_ROLES = ("owner", "admin", "member")
+WORKSPACE_ROLES = ("admin", "editor", "viewer")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -68,10 +73,15 @@ def _created_at() -> Mapped[datetime]:
     return mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
-class TenantMixin:
-    """`org_id` and `workspace_id` on every tenant-scoped table."""
+class OrgMixin:
+    """`org_id` on every tenant table: the key of its row-level security policy (spec 007)."""
 
     org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id"), nullable=False)
+
+
+class TenantMixin(OrgMixin):
+    """`org_id` and `workspace_id` on every table that belongs to one workspace."""
+
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False
     )
@@ -94,6 +104,95 @@ class Workspace(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     timezone: Mapped[str] = mapped_column(Text, nullable=False, server_default="UTC")
     created_at: Mapped[datetime] = _created_at()
+
+
+class User(Base):
+    """A person; spans orgs, so no `org_id` and no RLS. Logins arrive with spec 013."""
+
+    __tablename__ = "users"
+    __table_args__ = (UniqueConstraint("email"), CheckConstraint("email = lower(email)", name="email_lower"))
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _created_at()
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class OrgMembership(Base):
+    """A user's role in an org: owner and admin act as admin in every workspace (spec 007)."""
+
+    __tablename__ = "org_memberships"
+    __table_args__ = (CheckConstraint(_in("role", ORG_ROLES), name="role"),)
+
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("orgs.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class WorkspaceMembership(OrgMixin, Base):
+    """A user's direct role in one workspace."""
+
+    __tablename__ = "workspace_memberships"
+    __table_args__ = (
+        CheckConstraint(_in("role", WORKSPACE_ROLES), name="role"),
+        Index("ix_workspace_memberships_user_id", "user_id"),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class Team(OrgMixin, Base):
+    """A named set of users in one org; teams get roles in workspaces."""
+
+    __tablename__ = "teams"
+    __table_args__ = (UniqueConstraint("org_id", "name"),)
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class TeamMember(OrgMixin, Base):
+    """A user in a team."""
+
+    __tablename__ = "team_members"
+    __table_args__ = (Index("ix_team_members_user_id", "user_id"),)
+
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = _created_at()
+
+
+class WorkspaceTeamRole(OrgMixin, Base):
+    """A team's role in one workspace; every member of the team holds it."""
+
+    __tablename__ = "workspace_team_roles"
+    __table_args__ = (CheckConstraint(_in("role", WORKSPACE_ROLES), name="role"),)
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True
+    )
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), primary_key=True
+    )
+    role: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class Source(TenantMixin, Base):
@@ -151,7 +250,7 @@ class Dataset(TenantMixin, Base):
     created_at: Mapped[datetime] = _created_at()
 
 
-class DatasetSeries(Base):
+class DatasetSeries(OrgMixin, Base):
     __tablename__ = "dataset_series"
 
     dataset_id: Mapped[uuid.UUID] = mapped_column(
@@ -181,7 +280,7 @@ class SeriesGroup(TenantMixin, Base):
     )
 
 
-class SeriesGroupMember(Base):
+class SeriesGroupMember(OrgMixin, Base):
     """One member of a series group, in declaration order (`position`)."""
 
     __tablename__ = "series_group_members"
@@ -225,7 +324,7 @@ class Run(TenantMixin, Base):
     created_at: Mapped[datetime] = _created_at()
 
 
-class Upload(Base):
+class Upload(OrgMixin, Base):
     __tablename__ = "uploads"
 
     run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("runs.id"), primary_key=True)
@@ -275,7 +374,7 @@ class Finding(TenantMixin, Base):
     )
 
 
-class Metric(Base):
+class Metric(OrgMixin, Base):
     __tablename__ = "metrics"
     __table_args__ = (
         PrimaryKeyConstraint("series_id", "check_id", "name", "ts"),
@@ -290,7 +389,7 @@ class Metric(Base):
     value: Mapped[float] = mapped_column(Double, nullable=False)
 
 
-class Score(Base):
+class Score(OrgMixin, Base):
     __tablename__ = "scores"
     __table_args__ = (
         PrimaryKeyConstraint("series_id", "layer", "computed_at"),
@@ -307,7 +406,7 @@ class Score(Base):
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class Coverage(Base):
+class Coverage(OrgMixin, Base):
     __tablename__ = "coverage"
     __table_args__ = (PrimaryKeyConstraint("series_id", "layer", "range_start"),)
 

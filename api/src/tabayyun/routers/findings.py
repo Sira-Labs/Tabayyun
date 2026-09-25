@@ -14,7 +14,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tabayyun.db import get_session
+from tabayyun.authz import ReadScope, WriteScope, get_session
 from tabayyun.db.models import FINDING_STATUSES
 from tabayyun.services import findings as findings_service
 from tabayyun.services.findings import DIMENSIONS, MAX_REASON_CHARS, SEVERITIES, FindingFilter
@@ -113,6 +113,7 @@ def _statuses(value: str | None) -> tuple[str, ...] | None:
 @router.get("", response_model=FindingList)
 async def list_findings(
     session: Annotated[AsyncSession, Depends(get_session)],
+    scope: ReadScope,
     series_id: str | None = None,
     check_id: Annotated[str | None, Query(max_length=128)] = None,
     severity: str | None = None,
@@ -139,7 +140,7 @@ async def list_findings(
     )
     try:
         rows, next_cursor = await findings_service.list_findings(
-            session, filters=filters, limit=limit, cursor=cursor
+            session, scope, filters=filters, limit=limit, cursor=cursor
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -157,9 +158,11 @@ def _finding_id(finding_id: str) -> uuid.UUID:
 
 
 @router.get("/{finding_id}", response_model=FindingOut)
-async def get_finding(finding_id: str, session: Annotated[AsyncSession, Depends(get_session)]) -> FindingOut:
+async def get_finding(
+    finding_id: str, session: Annotated[AsyncSession, Depends(get_session)], scope: ReadScope
+) -> FindingOut:
     """One finding; 404 for unknown ids."""
-    finding = await findings_service.get_finding(session, _finding_id(finding_id))
+    finding = await findings_service.get_finding(session, scope, _finding_id(finding_id))
     if finding is None:
         raise HTTPException(status_code=404, detail="finding not found")
     return FindingOut(**findings_service.finding_to_dict(finding))
@@ -170,11 +173,13 @@ async def change_status(
     finding_id: str,
     change: Annotated[StatusChange, Body()],
     session: Annotated[AsyncSession, Depends(get_session)],
+    scope: WriteScope,
 ) -> FindingOut:
     """Move a finding through its lifecycle; 409 with the current status on a forbidden move."""
     try:
         finding = await findings_service.change_status(
             session,
+            scope,
             _finding_id(finding_id),
             status=change.status,
             reason=change.reason,

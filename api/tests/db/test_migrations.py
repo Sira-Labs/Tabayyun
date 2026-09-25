@@ -20,6 +20,13 @@ EXPECTED_TABLES = {
     "coverage",
     "series_groups",
     "series_group_members",
+    # Spec 007.
+    "users",
+    "org_memberships",
+    "workspace_memberships",
+    "teams",
+    "team_members",
+    "workspace_team_roles",
 }
 HYPERTABLES = {"findings", "metrics", "scores"}
 
@@ -140,5 +147,64 @@ def test_0003_downgrades_and_upgrades(db_url, fresh_schema):
     finally:
         engine.dispose()
     migrate.upgrade(db_url, "head", timescale="auto")
+    assert _current_revision(db_url) == migrate.head_revision()
+    migrate.check(db_url)
+
+
+ORG_X = "00000000-0000-0000-0000-0000000000f1"
+# Rows at revision 0003 in a second org, one per table that gains `org_id` in 0004.
+SEED_0003 = f"""
+INSERT INTO orgs (id, name) VALUES ('{ORG_X}', 'x');
+INSERT INTO workspaces (id, org_id, name) VALUES ('00000000-0000-0000-0000-0000000000f2', '{ORG_X}', 'x');
+INSERT INTO sources (id, org_id, workspace_id, type, name)
+  VALUES ('00000000-0000-0000-0000-0000000000f3', '{ORG_X}', '00000000-0000-0000-0000-0000000000f2',
+          'upload', 's');
+INSERT INTO series (id, org_id, workspace_id, source_id, external_id, name)
+  VALUES ('00000000-0000-0000-0000-0000000000f4', '{ORG_X}', '00000000-0000-0000-0000-0000000000f2',
+          '00000000-0000-0000-0000-0000000000f3', 'x', 'x');
+INSERT INTO runs (id, org_id, workspace_id, trigger, status)
+  VALUES ('00000000-0000-0000-0000-0000000000f5', '{ORG_X}', '00000000-0000-0000-0000-0000000000f2', 'upload',
+          'queued');
+INSERT INTO uploads (run_id, filename, size_bytes, data)
+  VALUES ('00000000-0000-0000-0000-0000000000f5', 'f.csv', 1, 'x');
+INSERT INTO metrics (series_id, run_id, check_id, name, ts, value)
+  VALUES ('00000000-0000-0000-0000-0000000000f4', '00000000-0000-0000-0000-0000000000f5', 'c', 'm', now(), 1);
+INSERT INTO scores (series_id, run_id, method_version, overall, computed_at)
+  VALUES ('00000000-0000-0000-0000-0000000000f4', '00000000-0000-0000-0000-0000000000f5', '1', 90, now());
+INSERT INTO coverage (series_id, range_start, range_end, rows)
+  VALUES ('00000000-0000-0000-0000-0000000000f4', now(), now(), 1);
+INSERT INTO datasets (id, org_id, workspace_id, name)
+  VALUES ('00000000-0000-0000-0000-0000000000f6', '{ORG_X}', '00000000-0000-0000-0000-0000000000f2', 'd');
+INSERT INTO dataset_series (dataset_id, series_id)
+  VALUES ('00000000-0000-0000-0000-0000000000f6', '00000000-0000-0000-0000-0000000000f4');
+INSERT INTO series_groups (id, org_id, workspace_id, name, kind)
+  VALUES ('00000000-0000-0000-0000-0000000000f7', '{ORG_X}', '00000000-0000-0000-0000-0000000000f2', 'g',
+          'related');
+INSERT INTO series_group_members (group_id, series_id, role, position)
+  VALUES ('00000000-0000-0000-0000-0000000000f7', '00000000-0000-0000-0000-0000000000f4', 'member', 0);
+"""
+BACKFILLED = ("uploads", "metrics", "scores", "coverage", "dataset_series", "series_group_members")
+
+
+@pytest.mark.parametrize("mode", ["auto", "off"])
+def test_0004_backfills_org_ids_and_downgrades(db_url, fresh_schema, mode):
+    """Child rows written before 0004 get their parent's org; 0004 downgrades and upgrades cleanly."""
+    fresh_schema(mode)
+    migrate.downgrade(db_url, "0003", timescale=mode)
+    engine = create_engine(db_url)
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql(SEED_0003)
+        migrate.upgrade(db_url, "head", timescale=mode)
+        with engine.connect() as conn:
+            for table in BACKFILLED:
+                orgs = conn.execute(text(f"SELECT DISTINCT org_id::text FROM {table}")).scalars().all()  # noqa: S608
+                assert orgs == [ORG_X], table
+        migrate.downgrade(db_url, "0003", timescale=mode)
+        assert "org_id" not in {c["name"] for c in inspect(engine).get_columns("uploads")}
+        assert "users" not in inspect(engine).get_table_names()
+    finally:
+        engine.dispose()
+    migrate.upgrade(db_url, "head", timescale=mode)
     assert _current_revision(db_url) == migrate.head_revision()
     migrate.check(db_url)

@@ -16,6 +16,7 @@ from tabayyun.db.models import Coverage, Series
 from tabayyun.main import create_app
 from tabayyun.services.timeconv import datetime_to_ns
 from tabayyun.settings import Settings
+from tenancy import app_settings, org_session
 
 
 async def _run(settings: Settings, csv: bytes) -> tuple[dict, list[Coverage], Series]:
@@ -29,7 +30,7 @@ async def _run(settings: Settings, csv: bytes) -> tuple[dict, list[Coverage], Se
         )
         assert r.status_code == 202, r.text
         run = (await client.get(f"/api/runs/{r.json()['id']}")).json()
-    async with app.state.session_factory() as session:
+    async with org_session(app) as session:
         series = (await session.execute(select(Series).where(Series.external_id == "cached"))).scalar_one()
         cov = list((await session.execute(select(Coverage).where(Coverage.series_id == series.id))).scalars())
     await app.state.engine.dispose()
@@ -37,7 +38,7 @@ async def _run(settings: Settings, csv: bytes) -> tuple[dict, list[Coverage], Se
 
 
 def _settings(db_url: str, **cache: object) -> Settings:
-    return Settings(env="test", database_url=db_url, inline_jobs=True, **cache)
+    return app_settings(db_url, inline_jobs=True, **cache)
 
 
 async def test_upload_run_writes_cache_and_coverage(db_url, fresh_schema, tmp_path):
