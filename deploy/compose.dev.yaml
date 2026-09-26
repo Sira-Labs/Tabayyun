@@ -16,14 +16,18 @@ services:
       timeout: 3s
       retries: 20
 
+  # The `tabayyun` realm (spec 013) is imported at start from the rendered dev copy; `make
+  # dev-infra` renders it for http://localhost:5173. Google and GitHub need real OAuth apps;
+  # passkeys work on localhost as they are.
   keycloak:
-    image: quay.io/keycloak/keycloak:26.3
-    command: ["start-dev", "--http-port=8080"]
+    image: quay.io/keycloak/keycloak:26.4
+    command: ["start-dev", "--http-port=8080", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin   # dev only
       KC_DB: dev-file
     ports: ["8080:8080"]
+    volumes: ["./keycloak/dev:/opt/keycloak/data/import:ro"]
 
   # S3-compatible store for the Parquet cache (spec 006), same version as the live system.
   # Create the bucket once: `make dev-bucket`. Dev credentials only.

@@ -25,6 +25,9 @@ node_modules/
 *.tsbuildinfo
 coverage/
 
+# Rendered dev realm (make dev-infra)
+deploy/keycloak/dev/
+
 # Env & secrets (never commit)
 .env
 .env.*

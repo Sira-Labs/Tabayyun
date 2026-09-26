@@ -28,6 +28,7 @@ demo:
 	  --quality-col quality --unit "m3/h" --physical-max 200 --pretty
 
 dev-infra:
+	mkdir -p deploy/keycloak/dev && python3 deploy/keycloak/render.py http://localhost:5173 > deploy/keycloak/dev/tabayyun-realm.json
 	docker compose -f deploy/compose.dev.yaml up -d
 
 # Bucket for the dev cache on RustFS (TABAYYUN_CACHE_URL=s3://tabayyun-cache, see api/.env.example).

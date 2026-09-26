@@ -62,7 +62,7 @@ login could ever become owner: the migration's bootstrap owner has no login.
 | Route | Request | Response |
 |---|---|---|
 | `GET /api/auth/sign-in-options` | — | `{"google": true, "github": true, "passkey": true}` from `SIGN_IN_METHODS` (Arqam's `/v1/sign-in-options`) |
-| `GET /api/auth/login?method=google&next=/runs` | `method` ∈ enabled methods; `next`: relative path, default `/` | 302 to the IdP's authorization endpoint (`response_type=code`, `scope=openid email profile`, `state`, `nonce`, `code_challenge` S256). `google`/`github` add `kc_idp_hint`. `passkey` adds `acr_values=passkey` and `prompt=login`. Sets `__Host-tby_login` (flow ID, 10 min). An unknown or disabled method → 400 |
+| `GET /api/auth/login?method=google&next=/runs` | `method` ∈ enabled methods; `next`: relative path, default `/` | 302 to the IdP's authorization endpoint (`response_type=code`, `scope=openid email profile`, `state`, `nonce`, `code_challenge` S256). `google`/`github` add `kc_idp_hint`. `passkey` adds `prompt=login`. Sets `__Host-tby_login` (flow ID, 10 min). An unknown or disabled method → 400 |
 | `GET /api/auth/callback?code&state` | from the IdP | 302 to `next`; sets `__Host-tby_session`; clears `__Host-tby_login` |
 | `GET /api/auth/me` | cookie | 200 with `user` (`id`, `email`, `display_name`), `org` (`id`, `name`), `role` (e.g. `owner`), `sign_in_method` (`google`/`github`/`passkey`) and `passkey_fresh` (bool); 401 without a session; 403 `{"detail": "no_access"}` for a signed-in user without a membership |
 | `GET /api/auth/sessions` | cookie | `[{"id", "current", "sign_in_method", "created_at", "last_seen_at", "user_agent", "ip_address"}]`, never tokens |
@@ -104,19 +104,22 @@ membership. The function:
   - URLs: redirect URI `<PUBLIC_URL>/api/auth/callback`, post-logout redirect
     `<PUBLIC_URL>/`, back-channel logout URL `<PUBLIC_URL>/api/auth/backchannel-logout` with
     "session required".
-  - Mappers: `identity_provider` (the broker alias, `google` or `github`) and `acr`.
+  - Mappers: `identity_provider` (user-session note, the broker alias `google` or `github`)
+    and `amr` (Keycloak's authentication-method-reference mapper).
 - **Identity providers:**
   - Google: "trust email".
   - GitHub: scope `user:email`, "trust email" (GitHub returns the primary verified email).
-  - First-broker-login flow: link to an existing Keycloak user only by a verified email with
-    the same address, create otherwise, no review page. This is Arqam's rule: an unverified
-    email never links.
+  - First-broker-login flow: create the user if the email is new, else link to the existing
+    Keycloak user with that email; no review page. Linking is safe because both providers are
+    trusted for email and the API refuses `email_verified = false`. This is Arqam's rule: an
+    unverified email never links.
 - **Passkeys:**
   - Policy: WebAuthn passwordless, discoverable credentials, user verification required,
     relying-party ID = the Keycloak host.
-  - Browser flow: passkey sign-in beside the identity-provider buttons, no password form.
-  - Step-up: level of assurance `passkey` mapped to the passkey authenticator, so
-    `acr_values=passkey` asks for it and the ID token's `acr` reports it.
+  - Browser flow, in this order: identity-provider redirector (follows `kc_idp_hint`),
+    SSO cookie, passkey. There is no password form.
+  - The passkey execution carries the AMR reference `passkey` with a maximum age of 120 s, so
+    the ID token's `amr` contains `passkey` only right after a passkey sign-in.
 - **Account settings:** no self-registration with a password; no password credential type
   at all ("no passwords", as Arqam). Brute-force protection and OTP policy as in the master
   realm.
@@ -164,12 +167,15 @@ membership. The function:
    - **ID token:** it must pass signature (JWKS, RS256/ES256 only), `iss`, `aud`/`azp`, `exp`
      (60 s leeway), `nonce` and `email_verified = true`. Any failure gives 400
      `invalid_token`.
-   - **Sign-in method:** `passkey` when the token's `acr` is `passkey`, else the
-     `identity_provider` claim (`google`/`github`). For `method=passkey`, a token whose `acr`
-     is not `passkey` gives 400 `passkey_required`. A token with neither claim, or a derived
-     method that differs from the flow's recorded `method`, gives 400 `invalid_token`:
-     `kc_idp_hint` only routes the request, so a user could otherwise finish a Google flow
-     through another provider, including one switched off in `TABAYYUN_SIGN_IN_METHODS`.
+   - **Sign-in method:** the token must prove the method the flow recorded, and the session
+     stores that method.
+     - `passkey`: `amr` contains `passkey`, else 400 `passkey_required`.
+     - `google`/`github`: the `identity_provider` claim equals the method, else 400
+       `invalid_token`. `kc_idp_hint` only routes the request, so a user could otherwise
+       finish a Google flow through another provider, including one switched off in
+       `TABAYYUN_SIGN_IN_METHODS`.
+     - Only the claim for the recorded method counts: within one Keycloak session the other
+       claim can be stale (see "Implementation notes").
    - **User and membership:** `tabayyun_login(...)` runs with issuer, `sub`, lower-cased email,
      `email_verified`, `name` and `TABAYYUN_ADMIN_EMAIL`. Its admin rule (Arqam's bootstrap
      rule): the user becomes `owner` of the default org only if the email equals
@@ -227,10 +233,10 @@ membership. The function:
 
 - [ ] With a mocked IdP (discovery, JWKS, token endpoint), the full code+PKCE flow sets a
       session cookie for each method: `google` and `github` via `identity_provider`,
-      `passkey` via `acr`. `/api/auth/me` returns the user and the method; an API list call
+      `passkey` via `amr`. `/api/auth/me` returns the user and the method; an API list call
       returns their org's rows.
 - [ ] State mismatch, a reused flow, an expired flow, a wrong nonce, a wrong audience, a bad
-      signature, `alg=none`, `email_verified=false`, a passkey flow without `acr=passkey` and
+      signature, `alg=none`, `email_verified=false`, a passkey flow without `passkey` in `amr` and
       a Google flow that returns through GitHub each fail with the stated status, and no
       session is created.
 - [ ] `next=https://evil.example` and `next=//evil.example` redirect to `/`. A disabled
@@ -320,6 +326,35 @@ Web (`web/src/__tests__`):
      Keycloak should get its final host name before the first passkey is registered.
 6. **No magic link:** Keycloak has no built-in email-link sign-in. Google, GitHub and passkeys
    cover sign-in; revisit if a customer needs email-only sign-in.
+
+## Implementation notes
+
+Recorded while implementing (2026-09-26); the spec above is corrected accordingly.
+
+- **Passkey proof via `amr`, not `acr`.** Checked with Keycloak 26.4.7 in a container, with a
+  virtual authenticator in Chromium: register a passkey, then sign in with it only.
+  - Keycloak's AMR mapper reports the reference configured on the passkey execution
+    (`amr: ["passkey"]`).
+  - A level-of-assurance step-up (`acr_values`) would have needed conditional sub-flows and
+    does not add anything here, so the login asks for no `acr`.
+- **Stale claims within one Keycloak session.** Measured with a second realm standing in for
+  Google (alias `google`):
+  - a passkey sign-in after a Google sign-in still carries `identity_provider: google`;
+  - a Google sign-in shortly after a passkey sign-in still carries `amr: ["passkey"]`.
+
+  Hence the callback checks only the claim of the method it asked for, and the passkey
+  reference expires after 120 s instead of 12 h.
+- **Flow order.** With the SSO cookie first, `kc_idp_hint` was ignored while a Keycloak
+  session existed, and `prompt=login` turned "Continue with Google" into a passkey
+  re-authentication. The identity-provider redirector now runs first. Only the passkey
+  method sends `prompt=login`.
+- **First broker login.** "Detect existing broker user" with "Automatically set existing
+  user" failed with `invalid_user_credentials`. "Create user if unique" or "Automatically set
+  existing user", as alternatives, links an existing email and creates a new one (checked
+  with the fake Google realm).
+- **Placeholder URL.** The realm export carries `__PUBLIC_URL__`; `deploy/keycloak/render.py
+  <url>` fills it for an install. `make dev-infra` renders it for `http://localhost:5173`,
+  and the dev Keycloak (now 26.4) imports it at start.
 
 ## Out of scope
 
