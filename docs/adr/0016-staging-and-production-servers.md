@@ -20,9 +20,12 @@ ADR adopts it for Tabayyun.
 ## Decision
 
 - **Two independent CapRover servers at Hetzner.**
-  - The **current server becomes staging and tools**: `tabayyun-*-stg` apps at
+  - The **current server becomes staging and tools**: the staging apps at
     `tabayyun-stg.siralabs.org`, GlitchTip with the uptime checks for both servers, and
-    experiments.
+    experiments. The staging apps are either new `tabayyun-*-stg` apps (the default names
+    `release.yml` deploys to) or the current `tabayyun-*` apps kept as they are, named in
+    the `staging` environment's `CAPROVER_APP_*` variables. CapRover cannot rename an app,
+    and on separate servers the names do not collide.
   - A **new server in Germany becomes production**: `tabayyun-*` apps at
     `tabayyun.siralabs.org` with their own RustFS (the Parquet cache), and Keycloak once
     it serves real users.

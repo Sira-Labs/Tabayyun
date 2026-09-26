@@ -35,6 +35,11 @@ A staging app that keeps an unsuffixed address talks to the old apps on the same
 `srv-captain--rustfs` resolves only inside one CapRover, so each server runs its own RustFS
 and that endpoint name stays the same.
 
+CapRover cannot rename an app: its name is also its internal address. The current install
+can therefore either stay as staging under its unsuffixed names (route A in "Move from one
+server to two", section 5) or be replaced by new `-stg` apps (route B). Either way, only the
+server tells staging and production apart; the table above describes route B.
+
 Rules:
 
 - Personal data of real people lives only on production. People who used the current
@@ -218,7 +223,7 @@ Settings → Environments:
 
 | Environment | Deployment branches and tags | Protection | Variables | Secrets |
 |---|---|---|---|---|
-| `staging` | Selected: branch `main`, tag pattern `v*` | none | `CAPROVER_SERVER` (the current server's `https://captain.…`), `CAPROVER_WEB_URL=https://tabayyun-stg.siralabs.org`; optional `CAPROVER_APP_API`, `_WEB`, `_WORKER` (default `tabayyun-*-stg`) | `CAPROVER_APP_TOKEN_API`, `_WEB`, `_WORKER` of the `-stg` apps |
+| `staging` | Selected: branch `main`, tag pattern `v*` | none | `CAPROVER_SERVER` (the current server's `https://captain.…`), `CAPROVER_WEB_URL=https://tabayyun-stg.siralabs.org`; `CAPROVER_APP_API`, `_WEB`, `_WORKER` = `tabayyun-api`, `tabayyun-web`, `tabayyun-worker` for route A (unset, they default to `tabayyun-*-stg`) | `CAPROVER_APP_TOKEN_API`, `_WEB`, `_WORKER` of the staging apps |
 | `production` | Selected: branch `main` | Required reviewer: the owner; prevent self-review off | `CAPROVER_SERVER` (the production server), `CAPROVER_WEB_URL=https://tabayyun.siralabs.org`; for a compose host instead: `DEPLOY_HOST`, `DEPLOY_USER` | `CAPROVER_APP_TOKEN_API`, `_WEB`, `_WORKER` of the production apps; `DEPLOY_SSH_KEY` for a compose host |
 
 Then delete the repository-level `CAPROVER_*` variables and secrets (Settings → Secrets and
@@ -233,10 +238,21 @@ tags.
 
 ### Move from one server to two (owner)
 
-1. Create the `-stg` apps on the current server (sections 1–4 with the suffix; persistent
-   data on `tabayyun-db-stg`), with new secrets and the `tabayyun-stg.siralabs.org` domain
-   on `tabayyun-web-stg`. Set up the two environments above; the next push to `main`
-   deploys staging.
+1. Staging on the current server, by one of two routes. Point `tabayyun-stg.siralabs.org`
+   at the current server either way.
+   - **A. Keep the current apps as staging** (least work). Nothing is recreated: the
+     database, variables, internal addresses, cache bucket and app tokens stay as they are.
+     On `tabayyun-web`, connect `tabayyun-stg.siralabs.org` next to `tabayyun.siralabs.org`
+     and enable HTTPS. On the `staging` environment, set `CAPROVER_APP_API=tabayyun-api`,
+     `CAPROVER_APP_WEB=tabayyun-web`, `CAPROVER_APP_WORKER=tabayyun-worker`, and move the
+     existing three app tokens there. The data in these apps becomes staging data, which
+     suits the rule above: it is test data, and people sign up again on production.
+   - **B. New `-stg` apps**, the same names as Arqam and Suffa use. Create them as in
+     sections 1–4 with the suffix (persistent data on `tabayyun-db-stg`), with new secrets
+     and the `tabayyun-stg.siralabs.org` domain on `tabayyun-web-stg`. The `CAPROVER_APP_*`
+     variables stay unset.
+
+   Set up the two environments above; the next push to `main` deploys staging.
 2. Order the production server, install CapRover (strong dashboard password, 2FA, SSH by
    key only, firewall open for 80, 443 and 22), and create the production apps and RustFS
    with production secrets. Leave `tabayyun.siralabs.org` on the old server for now.
@@ -246,11 +262,13 @@ tags.
 4. Point `tabayyun.siralabs.org` at the new server, connect it on `tabayyun-web` (Enable and
    Force HTTPS), set `CAPROVER_WEB_URL=https://tabayyun.siralabs.org` on `production`, and
    check `GET /api/version` on the public domain.
-5. Remove the old install from the current server: delete the old `tabayyun-db`,
-   `tabayyun-api`, `tabayyun-worker` and `tabayyun-web` apps together with their volumes
-   (CapRover asks when deleting an app; afterwards `docker volume ls | grep tabayyun` should
-   list only `-stg` volumes), and the old `tabayyun-cache` bucket and its objects from RustFS
-   (RustFS itself stays: staging uses it). The data is test data, but it should not linger.
+5. Clean up the current server.
+   - Route A: remove `tabayyun.siralabs.org` from `tabayyun-web`; the apps stay as staging.
+   - Route B: delete the old `tabayyun-db`, `tabayyun-api`, `tabayyun-worker` and
+     `tabayyun-web` apps together with their volumes (CapRover asks when deleting an app;
+     afterwards `docker volume ls | grep tabayyun` should list only `-stg` volumes), and the
+     old `tabayyun-cache` bucket and its objects from RustFS (RustFS itself stays: staging
+     uses it). The data is test data, but it should not linger.
 
 Images are public on GHCR, so neither server needs registry credentials; if the repository
 ever becomes private, add the registry under CapRover → Cluster → Docker Registries first.

@@ -209,12 +209,14 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
 - [ ] Owner: environments `staging` (`main`, `v*`) and `production` (`main`, required
       reviewer), `CAPROVER_*` and `DEPLOY_*` values moved into them and deleted at repository
       level, tag ruleset imported (`deploy/caprover.md`, section 5).
-- [ ] Owner: `-stg` apps on the current server (persistent data on `tabayyun-db-stg`), DNS
-      `tabayyun-stg.siralabs.org`.
+- [ ] Owner: staging on the current server, DNS `tabayyun-stg.siralabs.org`. Either keep the
+      current `tabayyun-*` apps (route A: `CAPROVER_APP_*` on `staging`, second domain on
+      `tabayyun-web`) or create `-stg` apps (route B); `deploy/caprover.md`, section 5.
 - [ ] Owner: production server in Germany (CapRover, 2FA, SSH by key, firewall 80/443/22),
       Hetzner DPA, backup location in another Hetzner location, production apps and RustFS
-      with their own secrets, `tabayyun.siralabs.org` moved; first `promote.yml` run; old
-      `tabayyun-*` apps on the current server deleted.
+      with their own secrets, `tabayyun.siralabs.org` moved; first `promote.yml` run; on the
+      current server, the domain removed from `tabayyun-web` (route A) or the old apps
+      deleted (route B).
 - [ ] Production backups: WAL archiving on weekly full and daily delta base backups, nightly
       `pg_dump -Fc`, versioned copy of the cache bucket, all encrypted to another location
       (`deploy/caprover.md`, section 7); first timed restore drill into a throwaway database
