@@ -232,34 +232,34 @@ membership. The function:
 
 ## Acceptance criteria
 
-- [ ] With a mocked IdP (discovery, JWKS, token endpoint), the full code+PKCE flow sets a
+- [x] With a mocked IdP (discovery, JWKS, token endpoint), the full code+PKCE flow sets a
       session cookie for each method: `google` and `github` via `identity_provider`,
       `passkey` via `amr`. `/api/auth/me` returns the user and the method; an API list call
       returns their org's rows.
-- [ ] State mismatch, a reused flow, an expired flow, a wrong nonce, a wrong audience, a bad
+- [x] State mismatch, a reused flow, an expired flow, a wrong nonce, a wrong audience, a bad
       signature, `alg=none`, `email_verified=false`, a passkey flow without `passkey` in `amr` and
       a Google flow that returns through GitHub each fail with the stated status, and no
       session is created.
-- [ ] `next=https://evil.example` and `next=//evil.example` redirect to `/`. A disabled
+- [x] `next=https://evil.example` and `next=//evil.example` redirect to `/`. A disabled
       `method` gives 400.
-- [ ] `TABAYYUN_ADMIN_EMAIL` becomes owner at the first verified login, only while the
+- [x] `TABAYYUN_ADMIN_EMAIL` becomes owner at the first verified login, only while the
       default org has no other owner; a second login or a changed setting grants nothing.
       Any other email gets a session and a 403 `no_access` from `/me` and from API routes.
-- [ ] Unknown, revoked, idle-expired and absolute-expired sessions each give 401. A disabled
+- [x] Unknown, revoked, idle-expired and absolute-expired sessions each give 401. A disabled
       user gives 401 and loses every session.
-- [ ] `GET /api/auth/sessions` lists only the user's sessions without tokens. Deleting another
+- [x] `GET /api/auth/sessions` lists only the user's sessions without tokens. Deleting another
       user's session gives 404. `revoke-others` keeps only the current one.
-- [ ] Unsafe requests without `X-Tabayyun-Request` or with a foreign `Origin` give 403. The
+- [x] Unsafe requests without `X-Tabayyun-Request` or with a foreign `Origin` give 403. The
       back-channel logout is exempt.
-- [ ] Logout revokes the session and returns an end-session URL with `id_token_hint`. A
+- [x] Logout revokes the session and returns an end-session URL with `id_token_hint`. A
       back-channel logout token revokes the matching sessions; an invalid one gives 400.
-- [ ] `require_recent_passkey()` passes a passkey session younger than 12 h. It refuses an
+- [x] `require_recent_passkey()` passes a passkey session younger than 12 h. It refuses an
       older one, and a Google or GitHub one, with 403 `second-factor-required`.
-- [ ] `prod` refuses `AUTH_MODE=dev`, missing or placeholder OIDC settings, and an empty
+- [x] `prod` refuses `AUTH_MODE=dev`, missing or placeholder OIDC settings, and an empty
       `TABAYYUN_ADMIN_EMAIL`.
-- [ ] RLS still isolates: a session of org A cannot read org B's rows (007's cross-tenant test
+- [x] RLS still isolates: a session of org A cannot read org B's rows (007's cross-tenant test
       with real sessions instead of the dependency override).
-- [ ] The web app:
+- [x] The web app:
       - shows the enabled sign-in buttons;
       - redirects to `/login` when signed out;
       - shows "No access yet" for 403;
@@ -268,7 +268,7 @@ membership. The function:
 - [ ] Staging: the owner signs in with Google, with GitHub and with a passkey on
       `tabayyun-stg.siralabs.org`, sees the example data, sees the three sessions under
       devices and signs out. An anonymous `curl` of `/api/series` gives 401.
-- [ ] `docs/frontend/02-security-baseline.md`: the authentication and session items and the
+- [x] `docs/frontend/02-security-baseline.md`: the authentication and session items and the
       CSRF item are ticked.
 
 ## Test cases

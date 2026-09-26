@@ -31,7 +31,9 @@ curl -fsSL https://raw.githubusercontent.com/Sira-Labs/Tabayyun/main/deploy/comp
 curl -fsSL https://raw.githubusercontent.com/Sira-Labs/Tabayyun/main/deploy/.env.example -o .env
 # edit .env: POSTGRES_PASSWORD and TABAYYUN_SESSION_SECRET (both mandatory, generate with
 # `openssl rand -base64 36`), TABAYYUN_APP_DB_PASSWORD (`openssl rand -hex 24`),
-# TABAYYUN_DOMAIN for automatic TLS; OIDC values stay empty until the auth router ships
+# TABAYYUN_DOMAIN for automatic TLS, and the sign-in settings (TABAYYUN_PUBLIC_URL,
+# TABAYYUN_OIDC_ISSUER, TABAYYUN_OIDC_CLIENT_SECRET, TABAYYUN_ADMIN_EMAIL; the realm setup
+# is in caprover.md, "Sign-in")
 docker compose up -d
 ```
 

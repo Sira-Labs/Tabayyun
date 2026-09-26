@@ -251,7 +251,25 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
       - Routes authorize and pass a `Scope`; the workspace is the default one until spec 014.
 - [ ] 013 Keycloak realm and OIDC BFF — `docs/specs/013-keycloak-oidc-bff.md` (decisions
       confirmed 26 Sep: Keycloak stays; Google, GitHub and passkeys, admin bootstrap, devices
-      and the 12 h passkey gate aligned with Arqam specs 008–012).
+      and the 12 h passkey gate aligned with Arqam specs 008–012). Implemented 26 Sep; every
+      criterion but the staging sign-in is met. The PR stays a draft until the owner steps
+      below are done, because staging runs `prod` and the api refuses to start without them.
+      - The per-method claim check (`amr` for passkeys, `identity_provider` for Google and
+        GitHub) replaces `acr`: within one Keycloak session the other claim can be stale.
+      - joserfc and httpx instead of Authlib, which deprecates `authlib.jose` and its httpx
+        client in 1.8 in favour of them.
+      - `sessions` has a uuid `id` (what devices name) besides the unique `id_hash`.
+      - Every router but `/api/auth` requires a principal, so the stateless check run is not
+        anonymous either; the CSRF header is required in dev mode too.
+      - Callback failures are short HTML pages with the status and a link to `/login`.
+      - Checked against Keycloak 26.4 with a virtual passkey authenticator: API and SPA,
+        passkey and brokered sign-in, devices, IdP logout and back-channel logout.
+- [ ] Owner: roll out spec 013 on staging (`deploy/caprover.md`, section 4a): import the
+      realm rendered for `https://tabayyun-stg.siralabs.org` on miftachun, regenerate the
+      `tabayyun-api` client secret, paste the Google and GitHub client credentials into the
+      realm's identity providers, set `TABAYYUN_PUBLIC_URL`, `TABAYYUN_OIDC_ISSUER`,
+      `TABAYYUN_OIDC_CLIENT_SECRET` and `TABAYYUN_ADMIN_EMAIL` on `tabayyun-api`, then merge
+      the PR and sign in with Google, GitHub and a passkey.
 - [ ] 014 Tenant APIs and admin panel v1
 - [ ] 015 Security baseline pass 1
 

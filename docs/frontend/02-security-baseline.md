@@ -4,10 +4,10 @@ This is the checklist the first release must pass. Each item maps to a CI gate, 
 review item, or an ops runbook entry.
 
 ## Authentication and sessions
-- [ ] OIDC Authorization Code + PKCE only; `state` and `nonce` verified; ID token signature and `aud` validated.
-- [ ] Session: server-side store, opaque ID, `__Host-tby_session`, `HttpOnly; Secure; SameSite=Lax; Path=/`.
-- [ ] Rotate session on login and privilege change; idle timeout 12 h, absolute 30 d (org-configurable); server-side revocation; IdP back-channel logout handled.
-- [ ] MFA and passkeys enforced per organisation via the IdP.
+- [x] OIDC Authorization Code + PKCE only; `state` and `nonce` verified; ID token signature and `aud` validated. (Spec 013: `tabayyun.auth.oidc`.)
+- [x] Session: server-side store, opaque ID, `__Host-tby_session`, `HttpOnly; Secure; SameSite=Lax; Path=/`. (Spec 013: Postgres `sessions`, HMAC of the token at rest.)
+- [x] Rotate session on login and privilege change; idle timeout 12 h, absolute 30 d (org-configurable); server-side revocation; IdP back-channel logout handled. (Spec 013; the timeouts are per install. Role changes arrive with spec 014, which revokes the member's sessions.)
+- [ ] MFA and passkeys enforced per organisation via the IdP. (Spec 013 offers passkeys and `require_recent_passkey()`; spec 014 applies it to admins; per-organisation enforcement later.)
 - [ ] API tokens (for integrations) are random, hashed at rest, scoped to a workspace and role, expiring, revocable.
 
 ## Authorization
@@ -29,7 +29,7 @@ review item, or an ops runbook entry.
 - [ ] CORS disabled (same origin) except documented API-token clients.
 
 ## CSRF and XSS
-- [ ] Unsafe methods require `X-Tabayyun-Request` header and JSON content type; `Origin` checked.
+- [x] Unsafe methods require `X-Tabayyun-Request` header and JSON content type; `Origin` checked. (Spec 013: `CsrfMiddleware`. Uploads are multipart, so the header, not the content type, is what a cross-site form cannot send.)
 - [ ] No inline scripts; no `dangerouslySetInnerHTML`; DOMPurify for markdown.
 
 ## Secrets and configuration
