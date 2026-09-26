@@ -19,8 +19,9 @@ digest; bump it deliberately, together with a database upgrade note.
 
 ## Run on CapRover
 
-See [caprover.md](caprover.md): three apps from the published images, TLS by CapRover,
-and a `deploy-caprover` job in the release workflow.
+See [caprover.md](caprover.md): three apps from the published images, TLS by CapRover, a
+staging server that every push to `main` deploys, and a production server that runs the
+staging-tested digest after the owner's approval (ADR-0016).
 
 ## Run on any Docker host
 
@@ -40,9 +41,14 @@ load balancer.
 
 ## Continuous deployment from GitHub Actions
 
-The `deploy` job in the release workflow ships the compose file to a host over SSH and runs
-`docker compose pull && up -d`. Its steps are skipped until you configure a GitHub
-**environment** named `production` with:
+Every push to `main` deploys to staging (`release.yml`, job `deploy-staging`); production is
+promoted from staging with `promote.yml` (Actions → promote → Run workflow on `main`, with the
+commit staging runs), behind the `production` environment's required reviewer. The CapRover
+setup of both environments is in `caprover.md`, section 5. For a plain Docker host as the
+production target, `promote.yml` ships the compose file over SSH and runs
+`docker compose pull && up -d` with the promoted images pinned by digest
+(`TABAYYUN_API_IMAGE`, `TABAYYUN_WEB_IMAGE`; manual installs use `TABAYYUN_TAG`); configure the GitHub
+**environment** `production` with:
 
 | Kind | Name | Value |
 |---|---|---|
@@ -50,12 +56,11 @@ The `deploy` job in the release workflow ships the compose file to a host over S
 | variable | `DEPLOY_USER` | SSH user with permission to run docker |
 | secret | `DEPLOY_SSH_KEY` | private key for that user (use a dedicated deploy key) |
 
-Repository → Settings → Environments → New environment → `production`. Add a required
-reviewer there if you want a manual approval gate before each deployment.
+Repository → Settings → Environments → New environment → `production`, with the owner as
+required reviewer and `main` as the only deployment branch.
 
-The host needs Docker Engine with the compose plugin and outbound access to `ghcr.io`.
-The job logs in to the registry with the workflow's own token, which works for public
-packages and for private packages of the same repository.
+The host needs Docker Engine with the compose plugin and outbound access to `ghcr.io`; the
+images are public, so it pulls without logging in.
 
 ## Air-gapped installs
 

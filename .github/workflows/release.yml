@@ -1,7 +1,8 @@
 name: release
 
-# Builds the production images on every push to main and on version tags, scans them with
-# Trivy, publishes them to the GitHub Container Registry, and (optionally) deploys them.
+# Builds the images on every push to main and on version tags, scans them with Trivy,
+# publishes them to the GitHub Container Registry and deploys them to staging. Production is
+# promoted separately (promote.yml, ADR-0016).
 on:
   push:
     branches: [main]
@@ -10,6 +11,12 @@ on:
 
 permissions:
   contents: read
+
+# Runs for the same commit (a push to main and a v* tag on it, or a re-run) go one at a time,
+# so the check that keeps sha-<short> tags immutable cannot race another run.
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
@@ -21,9 +28,10 @@ env:
   TRIVY_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
 
 jobs:
-  # Only main and v* tags on commits that are on main publish and deploy: every deploy job
-  # targets production. "Run workflow" on another branch stops here with a notice, and a v*
-  # tag on a commit outside main fails here, before anything is published.
+  # Only main and v* tags on commits that are on main publish and deploy: what is published
+  # here is what production is later promoted from. "Run workflow" on another branch stops
+  # here with a notice, and a v* tag on a commit outside main fails here, before anything is
+  # published.
   source:
     name: release source
     runs-on: ubuntu-latest
@@ -123,81 +131,53 @@ jobs:
         env:
           IMAGE: ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}
           META: ${{ steps.meta.outputs.json }}
+        # `sha-<short>` tags are immutable: a re-run for the same commit builds a new digest but
+        # leaves the existing sha tag where staging deployed it, so promote.yml, which resolves
+        # the sha tag, always gets the digest staging ran. Branch, version and latest tags move.
         run: |
-          # shellcheck disable=SC2046 # one "-t <tag>" pair per tag
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$META") "$IMAGE"
+          args=()
+          while read -r tag; do
+            if [[ "$tag" == *:sha-* ]] && docker buildx imagetools inspect "$tag" >/dev/null 2>&1; then
+              echo "::notice::$tag already exists and is not moved (sha tags are immutable)"
+              continue
+            fi
+            args+=(-t "$tag")
+          done < <(jq -r '.tags[]' <<< "$META")
+          docker buildx imagetools create "${args[@]}" "$IMAGE"
 
-  deploy:
-    name: deploy to docker host
-    needs: images
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: read
-    # Environment-scoped variables are only visible once the environment is bound, i.e. inside
-    # steps; a job-level `if` cannot see them. Every step therefore carries the gate.
-    environment: production
-    steps:
-      - name: configured?
-        id: gate
-        run: |
-          if [ -n "${{ vars.DEPLOY_HOST }}" ]; then echo "on=true" >> "$GITHUB_OUTPUT"; else echo "on=false" >> "$GITHUB_OUTPUT"; echo "DEPLOY_HOST not set on environment 'production'; skipping deploy"; fi
-      - uses: actions/checkout@v7
-        if: steps.gate.outputs.on == 'true'
-      - name: copy compose bundle
-        if: steps.gate.outputs.on == 'true'
-        uses: appleboy/scp-action@v1.0.0
-        with:
-          host: ${{ vars.DEPLOY_HOST }}
-          username: ${{ vars.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          source: "deploy/compose.yaml"
-          target: "~/tabayyun"
-          strip_components: 1
-      - name: pull and restart
-        if: steps.gate.outputs.on == 'true'
-        uses: appleboy/ssh-action@v1.2.5
-        env:
-          TABAYYUN_TAG: ${{ needs.images.outputs.tag }}
-        with:
-          host: ${{ vars.DEPLOY_HOST }}
-          username: ${{ vars.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: TABAYYUN_TAG
-          script: |
-            set -euo pipefail
-            cd ~/tabayyun
-            export TABAYYUN_TAG
-            echo "deploying image tag $TABAYYUN_TAG"
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            docker compose -f compose.yaml pull
-            docker compose -f compose.yaml up -d --remove-orphans
-            docker image prune -f
-
-  deploy-caprover:
-    name: deploy to CapRover
+  # main and v* tags deploy to staging only (ADR-0016). Production gets the staging-tested
+  # digest through promote.yml, behind the `production` environment's required reviewer.
+  deploy-staging:
+    name: deploy to staging
     needs: images
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
-    # Runs only when the repository variable CAPROVER_SERVER is set (Settings → Secrets and
-    # variables → Actions → Variables) and the two app tokens exist as secrets.
+    # CAPROVER_SERVER, CAPROVER_WEB_URL and the CAPROVER_APP_TOKEN_* secrets belong to the
+    # `staging` environment. Environment values are only visible inside steps, so every step
+    # carries the gate; the job is a no-op until CAPROVER_SERVER is set there.
+    environment: staging
     steps:
       - name: configured?
         id: gate
         env:
+          SERVER: ${{ vars.CAPROVER_SERVER }}
           WORKER_TOKEN: ${{ secrets.CAPROVER_APP_TOKEN_WORKER }}
         run: |
-          if [ -n "${{ vars.CAPROVER_SERVER }}" ]; then echo "on=true" >> "$GITHUB_OUTPUT"; else echo "on=false" >> "$GITHUB_OUTPUT"; echo "CAPROVER_SERVER not set; skipping CapRover deploy"; fi
+          if [ -n "$SERVER" ]; then echo "on=true" >> "$GITHUB_OUTPUT"; else echo "on=false" >> "$GITHUB_OUTPUT"; echo "::notice::CAPROVER_SERVER not set on environment 'staging'; skipping the deploy"; fi
           # The worker app is optional until it exists: deployed only when its token is set.
           if [ -n "$WORKER_TOKEN" ]; then echo "worker=true" >> "$GITHUB_OUTPUT"; else echo "worker=false" >> "$GITHUB_OUTPUT"; echo "CAPROVER_APP_TOKEN_WORKER not set; skipping worker deploy"; fi
+      - uses: actions/checkout@v7
+        if: steps.gate.outputs.on == 'true'
+        with:
+          persist-credentials: false
       - name: deploy api
         if: steps.gate.outputs.on == 'true'
         uses: caprover/deploy-from-github@v2
         with:
           server: ${{ vars.CAPROVER_SERVER }}
-          app: ${{ vars.CAPROVER_APP_API || 'tabayyun-api' }}
+          app: ${{ vars.CAPROVER_APP_API || 'tabayyun-api-stg' }}
           token: ${{ secrets.CAPROVER_APP_TOKEN_API }}
           image: ${{ env.IMAGE_PREFIX }}-api:${{ needs.images.outputs.tag }}
       - name: deploy web
@@ -205,7 +185,7 @@ jobs:
         uses: caprover/deploy-from-github@v2
         with:
           server: ${{ vars.CAPROVER_SERVER }}
-          app: ${{ vars.CAPROVER_APP_WEB || 'tabayyun-web' }}
+          app: ${{ vars.CAPROVER_APP_WEB || 'tabayyun-web-stg' }}
           token: ${{ secrets.CAPROVER_APP_TOKEN_WEB }}
           image: ${{ env.IMAGE_PREFIX }}-web:${{ needs.images.outputs.tag }}
       - name: deploy worker
@@ -213,38 +193,13 @@ jobs:
         uses: caprover/deploy-from-github@v2
         with:
           server: ${{ vars.CAPROVER_SERVER }}
-          app: ${{ vars.CAPROVER_APP_WORKER || 'tabayyun-worker' }}
+          app: ${{ vars.CAPROVER_APP_WORKER || 'tabayyun-worker-stg' }}
           token: ${{ secrets.CAPROVER_APP_TOKEN_WORKER }}
           image: ${{ env.IMAGE_PREFIX }}-api:${{ needs.images.outputs.tag }}
-      # CapRover accepts a deploy before it pulls the image, so a failed pull (a private package,
-      # a wrong name) or a container that never starts would otherwise leave this job green.
-      # Waits until the public URL serves this commit from the web and the api image and, when
-      # the worker was deployed, until /api/version lists a connected worker on this commit
-      # (the worker has no HTTP endpoint; it names its database connections after its commit).
       - name: wait until the new version is live
         if: steps.gate.outputs.on == 'true'
         env:
           URL: ${{ vars.CAPROVER_WEB_URL }}
           WANT: ${{ github.sha }}
           CHECK_WORKER: ${{ steps.gate.outputs.worker }}
-        run: |
-          if [ -z "$URL" ]; then echo "::notice::CAPROVER_WEB_URL not set; not checking that the deploy went live"; exit 0; fi
-          URL="${URL%/}"
-          deadline=$((SECONDS + 600))
-          while :; do
-            web=$(curl -fsS -m 10 "$URL/version.json" 2>/dev/null | jq -r '.commit // empty' 2>/dev/null || true)
-            version=$(curl -fsS -m 10 "$URL/api/version" 2>/dev/null || true)
-            api=$(jq -r '.commit // empty' <<< "$version" 2>/dev/null || true)
-            workers=$(jq -r '(.workers // []) | join(",")' <<< "$version" 2>/dev/null || true)
-            worker_ok=true
-            if [ "$CHECK_WORKER" = "true" ] && [[ ",$workers," != *",$WANT,"* ]]; then worker_ok=false; fi
-            if [ "$web" = "$WANT" ] && [ "$api" = "$WANT" ] && [ "$worker_ok" = "true" ]; then
-              if [ "$CHECK_WORKER" = "true" ]; then echo "web, api and worker run $WANT"; else echo "web and api run $WANT"; fi
-              exit 0
-            fi
-            if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "::error::after 10 minutes $URL serves web '${web:-?}', api '${api:-?}', workers '${workers:-none}', not $WANT; see the apps' deployment logs in CapRover"
-              exit 1
-            fi
-            sleep 15
-          done
+        run: .github/scripts/wait-live.sh

@@ -11,6 +11,46 @@ Internet ──▶ CapRover nginx (TLS) ──▶ tabayyun-web (Caddy :80) ─�
                                                                      tabayyun-db (TimescaleDB)
 ```
 
+## Staging and production (ADR-0016)
+
+Two independent CapRover servers at Hetzner, shared with Arqam and Suffa (Sīra family,
+Arqam ADR-0020):
+
+| Server | Apps | Domain | Data |
+|---|---|---|---|
+| **Staging and tools** (the current server) | `tabayyun-db-stg`, `tabayyun-api-stg`, `tabayyun-worker-stg`, `tabayyun-web-stg`; GlitchTip and uptime checks for both servers | `tabayyun-stg.siralabs.org` | test data only |
+| **Production** (new server in Germany) | `tabayyun-db`, `tabayyun-api`, `tabayyun-worker`, `tabayyun-web`, its own `rustfs`, and Keycloak once it serves real users | `tabayyun.siralabs.org` | real people's data, and only there |
+
+Sections 1–4 below set up one server's apps with the production names. On staging every app
+name gets the `-stg` suffix, and so does every internal address that names an app:
+
+| Setting | Production | Staging |
+|---|---|---|
+| `TABAYYUN_MIGRATION_DATABASE_URL`, `TABAYYUN_DATABASE_URL` host | `srv-captain--tabayyun-db` | `srv-captain--tabayyun-db-stg` |
+| `TABAYYUN_API_UPSTREAM` (web app) | `srv-captain--tabayyun-api:8000` | `srv-captain--tabayyun-api-stg:8000` |
+| `TABAYYUN_CACHE_URL` bucket | `s3://tabayyun-cache` | `s3://tabayyun-stg-cache` |
+| Persistent directory label of the db | `tabayyun-pgdata` | `tabayyun-stg-pgdata` |
+
+A staging app that keeps an unsuffixed address talks to the old apps on the same server.
+`srv-captain--rustfs` resolves only inside one CapRover, so each server runs its own RustFS
+and that endpoint name stays the same.
+
+CapRover cannot rename an app: its name is also its internal address. The current install
+can therefore either stay as staging under its unsuffixed names (route A in "Move from one
+server to two", section 5) or be replaced by new `-stg` apps (route B). Either way, only the
+server tells staging and production apart; the table above describes route B.
+
+Rules:
+
+- Personal data of real people lives only on production. People who used the current
+  install sign up again on production; nothing is copied across.
+- Staging and production have separate secrets: database passwords, session secret, S3 keys,
+  OAuth clients and CapRover app tokens.
+- `main` deploys to staging automatically; production runs the image digest staging runs,
+  after the owner approves it (section 5).
+- Production Postgres is backed up continuously (section 7); restore drills go into a
+  throwaway database on the production server, never into staging.
+
 ## 1. Database app: `tabayyun-db`
 
 - Apps → One-Click Apps/Databases is **not** used (it lacks TimescaleDB). Create a plain app
@@ -105,6 +145,9 @@ share it. The live system runs RustFS (Apache-2.0); MinIO community builds ended
    | `TABAYYUN_S3_ALLOW_HTTP` | `true` |
    | `TABAYYUN_S3_ACCESS_KEY_ID` / `TABAYYUN_S3_SECRET_ACCESS_KEY` | the limited key from step 2 |
 
+   On staging, create bucket `tabayyun-stg-cache` and a separate key whose policy names
+   `tabayyun-stg-cache` in both resources (the same JSON with the bucket name replaced), and
+   use it on the `-stg` apps. Staging and production never share a key or a bucket.
 4. Check: upload a CSV on `/runs/new`; the run's `stats.cache` shows `"written": true` and the
    bucket gains `raw/<source id>/<bucket>/<yyyy>/<mm>/part-*.parquet`. A store problem never
    fails a run: `stats.cache` then carries `"written": false` and the error, and the worker
@@ -147,51 +190,95 @@ Until the switch, both apps keep serving and log `db.rls_bypassed` as an error o
 
 Open the domain: the page should show the API version and let you upload a CSV.
 
-## 5. Continuous deployment from GitHub Actions
+## 5. Continuous deployment: staging, then promotion to production
 
-The `deploy-caprover` job in `.github/workflows/release.yml` deploys the images built by
-each push to `main` (tag `sha-<short>`) using CapRover's official action. Configure in the
-repository → Settings → Secrets and variables → Actions:
+Two workflows (ADR-0016):
 
-| Kind | Name | Value |
-|---|---|---|
-| variable | `CAPROVER_SERVER` | `https://captain.<your-root-domain>` |
-| variable | `CAPROVER_APP_API` | `tabayyun-api` (optional, default) |
-| variable | `CAPROVER_APP_WEB` | `tabayyun-web` (optional, default) |
-| secret | `CAPROVER_APP_TOKEN_API` | app token from the API app's Deployment tab |
-| secret | `CAPROVER_APP_TOKEN_WEB` | app token from the web app's Deployment tab |
-| variable | `CAPROVER_APP_WORKER` | `tabayyun-worker` (optional, default) |
-| secret | `CAPROVER_APP_TOKEN_WORKER` | app token from the worker app; the worker deploy step is skipped while it is unset |
-| variable | `CAPROVER_WEB_URL` | public URL of the web app, e.g. `https://tabayyun.example.com`; enables the rollout check below |
+- **`release.yml`**: every push to `main` (and every `v*` tag on a commit on `main`) builds,
+  scans and publishes the images, then its `deploy-staging` job deploys them to the `-stg`
+  apps and waits until staging serves the commit.
+- **`promote.yml`**: Actions → promote → Run workflow on `main`, with the commit staging
+  serves (`GET https://tabayyun-stg.siralabs.org/api/version` → `commit`). It checks that the
+  commit is on `main` and live on staging (web, api and worker), pins the images to their
+  digests, waits for the owner's approval on the `production` environment, deploys those
+  digests (`tag@sha256:…`) to the production apps and waits until production serves the
+  commit.
 
-The job is skipped until `CAPROVER_SERVER` exists.
+`sha-<short>` tags are immutable: a re-run of `release.yml` for the same commit leaves them
+on the digest staging got, and runs for the same commit are serialised so two cannot create
+the tag at once. Promotion resolves that tag to digests and deploys by digest, on CapRover
+(`tag@sha256:…`) and on a compose host (`TABAYYUN_API_IMAGE`, `TABAYYUN_WEB_IMAGE`).
 
-CapRover accepts a deploy before it pulls the image, so the deploy steps succeed even when
-the pull fails (a private package, a wrong image name) or the new container never starts.
-With `CAPROVER_WEB_URL` set, the job then waits up to ten minutes until
-`<url>/version.json` (web image) and `<url>/api/version` (api image) both report the
-commit being released, and fails otherwise; the app's deployment log in CapRover then shows
-why. Both images carry the commit they were built from (`TABAYYUN_COMMIT`). The worker has no
-HTTP endpoint: it names its database connections `tabayyun-worker/<commit>`, and
-`/api/version` lists the commits of the connected workers under `workers`. When the worker
-was deployed, the check also waits for the released commit to appear there. It shows that a
-worker on that commit is connected, not that the old one has stopped. Images are public on GHCR, so CapRover
-needs no registry credentials; if the repository ever becomes private, add the registry
-under CapRover → Cluster → Docker Registries first.
+Both wait-until-live checks are `.github/scripts/wait-live.sh`, and both fail when their
+environment has no `CAPROVER_WEB_URL`: CapRover accepts a deploy
+before it pulls the image, so without the check a failed pull or a container that never
+starts would leave the run green. It polls `<url>/version.json` (web image) and
+`<url>/api/version` (api image) for the commit, and waits for a connected worker on that
+commit (the worker names its database connections `tabayyun-worker/<commit>`). That shows a
+worker on the commit is connected, not that the old one has stopped.
 
-**After the move to the Sira-Labs organisation (Sep 2026).** Images are published under
-`ghcr.io/sira-labs/tabayyun-api` and `ghcr.io/sira-labs/tabayyun-web`; the old
-`ghcr.io/thedatadudech/…` packages stay as they are but receive no new tags. Once, after the
-first release run from the organisation:
+### GitHub settings (owner, once)
 
-1. Make both new packages public: github.com/orgs/Sira-Labs/packages → package → Package
-   settings → Change visibility → Public (organisation packages start private), or add
-   `ghcr.io` credentials in CapRover as above.
-2. In each CapRover app that deploys by image name (db excluded), change the image to the
-   `ghcr.io/sira-labs/…` name.
-3. Set `CAPROVER_SERVER` and the app tokens again if they were repository-level secrets:
-   repository secrets and variables move with the repository, organisation-level ones can be
-   added under Sira-Labs → Settings → Secrets and variables → Actions.
+Settings → Environments:
+
+| Environment | Deployment branches and tags | Protection | Variables | Secrets |
+|---|---|---|---|---|
+| `staging` | Selected: branch `main`, tag pattern `v*` | none | `CAPROVER_SERVER` (the current server's `https://captain.…`), `CAPROVER_WEB_URL=https://tabayyun-stg.siralabs.org`; `CAPROVER_APP_API`, `_WEB`, `_WORKER` = `tabayyun-api`, `tabayyun-web`, `tabayyun-worker` for route A (unset, they default to `tabayyun-*-stg`) | `CAPROVER_APP_TOKEN_API`, `_WEB`, `_WORKER` of the staging apps |
+| `production` | Selected: branch `main` | Required reviewer: the owner; prevent self-review off | `CAPROVER_SERVER` (the production server), `CAPROVER_WEB_URL=https://tabayyun.siralabs.org`; for a compose host instead: `DEPLOY_HOST`, `DEPLOY_USER` | `CAPROVER_APP_TOKEN_API`, `_WEB`, `_WORKER` of the production apps; `DEPLOY_SSH_KEY` for a compose host |
+
+Then delete the repository-level `CAPROVER_*` variables and secrets (Settings → Secrets and
+variables → Actions): repository values reach every job, environment values only the jobs
+that bind the environment and pass its rules. The rules hold even if a branch edits a
+workflow file: a job that names `production` from any branch other than `main` is refused
+before it sees a secret.
+
+Release tags: import `.github/rulesets/protect-release-tags.json` (CONTRIBUTING.md,
+"Repository settings") so that only organisation admins can create, move or delete `v*`
+tags.
+
+### Move from one server to two (owner)
+
+1. Staging on the current server, by one of two routes. Point `tabayyun-stg.siralabs.org`
+   at the current server either way.
+   - **A. Keep the current apps as staging** (least work). Nothing is recreated: the
+     database, variables, internal addresses, cache bucket and app tokens stay as they are.
+     On `tabayyun-web`, connect `tabayyun-stg.siralabs.org` next to `tabayyun.siralabs.org`
+     and enable HTTPS. On the `staging` environment, set `CAPROVER_APP_API=tabayyun-api`,
+     `CAPROVER_APP_WEB=tabayyun-web`, `CAPROVER_APP_WORKER=tabayyun-worker`, and move the
+     existing three app tokens there. Until step 4, `tabayyun.siralabs.org` is served by
+     these staging apps, so every push to `main` reaches it, as before ADR-0016; nothing is
+     promoted anywhere yet. The API has no login until spec 013, so anyone can upload there
+     (as on route B's staging); step 5 therefore empties the database and the bucket.
+   - **B. New `-stg` apps**, the same names as Arqam and Suffa use. Create them as in
+     sections 1–4 with the suffix (persistent data on `tabayyun-db-stg`), with new secrets
+     and the `tabayyun-stg.siralabs.org` domain on `tabayyun-web-stg`. The `CAPROVER_APP_*`
+     variables stay unset.
+
+   Set up the two environments above; the next push to `main` deploys staging.
+2. Order the production server, install CapRover (strong dashboard password, 2FA, SSH by
+   key only, firewall open for 80, 443 and 22), and create the production apps and RustFS
+   with production secrets. Leave `tabayyun.siralabs.org` on the old server for now.
+3. Set the `production` environment's `CAPROVER_WEB_URL` to the new web app's temporary
+   CapRover address (`https://tabayyun-web.<new server's root domain>`) and run promote.yml
+   for the commit staging runs; it verifies production there.
+4. Point `tabayyun.siralabs.org` at the new server, connect it on `tabayyun-web` (Enable and
+   Force HTTPS), set `CAPROVER_WEB_URL=https://tabayyun.siralabs.org` on `production`, and
+   check `GET /api/version` on the public domain.
+5. Clean up the current server.
+   - Route A: remove `tabayyun.siralabs.org` from `tabayyun-web`; the apps stay as staging,
+     but nothing uploaded before the switch may stay on them. Set the instance count of
+     `tabayyun-api` and `tabayyun-worker` to 0, run `dropdb -U tabayyun tabayyun && createdb
+     -U tabayyun tabayyun` in the `tabayyun-db` terminal, delete the objects in the
+     `tabayyun-cache` bucket, and set both instance counts back to 1. The api migrates the
+     empty database on start and sets the `tabayyun_app` password again.
+   - Route B: delete the old `tabayyun-db`, `tabayyun-api`, `tabayyun-worker` and
+     `tabayyun-web` apps together with their volumes (CapRover asks when deleting an app;
+     afterwards `docker volume ls | grep tabayyun` should list only `-stg` volumes), and the
+     old `tabayyun-cache` bucket and its objects from RustFS (RustFS itself stays: staging
+     uses it). The data is test data, but it should not linger.
+
+Images are public on GHCR, so neither server needs registry credentials; if the repository
+ever becomes private, add the registry under CapRover → Cluster → Docker Registries first.
 
 ## 6. Alternative: let CapRover build from GitHub (Method 3)
 
@@ -218,16 +305,38 @@ Trade-offs against the GHCR path in section 4:
   peak) on every push, next to the running apps. The GHCR path does that on GitHub runners.
 - It deploys whatever `main` currently is, not the immutable `sha-<short>` tag the release
   workflow published, so rolling back means pushing a revert.
-- No repository secrets or app tokens are needed; the `deploy-caprover` job stays skipped
-  as long as `CAPROVER_SERVER` is unset.
+- No app tokens are needed; the `deploy-staging` job stays skipped as long as
+  `CAPROVER_SERVER` is unset on the `staging` environment.
 
 Do not enable both paths for the same app, or each push deploys it twice.
+
+## 7. Production backups (ADR-0016)
+
+Required before real users arrive on production; not built yet (TASKS.md, "Production server").
+Staging needs none of it: its data can be rebuilt.
+
+- **Point-in-time recovery for Postgres:** continuous WAL archiving with WAL-G or pgBackRest
+  (both support TimescaleDB), on top of physical base backups: a full every week and a
+  delta every day, at least two fulls kept. WAL replays only onto a base backup, so the
+  recovery point of minutes rests on them.
+- **Nightly logical dump:** `pg_dump -Fc` of `tabayyun`. Restoring a TimescaleDB dump needs
+  `SELECT timescaledb_pre_restore();` before and `SELECT timescaledb_post_restore();` after.
+- **The Parquet cache bucket** holds the only copy of uploaded series once their runs
+  finished: copy it with versioning (deleted objects kept) along with the database backups.
+- **Where:** everything encrypted (WAL-G libsodium or pgBackRest `repo-cipher`; the dump and
+  bucket copies with `age` or `rclone crypt`), to S3-compatible object storage in a
+  different Hetzner location than the production server. The encryption keys also go into
+  the owner's password manager.
+- **Restore drill:** restore the latest base backup plus WAL, and the latest dump, into a
+  throwaway database on the production server, compare row counts and `GET /api/version`
+  against it, time it, drop it, and record the time in `TASKS.md`. Never restore production
+  data into staging.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `deploy-caprover` job fails with an HTML `404 Not Found` from nginx | `CAPROVER_SERVER` points at an app domain instead of the dashboard | Set it to `https://captain.<root-domain>` |
+| `deploy-staging` or `promote` fails with an HTML `404 Not Found` from nginx | `CAPROVER_SERVER` points at an app domain instead of the dashboard | Set it to `https://captain.<root-domain>` on that environment |
 | API log: `db.schema_mismatch` and the container exits with code 3 | the database is at another migration revision than the image (an older image after a newer one migrated, or a migration that failed) | Redeploy the newest image; it migrates on start. Never run two api versions against one database |
 | API log: `refusing to start in prod: ... ['TABAYYUN_DATABASE_URL']` | password is `tabayyun`, `changeme` or similar; prod rejects placeholders | Use a generated password in both the db app and the URL |
 | API log: same message naming `TABAYYUN_SESSION_SECRET` | secret missing, shorter than 16 characters or a placeholder | Generate one and Save & Update |
