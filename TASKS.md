@@ -249,7 +249,9 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
       - Warn-first rollout (owner's choice): prod logs an error on a bypassing login; spec 015
         turns it into exit code 4.
       - Routes authorize and pass a `Scope`; the workspace is the default one until spec 014.
-- [ ] 013 Keycloak realm and OIDC BFF
+- [ ] 013 Keycloak realm and OIDC BFF — `docs/specs/013-keycloak-oidc-bff.md` (decisions
+      confirmed 26 Sep: Keycloak stays; Google, GitHub and passkeys, admin bootstrap, devices
+      and the 12 h passkey gate aligned with Arqam specs 008–012).
 - [ ] 014 Tenant APIs and admin panel v1
 - [ ] 015 Security baseline pass 1
 
@@ -261,6 +263,9 @@ Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, S
       credentials in the owner's password manager, to CapRover env vars in S8-1 (23 Sep).
 - [x] SMTP through the Google Workspace relay (`smtp-relay.gmail.com:587`, allowed by the
       server IP); SPF, DKIM and DMARC fixed on data-and-ai-dude.com and .ch (23 Sep).
+- [ ] GitHub OAuth app for the Keycloak broker (callback
+      `https://miftachun.apps.data-and-ai-dude.ch/realms/tabayyun/broker/github/endpoint`),
+      credentials to the realm's GitHub provider at import (spec 013).
 - [ ] Around 7 Oct: move both DMARC records from `p=none` to `p=quarantine` once the
       reports show only Google sending (reminder scheduled).
 
