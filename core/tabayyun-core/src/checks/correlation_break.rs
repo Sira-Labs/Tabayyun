@@ -47,6 +47,9 @@ pub struct CorrelationBreak {
     pub ref_segments: usize,
     /// Lags searched, in grid steps, on either side.
     pub max_lag: usize,
+    /// A moved lag must correlate at least this much better than the reference lag in the
+    /// same segment; on smooth, noisy pairs neighbouring lags fit almost equally well.
+    pub lag_margin: f64,
     /// Alignment grid: `auto` (coarsest expected interval) or a duration.
     pub grid: String,
     pub severity: Severity,
@@ -61,6 +64,7 @@ impl Default for CorrelationBreak {
             min_points: 24,
             ref_segments: 7,
             max_lag: 6,
+            lag_margin: 0.1,
             grid: "auto".into(),
             severity: Severity::High,
         }
@@ -114,34 +118,42 @@ fn diff(xs: &[f64]) -> Vec<f64> {
     xs.windows(2).map(|w| w[1] - w[0]).collect()
 }
 
-/// The lag in `[-max_lag, max_lag]` maximising `sign` × corr(x[t], y[t + lag]) over
-/// pairwise-complete bins, with that signed strength; lags with fewer than `min_pairs` pairs
-/// are not considered. `sign` is the pair's direction, so a negatively related pair's lag is
-/// the one where it is most negatively correlated.
-fn best_lag(x: &[f64], y: &[f64], sign: f64, max_lag: usize, min_pairs: usize) -> Option<(i64, f64)> {
+/// `sign` × corr(x[t], y[t + lag]) for every lag in `[-max_lag, max_lag]` (index `lag +
+/// max_lag`) over pairwise-complete bins; None where fewer than `min_pairs` pairs remain.
+/// `sign` is the pair's direction, so a negatively related pair peaks where it is most
+/// negatively correlated.
+fn lag_profile(x: &[f64], y: &[f64], sign: f64, max_lag: usize, min_pairs: usize) -> Vec<Option<f64>> {
     let n = x.len() as i64;
+    (-(max_lag as i64)..=(max_lag as i64))
+        .map(|lag| {
+            let (mut xs, mut ys) = (Vec::new(), Vec::new());
+            for t in 0.max(-lag)..n.min(n - lag) {
+                let (a, b) = (x[t as usize], y[(t + lag) as usize]);
+                if a.is_finite() && b.is_finite() {
+                    xs.push(a);
+                    ys.push(b);
+                }
+            }
+            if xs.len() < min_pairs.max(3) {
+                return None;
+            }
+            pearson(&xs, &ys).map(|r| sign * r)
+        })
+        .collect()
+}
+
+/// The profile's peak as (lag, strength); ties go to the smaller |lag|, so a flat profile
+/// reads as no lag.
+fn best_lag(profile: &[Option<f64>], max_lag: usize) -> Option<(i64, f64)> {
     let mut best: Option<(i64, f64)> = None;
-    for lag in -(max_lag as i64)..=(max_lag as i64) {
-        let (mut xs, mut ys) = (Vec::new(), Vec::new());
-        for t in 0.max(-lag)..n.min(n - lag) {
-            let (a, b) = (x[t as usize], y[(t + lag) as usize]);
-            if a.is_finite() && b.is_finite() {
-                xs.push(a);
-                ys.push(b);
-            }
-        }
-        if xs.len() < min_pairs.max(3) {
-            continue;
-        }
-        if let Some(r) = pearson(&xs, &ys).map(|r| sign * r) {
-            // Ties go to the smaller |lag|, so a flat correlation profile reads as no lag.
-            let better = match best {
-                None => true,
-                Some((l, c)) => r > c + 1e-12 || ((r - c).abs() <= 1e-12 && lag.abs() < l.abs()),
-            };
-            if better {
-                best = Some((lag, r));
-            }
+    for (k, r) in profile.iter().enumerate() {
+        let (Some(r), lag) = (*r, k as i64 - max_lag as i64) else { continue };
+        let better = match best {
+            None => true,
+            Some((l, c)) => r > c + 1e-12 || ((r - c).abs() <= 1e-12 && lag.abs() < l.abs()),
+        };
+        if better {
+            best = Some((lag, r));
         }
     }
     best
@@ -155,6 +167,9 @@ struct Segment {
     n_points: usize,
     rho: f64,
     lag: Option<(i64, f64)>,
+    /// Signed cross-correlation per lag (see `lag_profile`), to test a moved lag against the
+    /// reference lag within the same segment.
+    profile: Vec<Option<f64>>,
 }
 
 fn median(xs: &[f64]) -> f64 {
@@ -200,12 +215,20 @@ impl CorrelationBreak {
                     // On first differences: levels of slowly trending series correlate at
                     // every lag, which flattens the profile the lag is read from.
                     let (dx, dy) = (diff(&x[s..e]), diff(&y[s..e]));
-                    let lag = best_lag(&dx, &dy, rho.signum(), self.max_lag, self.min_points / 2);
+                    let profile = lag_profile(&dx, &dy, rho.signum(), self.max_lag, self.min_points / 2);
+                    let lag = best_lag(&profile, self.max_lag);
                     let window = Window::new(
                         aligned.ts[complete[0]],
                         aligned.ts[complete[complete.len() - 1]] + aligned.grid_ns,
                     );
-                    out.push(Segment { key: key as usize, window, n_points: complete.len(), rho, lag });
+                    out.push(Segment {
+                        key: key as usize,
+                        window,
+                        n_points: complete.len(),
+                        rho,
+                        lag,
+                        profile,
+                    });
                 }
             }
             s = e;
@@ -246,6 +269,9 @@ impl CrossCheck for CorrelationBreak {
         }
         if p.max_lag > MAX_LAG {
             return Err(invalid(&format!("max_lag must be at most {MAX_LAG} steps")));
+        }
+        if !(0.0..=2.0).contains(&p.lag_margin) {
+            return Err(invalid("lag_margin must be between 0 and 2"));
         }
         let mut out = CheckOutput::default();
         for i in 0..frames.len() {
@@ -368,6 +394,14 @@ impl CorrelationBreak {
             .filter(|s| !broken(s))
             .filter_map(|s| s.lag.filter(|(_, r)| *r >= self.min_ref).map(|(l, _)| (s, l)))
             .filter(|(_, l)| (l - lag_ref).abs() > LAG_TOLERANCE)
+            .filter(|(s, l)| {
+                let at = |lag: i64| {
+                    s.profile.get(usize::try_from(lag + self.max_lag as i64).ok()?).copied().flatten()
+                };
+                // The reference lag may lie outside this segment's usable lags: then nothing to
+                // compare with, and the moved lag stands.
+                at(lag_ref).is_none_or(|r| at(*l).is_some_and(|b| b - r >= self.lag_margin))
+            })
             .map(|(s, l)| (s.key, s.window, (s, l)))
             .collect();
         for (w, items) in episodes(lag_flagged) {
@@ -520,6 +554,29 @@ mod tests {
     }
 
     #[test]
+    fn smooth_noisy_pair_has_no_lag_findings() {
+        // Two meters on one pipe: a slow daily curve at 15-minute bins plus independent
+        // noise. Neighbouring lags of the differenced series fit almost equally well, so the
+        // peak wanders by a step or two from day to day; none of that is a moved lag.
+        let n = 42 * PER_DAY;
+        let mut rng = Rng::new(3);
+        let curve: Vec<f64> = (0..n)
+            .map(|i| {
+                let weekend = if (i / PER_DAY) % 7 >= 5 { 0.8 } else { 1.0 };
+                let hour = (i % PER_DAY) as f64 / PER_DAY as f64 * 24.0;
+                20.0 + 120.0 * weekend * (1.0 + 0.6 * ((hour - 9.0) / 24.0 * std::f64::consts::TAU).sin())
+            })
+            .collect();
+        let meter = |rng: &mut Rng| curve.iter().map(|v| v + 0.5 * rng.normal()).collect::<Vec<_>>();
+        let (a, b) = (frame("ft-a", meter(&mut rng)), frame("ft-b", meter(&mut rng)));
+        let silent = run(&[&a, &b], serde_json::Value::Null);
+        assert!(silent.findings.is_empty(), "{:?}", silent.findings);
+        // Without the margin the wandering peak is reported: the case the margin exists for.
+        let noisy = run(&[&a, &b], serde_json::json!({"lag_margin": 0.0}));
+        assert!(!noisy.findings.is_empty(), "expected spurious lag findings without a margin");
+    }
+
+    #[test]
     fn negatively_related_pair_lag() {
         // y mirrors the driver (ρ ≈ −1); on day 11 it mirrors it three steps late.
         let n = DAYS * PER_DAY;
@@ -600,6 +657,7 @@ mod tests {
             (serde_json::json!({"segment": "0s"}), "segment must be positive"),
             (serde_json::json!({"grid": "0s"}), "grid must be positive"),
             (serde_json::json!({"max_lag": 241}), "max_lag must be at most 240"),
+            (serde_json::json!({"lag_margin": -0.1}), "lag_margin must be between 0 and 2"),
         ] {
             let g = group(GroupKind::Related, &["pt-a", "pt-b"], params);
             let err = CorrelationBreak::default().run(&[&a, &b], &g, &ctx).unwrap_err();

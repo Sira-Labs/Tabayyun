@@ -28,6 +28,7 @@ severity high. Params (group `params` override check params):
 | `min_points` | 24 | aligned points a segment needs |
 | `ref_segments` | 7 | leading segments that form the reference when no stored baseline exists |
 | `max_lag` | 6 | lags searched, in grid steps |
+| `lag_margin` | 0.1 | a moved lag must correlate at least this much better than the reference lag in the same segment (added 2026-09-26) |
 | `grid` | auto | alignment grid (spec 008) |
 
 Evidence (correlation finding): `group_id`, `group_name`, `members`, `partner`, `rho`,
@@ -55,8 +56,9 @@ Metrics per pair and segment: `rho`, `lag_steps`.
    window spans the episode and `rho` is the episode's worst segment value.
 5. Lag: per segment the lag in `[-max_lag, max_lag]` maximising the cross-correlation;
    reference lag = median. Segments whose lag differs from the reference by more than one
-   step form lag episodes and lag findings (separate evidence shape, so they deduplicate
-   separately).
+   step, and whose best lag correlates at least `lag_margin` better than the reference lag in
+   that segment, form lag episodes and lag findings (separate evidence shape, so they
+   deduplicate separately).
 6. Findings attach to the group's first member unless the pair is from a `redundant` group
    with a suspect named by spec 010 in the same run (not coupled in this spec: first member).
 7. Summaries are plain language, e.g. "PT-101 stopped tracking TT-101 for 2 days
@@ -135,6 +137,12 @@ Recorded on 2026-09-23; approved with the plan.
   cross-correlation is at least `min_ref`, and only when the reference lags are stable (MAD
   ≤ 1 step); otherwise a decoupled day would also report a random lag, and a pair without a
   sharp cross-correlation peak would report noise.
+- Corrected 2026-09-26: `lag_margin` (default 0.1). The stability test above let through
+  pairs whose reference lag sat at ±1 step while daily peaks wandered to ±2: on three
+  redundant 15-minute meters with a smooth daily curve the example seed got 8–12 "lags by
+  30m" findings. In every such segment the "moved" lag fit at most 0.03 better than the
+  reference lag; the planted 3-step shifts fit about 1.0 better. Test:
+  `smooth_noisy_pair_has_no_lag_findings`.
 - Group `params` override the check's params key by key; keys the check does not know (other
   checks' params) are ignored, a wrong type is `InvalidParams`, and so are a zero `segment` or
   `grid` and a `max_lag` above 240 steps.

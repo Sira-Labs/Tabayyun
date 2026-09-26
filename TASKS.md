@@ -208,9 +208,9 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
         corrected.
       - The API rejected unpadded text timestamps (`2007-1-1T00:00:00+01:00`, UCI) that the CLI
         reads; it now falls back to lenient formats.
-      - Open: `tby.correlation_break` reports random ±30 min lags on smooth, noisy pairs (the
-        cross-correlation of first differences is flat near lag 0); needs a significance margin,
-        which changes spec 009's lag rule.
+      - `tby.correlation_break` reported random ±30 min lags on smooth, noisy pairs (the
+        cross-correlation of first differences is flat near lag 0). A moved lag now needs to
+        fit `lag_margin` (0.1) better than the reference lag; spec 009 corrected (owner's go).
 
 ## Production server (ADR-0016, Sīra family decision 25 Sep 2026)
 
