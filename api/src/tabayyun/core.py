@@ -271,6 +271,33 @@ def _normalise_ts(table: pa.Table, name: str, unit: TsUnit) -> tuple[pa.Table, s
         resolved = TEXT_TIMESTAMPS
     elif pa.types.is_integer(ts.type):
         ts, resolved = epoch_to_ns(ts, name, unit)
+    elif pa.types.is_string(ts.type) or pa.types.is_large_string(ts.type):
+        ts = _lenient_text_ts(ts, name)
+        resolved = TEXT_TIMESTAMPS
     else:
         raise ValueError(f"column {name!r} is not a timestamp or integer column ({ts.type})")
     return table.set_column(table.schema.get_field_index(name), name, ts), resolved
+
+
+# Text the CSV reader's ISO 8601 parser rejects but the CLI reads (chrono): unpadded dates such
+# as `2007-1-1T00:00:00+01:00` (UCI exports). Offsets become UTC; naive text is taken as UTC.
+_LENIENT_TS_FORMATS = ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S")
+
+
+def _lenient_text_ts(ts: pa.ChunkedArray, name: str) -> pa.ChunkedArray:
+    """Parse each text timestamp with the first format that fits it, keeping row order.
+
+    A column may mix the formats (offset and naive cells); a non-null cell no format fits
+    fails the column, naming the first such cell.
+    """
+    utc = pa.timestamp("ns", tz="UTC")
+    candidates = []
+    for fmt in _LENIENT_TS_FORMATS:
+        parsed = pc.strptime(ts, format=fmt, unit="ns", error_is_null=True)
+        candidates.append(parsed.cast(utc) if parsed.type.tz else parsed.cast(pa.timestamp("ns")).cast(utc))
+    combined = pc.coalesce(*candidates)
+    unparsed = pc.and_(pc.is_valid(ts), pc.is_null(combined))
+    if pc.any(unparsed).as_py():
+        first = ts.filter(unparsed)[0].as_py()
+        raise ValueError(f"column {name!r} is not a timestamp or integer column (cannot parse {first!r})")
+    return combined

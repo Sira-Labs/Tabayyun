@@ -159,11 +159,7 @@ impl CrossCheck for RedundantDisagreement {
             };
             bins.push(Bin { ts: aligned.ts[i], deviations, disagrees: false, suspect: None });
         }
-        let pooled: Vec<f64> = if m == 2 {
-            bins.iter().map(|b| b.deviations[0]).collect()
-        } else {
-            bins.iter().flat_map(|b| b.deviations.iter().copied().filter(|d| d.is_finite())).collect()
-        };
+        let pooled = pooled_deviations(&bins, m);
         let (tol, source) = p.tolerance(frames, &pooled)?;
         // A pair's auto tolerance is centred at zero, not at the typical difference, so a
         // constant bias larger than the noise is a disagreement.
@@ -299,6 +295,25 @@ impl RedundantDisagreement {
     }
 }
 
+/// The deviations the automatic tolerance is estimated from. For a pair, the difference once
+/// per bin. For three or more, every member's distance from the bin median, except that in a
+/// bin with an odd number of values one member *is* the median: its 0 is not a measurement of
+/// agreement, and pooling it would shrink the MAD (by about half for three members) and flag
+/// ordinary noise as disagreement.
+fn pooled_deviations(bins: &[Bin], m: usize) -> Vec<f64> {
+    if m == 2 {
+        return bins.iter().map(|b| b.deviations[0]).collect();
+    }
+    let mut pooled = Vec::with_capacity(bins.len() * m);
+    for b in bins {
+        let present: Vec<f64> = b.deviations.iter().copied().filter(|d| d.is_finite()).collect();
+        let median_member =
+            if present.len() % 2 == 1 { present.iter().position(|d| *d == 0.0) } else { None };
+        pooled.extend(present.iter().enumerate().filter(|(k, _)| Some(*k) != median_member).map(|(_, d)| *d));
+    }
+    pooled
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,6 +439,38 @@ mod tests {
         // Without a bias the same noise stays silent.
         let c = sensor("tt-2", 2, 1.0, |_| 0.0);
         assert!(run(&[&a, &c], serde_json::Value::Null).findings.is_empty());
+    }
+
+    #[test]
+    fn auto_tolerance_three_members_ignores_the_median_members_zero() {
+        // Three healthy meters (noise 0.05 bar each) and single-minute episodes allowed: with
+        // the median member's 0 in the pool the tolerance halves and ~18 % of minutes disagree.
+        let a = sensor("ft-a", 1, 1.0, |_| 0.0);
+        let b = sensor("ft-b", 2, 1.0, |_| 0.0);
+        let c = sensor("ft-c", 3, 1.0, |_| 0.0);
+        let quiet = run(&[&a, &b, &c], serde_json::json!({"min_duration": "1m"}));
+        assert!(quiet.findings.len() <= 10, "{} findings on healthy meters", quiet.findings.len());
+        // A real offset on one meter is still found and blamed on it.
+        let d = sensor("ft-c", 3, 1.0, during(600, 960, 0.5));
+        let out = run(&[&a, &b, &d], serde_json::Value::Null);
+        assert_eq!(out.findings.len(), 1, "{:?}", out.findings);
+        assert_eq!(out.findings[0].evidence["suspect"], "ft-c");
+        assert_eq!(out.findings[0].evidence["tolerance_source"], "auto");
+    }
+
+    #[test]
+    fn pooled_deviations_drop_one_median_zero_per_odd_bin() {
+        let bin = |d: &[f64]| Bin { ts: 0, deviations: d.to_vec(), disagrees: false, suspect: None };
+        let bins = [
+            bin(&[-1.0, 0.0, 2.0]),           // odd: the median member's 0 goes
+            bin(&[0.0, 0.0, 0.0]),            // exact agreement keeps two real zeros
+            bin(&[-1.5, 0.5, f64::NAN, 1.5]), // three present, none exactly 0
+            bin(&[-0.5, 0.5, 1.0, -1.0]),     // even count: no member is the median
+        ];
+        assert_eq!(
+            pooled_deviations(&bins, 3),
+            vec![-1.0, 2.0, 0.0, 0.0, -1.5, 0.5, 1.5, -0.5, 0.5, 1.0, -1.0]
+        );
     }
 
     #[test]

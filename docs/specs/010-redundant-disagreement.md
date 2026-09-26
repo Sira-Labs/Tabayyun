@@ -87,6 +87,11 @@ Recorded on 2026-09-23; approved with the plan.
   (series, check, name, ts), and a series in two redundant groups would overwrite its own line.
 - With three or more members the automatic tolerance uses the MAD of every member's deviation
   from the bin median (the spec gave the formula for a pair's difference only).
+  - Corrected 2026-09-26: in a bin with an odd number of values one member *is* the median, and
+    its deviation is 0 by construction. Pooling those zeros roughly halved the tolerance for three
+    members, and three healthy meters with 15-minute data gave 110–166 findings each on
+    staging. The median member's 0 is now left out (one per odd bin). Test:
+    `auto_tolerance_three_members_ignores_the_median_members_zero`.
 - Without a `resolution` in the metadata the floor uses the resolution estimated from the data
   (`profile::resolution`), so identical quantised readings (MAD 0) never give a zero tolerance.
 - Step 4 runs in the order written: runs shorter than `min_duration` are dropped first, then the

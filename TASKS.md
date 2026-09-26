@@ -199,6 +199,18 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
       web `/version.json`); with `CAPROVER_WEB_URL` set the job waits for that commit to be live.
       - Worker (no HTTP): its connections' `application_name` is `tabayyun-worker/<commit>`;
         `/api/version` lists them from `pg_stat_activity` (no migration, no heartbeat table).
+- [x] **Staging refilled after the database reset** (26 Sep, no spec): `deploy/examples/seed.py`
+      loads synthetic series with planted faults, a related, a redundant and a balance group and a
+      dataset, and fails when a planted fault goes unfound; the 14 files of the test-dataset
+      bundle (UCI, OPSD, synthetic, Petrobras 3W) were re-uploaded and match their expectations.
+      - `tby.redundant_disagreement` pooled the median member's exact 0 into its auto tolerance
+        (three or more members), halving it: 110–166 findings per healthy meter. Fixed, spec 010
+        corrected.
+      - The API rejected unpadded text timestamps (`2007-1-1T00:00:00+01:00`, UCI) that the CLI
+        reads; it now falls back to lenient formats.
+      - `tby.correlation_break` reported random ±30 min lags on smooth, noisy pairs (the
+        cross-correlation of first differences is flat near lag 0). A moved lag now needs to
+        fit `lag_margin` (0.1) better than the reference lag; spec 009 corrected (owner's go).
 
 ## Production server (ADR-0016, Sīra family decision 25 Sep 2026)
 

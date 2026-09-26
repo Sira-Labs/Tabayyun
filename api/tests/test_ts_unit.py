@@ -118,3 +118,41 @@ async def test_stateless_endpoint_accepts_ts_unit():
         assert bad.status_code == 422 and "ts_unit" in bad.json()["detail"]
         assert (await post(epoch_csv("s"), {"ts_unit": "minutes"})).status_code == 422
     await app.state.engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("2007-1-1T00:00:00+01:00", datetime(2006, 12, 31, 23, tzinfo=UTC)),
+        ("2007-1-1T00:00:00Z", datetime(2007, 1, 1, tzinfo=UTC)),
+        ("2007-1-1 00:00:00", datetime(2007, 1, 1, tzinfo=UTC)),
+        ("2007-1-1T08:05:00", datetime(2007, 1, 1, 8, 5, tzinfo=UTC)),
+    ],
+)
+def test_unpadded_text_timestamps_parse_like_the_cli(text, expected):
+    """Dates without leading zeros (UCI exports) are read as the CLI reads them."""
+    parsed = core.read_csv(f"ts,value\n{text},1.5\n".encode(), "ts", "value", None)
+    assert parsed.ts_unit == "text"
+    assert parsed.table.column("ts").cast(pa.int64()).to_pylist() == [
+        int(expected.timestamp()) * 1_000_000_000
+    ]
+
+
+def test_unparseable_text_timestamps_name_the_cell():
+    """Text that fits no format fails with the first cell in the message."""
+    with pytest.raises(ValueError, match="cannot parse 'yesterday'"):
+        core.read_csv(b"ts,value\nyesterday,1\n", "ts", "value", None)
+
+
+def test_mixed_unpadded_text_timestamps_parse_per_cell():
+    """Offset and naive cells in one column each parse; order and nulls are kept."""
+    data = b"ts,value\n2007-1-1T00:00:00+01:00,1\n2007-1-1T01:00:00,2\n2007-1-1 02:00:00,3\n"
+    parsed = core.read_csv(data, "ts", "value", None)
+    hours = [
+        datetime(2006, 12, 31, 23, tzinfo=UTC),
+        datetime(2007, 1, 1, 1, tzinfo=UTC),
+        datetime(2007, 1, 1, 2, tzinfo=UTC),
+    ]
+    assert parsed.table.column("ts").cast(pa.int64()).to_pylist() == [
+        int(h.timestamp()) * 1_000_000_000 for h in hours
+    ]
