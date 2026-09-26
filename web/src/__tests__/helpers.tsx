@@ -3,6 +3,7 @@ import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import { render } from "@testing-library/react";
 import { vi } from "vitest";
 import { makeRouter } from "../router";
+import type { Me } from "../auth";
 import type { Run } from "../types";
 
 export type Route = (url: string, init?: RequestInit) => unknown | Promise<unknown>;
@@ -12,11 +13,22 @@ export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-/** Stub `fetch` with a router function; a returned Response is passed through, anything else is JSON. */
-export function stubFetch(route: Route) {
+/** The signed-in user most tests run as: owner of the default org, signed in with Google. */
+export const ME: Me = {
+  user: { id: "u1", email: "ana@example.org", display_name: "Ana" },
+  org: { id: "o1", name: "default" },
+  role: "owner",
+  sign_in_method: "google",
+  passkey_fresh: false,
+};
+
+/** Stub `fetch` with a router function; a returned Response is passed through, anything else is JSON.
+ * `/api/auth/me` answers `me` (the signed-in `ME` unless given). */
+export function stubFetch(route: Route, { me = ME }: { me?: Me | Response } = {}) {
   const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.pathname + input.search : input.url;
     if (url.startsWith("/api/version")) return json({ version: "0.1.0", env: "test", schema_revision: "0002" });
+    if (url === "/api/auth/me") return me instanceof Response ? me.clone() : json(me);
     const out = await route(url, init);
     return out instanceof Response ? out : json(out);
   });

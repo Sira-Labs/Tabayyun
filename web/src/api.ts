@@ -4,13 +4,31 @@ import type { Finding, Page, Run, RunCreated, ScoreRow, Series } from "./types";
 
 const HEADERS = { Accept: "application/json", "X-Tabayyun-Request": "1" };
 
-/** A non-2xx answer; `message` is the server's detail when it sent one. */
+/** A non-2xx answer; `message` is the server's detail when it sent one, `body` its parsed JSON. */
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    public readonly body: unknown = null,
   ) {
     super(message);
+  }
+}
+
+// Called on any 401: the router sends the user to /login with the current path (spec 013).
+let onUnauthorized: (() => void) | null = null;
+
+/** Register what happens when the session is missing or expired. */
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
+}
+
+/** Parsed JSON of a body, or null. */
+function parseJson(body: string): unknown {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return null;
   }
 }
 
@@ -40,12 +58,16 @@ export function errorMessage(body: string, fallback: string): string {
   }
 }
 
-/** Fetch JSON with the CSRF header; throws ApiError with the server's detail. */
+/** Fetch JSON with the CSRF header; throws ApiError with the server's detail. A 401 also
+ * triggers the unauthorized handler; 204 resolves to undefined. */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(path, { credentials: "same-origin", ...init, headers: { ...HEADERS, ...init.headers } });
   if (!res.ok) {
-    throw new ApiError(res.status, errorMessage(await res.text(), `${res.status} ${res.statusText}`.trim()));
+    const body = await res.text();
+    if (res.status === 401) onUnauthorized?.();
+    throw new ApiError(res.status, errorMessage(body, `${res.status} ${res.statusText}`.trim()), parseJson(body));
   }
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
