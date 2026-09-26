@@ -35,7 +35,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from tabayyun.db import Base
@@ -55,6 +55,7 @@ GROUP_KINDS = ("related", "redundant", "balance")
 MEMBER_ROLES = ("member", "input", "output")
 ORG_ROLES = ("owner", "admin", "member")
 WORKSPACE_ROLES = ("admin", "editor", "viewer")
+SIGN_IN_METHODS = ("google", "github", "passkey")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -193,6 +194,76 @@ class WorkspaceTeamRole(OrgMixin, Base):
         UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), primary_key=True
     )
     role: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class UserIdentity(Base):
+    """A login at the identity provider (issuer, subject) and the user it belongs to (spec 013).
+
+    Read-only to the app login: `tabayyun_login()` (migration 0005) is the only writer.
+    """
+
+    __tablename__ = "user_identities"
+    __table_args__ = (Index("ix_user_identities_user_id", "user_id"),)
+
+    issuer: Mapped[str] = mapped_column(Text, primary_key=True)
+    subject: Mapped[str] = mapped_column(Text, primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    email_at_login: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _created_at()
+    last_login_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class AuthSession(Base):
+    """A signed-in browser (spec 013); the cookie holds a token, the table only its HMAC.
+
+    No row-level security: a request looks its session up before any org is known. `org_id`
+    null means signed in without access yet.
+    """
+
+    __tablename__ = "sessions"
+    __table_args__ = (
+        CheckConstraint(_in("sign_in_method", SIGN_IN_METHODS), name="sign_in_method"),
+        Index("ix_sessions_user_id", "user_id"),
+        Index("ix_sessions_idp_sid", "idp_sid"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    id_hash: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, unique=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    org_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("orgs.id", ondelete="CASCADE")
+    )
+    sign_in_method: Mapped[str] = mapped_column(Text, nullable=False)
+    idp_sid: Mapped[str | None] = mapped_column(Text)
+    id_token: Mapped[str | None] = mapped_column(Text)
+    ip_address: Mapped[str | None] = mapped_column(INET)
+    user_agent: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LoginFlow(Base):
+    """A login in progress between `/api/auth/login` and the callback (10 minutes, single use)."""
+
+    __tablename__ = "login_flows"
+
+    id_hash: Mapped[bytes] = mapped_column(LargeBinary, primary_key=True)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    nonce: Mapped[str] = mapped_column(Text, nullable=False)
+    code_verifier: Mapped[str] = mapped_column(Text, nullable=False)
+    method: Mapped[str] = mapped_column(Text, nullable=False)
+    next_path: Mapped[str] = mapped_column("next", Text, nullable=False)
+    created_at: Mapped[datetime] = _created_at()
 
 
 class Source(TenantMixin, Base):

@@ -36,7 +36,13 @@ BYSTANDER = uuid.UUID("00000000-0000-0000-0000-0000000000a6")  # org member, no 
 DISABLED = uuid.UUID("00000000-0000-0000-0000-0000000000a7")  # org admin, but disabled
 TEAM_A = uuid.UUID("00000000-0000-0000-0000-0000000000a8")
 HOUR0 = datetime(2026, 1, 1, tzinfo=UTC)
-TENANT_TABLES = sorted(["orgs", *(t.name for t in Base.metadata.sorted_tables if "org_id" in t.c)], key=str)
+# `sessions` has `org_id` but no row-level security: it is looked up before any org is known
+# (spec 013), and only by the HMAC of the cookie's token.
+NOT_TENANT = {"sessions"}
+TENANT_TABLES = sorted(
+    ["orgs", *(t.name for t in Base.metadata.sorted_tables if "org_id" in t.c and t.name not in NOT_TENANT)],
+    key=str,
+)
 INSUFFICIENT_PRIVILEGE = "42501"
 UNIQUE_VIOLATION = "23505"
 

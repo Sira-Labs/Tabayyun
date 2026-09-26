@@ -95,13 +95,22 @@ def test_prod_refuses_placeholders():
         )
 
 
-def test_prod_starts_without_oidc_when_secrets_are_real():
-    """Prod starts with real secrets even before OIDC is configured."""
+def test_prod_requires_the_oidc_login():
+    """Prod starts with real secrets and the OIDC settings, and refuses without them (spec 013)."""
+    real = {
+        "env": "prod",
+        "session_secret": "9f1c2a7d4e8b6c0f3a5d7e9b1c2d4f6a8b0c2d4e",
+        "database_url": "postgresql+psycopg://tabayyun:s3cr3t-long-enough-value@db/tabayyun",
+    }
+    with pytest.raises(RuntimeError, match="TABAYYUN_OIDC_ISSUER"):
+        create_app(Settings(**real))
     app = create_app(
         Settings(
-            env="prod",
-            session_secret="9f1c2a7d4e8b6c0f3a5d7e9b1c2d4f6a8b0c2d4e",
-            database_url="postgresql+psycopg://tabayyun:s3cr3t-long-enough-value@db/tabayyun",
+            **real,
+            public_url="https://tabayyun.example.org",
+            oidc_issuer="https://keycloak.example.org/realms/tabayyun",
+            oidc_client_secret="7c1e9a3b5d7f9e1c3a5b7d9f1e3c5a7b",
+            admin_email="owner@example.org",
         )
     )
     assert app.title == "Tabayyun API"
