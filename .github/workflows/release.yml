@@ -177,7 +177,7 @@ jobs:
         uses: caprover/deploy-from-github@v2
         with:
           server: ${{ vars.CAPROVER_SERVER }}
-          app: ${{ vars.CAPROVER_APP_API || 'tabayyun-api-stg' }}
+          app: ${{ vars.CAPROVER_APP_API || 'tabayyun-api' }}
           token: ${{ secrets.CAPROVER_APP_TOKEN_API }}
           image: ${{ env.IMAGE_PREFIX }}-api:${{ needs.images.outputs.tag }}
       - name: deploy web
@@ -185,7 +185,7 @@ jobs:
         uses: caprover/deploy-from-github@v2
         with:
           server: ${{ vars.CAPROVER_SERVER }}
-          app: ${{ vars.CAPROVER_APP_WEB || 'tabayyun-web-stg' }}
+          app: ${{ vars.CAPROVER_APP_WEB || 'tabayyun-web' }}
           token: ${{ secrets.CAPROVER_APP_TOKEN_WEB }}
           image: ${{ env.IMAGE_PREFIX }}-web:${{ needs.images.outputs.tag }}
       - name: deploy worker
@@ -193,7 +193,7 @@ jobs:
         uses: caprover/deploy-from-github@v2
         with:
           server: ${{ vars.CAPROVER_SERVER }}
-          app: ${{ vars.CAPROVER_APP_WORKER || 'tabayyun-worker-stg' }}
+          app: ${{ vars.CAPROVER_APP_WORKER || 'tabayyun-worker' }}
           token: ${{ secrets.CAPROVER_APP_TOKEN_WORKER }}
           image: ${{ env.IMAGE_PREFIX }}-api:${{ needs.images.outputs.tag }}
       - name: wait until the new version is live

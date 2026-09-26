@@ -37,8 +37,9 @@ and that endpoint name stays the same.
 
 CapRover cannot rename an app: its name is also its internal address. The current install
 can therefore either stay as staging under its unsuffixed names (route A in "Move from one
-server to two", section 5) or be replaced by new `-stg` apps (route B). Either way, only the
-server tells staging and production apart; the table above describes route B.
+server to two", section 5; the names `release.yml` deploys to by default) or be replaced
+by new `-stg` apps (route B). Either way, only the server tells staging and production
+apart; the table above describes route B.
 
 Rules:
 
@@ -223,7 +224,7 @@ Settings → Environments:
 
 | Environment | Deployment branches and tags | Protection | Variables | Secrets |
 |---|---|---|---|---|
-| `staging` | Selected: branch `main`, tag pattern `v*` | none | `CAPROVER_SERVER` (the current server's `https://captain.…`), `CAPROVER_WEB_URL=https://tabayyun-stg.siralabs.org`; `CAPROVER_APP_API`, `_WEB`, `_WORKER` = `tabayyun-api`, `tabayyun-web`, `tabayyun-worker` for route A (unset, they default to `tabayyun-*-stg`) | `CAPROVER_APP_TOKEN_API`, `_WEB`, `_WORKER` of the staging apps |
+| `staging` | Selected: branch `main`, tag pattern `v*` | none | `CAPROVER_SERVER` (the current server's `https://captain.…`), `CAPROVER_WEB_URL=https://tabayyun-stg.siralabs.org`; for route B only: `CAPROVER_APP_API`, `_WEB`, `_WORKER` = `tabayyun-api-stg`, `tabayyun-web-stg`, `tabayyun-worker-stg` (unset, they default to `tabayyun-api`, `tabayyun-web`, `tabayyun-worker`) | `CAPROVER_APP_TOKEN_API`, `_WEB`, `_WORKER` of the staging apps |
 | `production` | Selected: branch `main` | Required reviewer: the owner; prevent self-review off | `CAPROVER_SERVER` (the production server), `CAPROVER_WEB_URL=https://tabayyun.siralabs.org`; for a compose host instead: `DEPLOY_HOST`, `DEPLOY_USER` | `CAPROVER_APP_TOKEN_API`, `_WEB`, `_WORKER` of the production apps; `DEPLOY_SSH_KEY` for a compose host |
 
 Then delete the repository-level `CAPROVER_*` variables and secrets (Settings → Secrets and
@@ -243,16 +244,17 @@ tags.
    - **A. Keep the current apps as staging** (least work). Nothing is recreated: the
      database, variables, internal addresses, cache bucket and app tokens stay as they are.
      On `tabayyun-web`, connect `tabayyun-stg.siralabs.org` next to `tabayyun.siralabs.org`
-     and enable HTTPS. On the `staging` environment, set `CAPROVER_APP_API=tabayyun-api`,
-     `CAPROVER_APP_WEB=tabayyun-web`, `CAPROVER_APP_WORKER=tabayyun-worker`, and move the
-     existing three app tokens there. Until step 4, `tabayyun.siralabs.org` is served by
+     and enable HTTPS. Move the existing three app tokens to the `staging` environment; the
+     `CAPROVER_APP_*` variables stay unset, as `release.yml` deploys to these names by
+     default. Until step 4, `tabayyun.siralabs.org` is served by
      these staging apps, so every push to `main` reaches it, as before ADR-0016; nothing is
      promoted anywhere yet. The API has no login until spec 013, so anyone can upload there
      (as on route B's staging); step 5 therefore empties the database and the bucket.
    - **B. New `-stg` apps**, the same names as Arqam and Suffa use. Create them as in
      sections 1–4 with the suffix (persistent data on `tabayyun-db-stg`), with new secrets
-     and the `tabayyun-stg.siralabs.org` domain on `tabayyun-web-stg`. The `CAPROVER_APP_*`
-     variables stay unset.
+     and the `tabayyun-stg.siralabs.org` domain on `tabayyun-web-stg`, and set
+     `CAPROVER_APP_API=tabayyun-api-stg`, `CAPROVER_APP_WEB=tabayyun-web-stg` and
+     `CAPROVER_APP_WORKER=tabayyun-worker-stg` on the `staging` environment.
 
    Set up the two environments above; the next push to `main` deploys staging.
 2. Order the production server, install CapRover (strong dashboard password, 2FA, SSH by
