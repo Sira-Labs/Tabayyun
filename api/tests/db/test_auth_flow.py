@@ -442,3 +442,14 @@ async def test_dev_mode_has_no_login(db_url, fresh_schema):
             assert (await c.get("/api/sources")).status_code == 200
     finally:
         await app.state.engine.dispose()
+
+
+async def test_session_older_than_a_minute_is_touched(env):
+    """A request after the touch interval refreshes `last_seen_at` and still succeeds."""
+    async with browser(env.app) as c:
+        await sign_in(env, c)
+        sql(env, "UPDATE sessions SET last_seen_at = now() - interval '5 minutes'")
+        assert (await c.get("/api/auth/me")).status_code == 200
+        assert (await c.get("/api/sources")).status_code == 200
+        age = sql(env, "SELECT now() - last_seen_at < interval '1 minute' FROM sessions")[0][0]
+        assert age is True

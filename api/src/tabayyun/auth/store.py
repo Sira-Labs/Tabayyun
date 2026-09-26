@@ -177,12 +177,7 @@ async def find_session(db: AsyncSession, id_hash: bytes, *, idle: timedelta) -> 
     if row is None:
         return None
     session, disabled = row
-    await db.execute(
-        update(AuthSession)
-        .where(AuthSession.id == session.id, AuthSession.last_seen_at < func.now() - TOUCH_INTERVAL)
-        .values(last_seen_at=func.now())
-    )
-    return CurrentSession(
+    current = CurrentSession(
         id=session.id,
         user_id=session.user_id,
         org_id=session.org_id,
@@ -192,6 +187,16 @@ async def find_session(db: AsyncSession, id_hash: bytes, *, idle: timedelta) -> 
         id_token=session.id_token,
         user_disabled=bool(disabled),
     )
+    # Read the row first, and keep the ORM from syncing it: a matched UPDATE would expire
+    # `last_seen_at` on the loaded object, and reading it again would need lazy IO, which an
+    # async session refuses (MissingGreenlet on every request after the first minute).
+    await db.execute(
+        update(AuthSession)
+        .where(AuthSession.id == session.id, AuthSession.last_seen_at < func.now() - TOUCH_INTERVAL)
+        .values(last_seen_at=func.now())
+        .execution_options(synchronize_session=False)
+    )
+    return current
 
 
 async def list_sessions(db: AsyncSession, user_id: uuid.UUID, *, idle: timedelta) -> list[AuthSession]:
