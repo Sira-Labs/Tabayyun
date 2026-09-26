@@ -18,7 +18,9 @@ def app():
 
 async def test_healthz(app):
     """/healthz answers 200 with a db field whatever the database state."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.get("/healthz")
     assert r.status_code == 200
     body = r.json()
@@ -29,7 +31,9 @@ async def test_healthz(app):
 async def test_healthz_degraded_when_db_unreachable():
     """/healthz stays 200 and reports db degraded when nothing answers."""
     app = create_app(Settings(env="test", database_url=UNREACHABLE_DB))
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.get("/healthz")
     assert r.status_code == 200
     assert r.json() == {"status": "ok", "db": DB_DEGRADED, "queue": None}
@@ -56,7 +60,9 @@ async def test_schema_guard_tolerates_unreachable_db():
 
 async def test_version(app):
     """/api/version reports the environment and a schema_revision field."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.get("/api/version")
     assert r.status_code == 200
     assert r.json()["env"] == "test"
@@ -67,7 +73,9 @@ async def test_version(app):
 async def test_version_without_database_reports_no_workers():
     """With the database unreachable, the workers field is null rather than an error."""
     app = create_app(Settings(env="test", database_url=UNREACHABLE_DB))
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.get("/api/version")
     assert r.status_code == 200
     assert r.json()["workers"] is None
@@ -76,7 +84,9 @@ async def test_version_without_database_reports_no_workers():
 async def test_version_reports_the_build_commit():
     """/api/version reports the commit the image was built from (TABAYYUN_COMMIT)."""
     app = create_app(Settings(env="test", commit="ce4c37fbfc9efff2d44289d05fc6c42049be2f5c"))
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.get("/api/version")
     assert r.json()["commit"] == "ce4c37fbfc9efff2d44289d05fc6c42049be2f5c"
 

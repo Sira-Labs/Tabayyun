@@ -102,7 +102,9 @@ def test_conversion_matches_the_core():
 async def test_stateless_endpoint_accepts_ts_unit():
     """Epoch seconds give the same report window as text; a wrong unit is a 422."""
     app = create_app(Settings(env="test"))
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as client:
 
         async def post(csv: bytes, form: dict[str, str]):
             """Post a CSV to the stateless endpoint with extra form fields."""

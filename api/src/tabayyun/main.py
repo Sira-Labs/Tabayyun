@@ -1,8 +1,9 @@
 """FastAPI application factory.
 
-Exposes health, version, stateless check execution, runs, findings and series results, and
-owns the process-wide database engine (spec 001). Routers for auth, workspaces and corrections
-are added per `docs/architecture/03-system-architecture.md`.
+Exposes health, version, the login (spec 013), stateless check execution, runs, findings and
+series results, and owns the process-wide database engine (spec 001). Every other `/api` router
+requires a principal; routers for workspaces and corrections are added per
+`docs/architecture/03-system-architecture.md`.
 """
 
 from collections.abc import AsyncIterator
@@ -10,15 +11,17 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import structlog
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
 
 from tabayyun import __version__
+from tabayyun.auth import CsrfMiddleware, OidcClient, build_oidc
+from tabayyun.authz import get_principal
 from tabayyun.db import DB_OK, check_db, guard_schema, make_engine, make_session_factory, worker_commits
 from tabayyun.db.roles import check_login, is_rls_violation
 from tabayyun.jobs.names import WORKER_APPLICATION_NAME
-from tabayyun.routers import checks, datasets, findings, groups, runs, series, sources
+from tabayyun.routers import auth, checks, datasets, findings, groups, runs, series, sources
 from tabayyun.services import runs as runs_service
 from tabayyun.services.cache import RunCache
 from tabayyun.settings import Settings, get_settings
@@ -26,10 +29,14 @@ from tabayyun.settings import Settings, get_settings
 log = structlog.get_logger()
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
-    """Build the FastAPI app with its routers, database engine and lifespan."""
+def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = None) -> FastAPI:
+    """Build the FastAPI app with its routers, database engine and lifespan.
+
+    `oidc` replaces the client built from the settings (tests serve a fake IdP through it).
+    """
     settings = settings or get_settings()
     settings.require_secrets_in_prod()
+    oidc = oidc or build_oidc(settings)
     # Lazy: no connection is opened until the first request or the startup guard.
     engine = make_engine(settings)
 
@@ -42,6 +49,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await check_login(engine, settings.env)
         yield
         log.info("api.stop")
+        if oidc is not None:
+            await oidc.aclose()
         await engine.dispose()
 
     app = FastAPI(
@@ -59,14 +68,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Inline jobs write the Parquet cache from the API process (spec 006); opened on first use.
     app.state.run_cache = RunCache.from_settings(settings)
     app.state.schema_revision = None
+    app.state.oidc = oidc
 
-    app.include_router(checks.router)
-    app.include_router(runs.router)
-    app.include_router(findings.router)
-    app.include_router(series.router)
-    app.include_router(sources.router)
-    app.include_router(groups.router)
-    app.include_router(datasets.router)
+    app.add_middleware(
+        CsrfMiddleware, public_url=settings.public_url, exempt_paths=frozenset({auth.BACKCHANNEL_PATH})
+    )
+    app.include_router(auth.router)
+    # Everything else needs a principal (spec 013), also routers that do not authorize() a
+    # workspace, such as the stateless check run. FastAPI resolves it once per request.
+    signed_in = [Depends(get_principal)]
+    for router in (checks, runs, findings, series, sources, groups, datasets):
+        app.include_router(router.router, dependencies=signed_in)
 
     @app.exception_handler(DBAPIError)
     async def rls_violation(request: Request, exc: DBAPIError) -> JSONResponse:

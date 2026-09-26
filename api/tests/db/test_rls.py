@@ -69,7 +69,9 @@ async def _upload(client: AsyncClient, series: str, csv: bytes) -> dict[str, Any
 
 async def _seed_org(app: Any, prefix: str) -> dict[str, str]:
     """Series, runs, findings, metrics, scores, coverage, a group and a dataset through the API."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         run = await _upload(c, f"{prefix}-1", faulty_csv(["gap", "flatline"]))
         assert run["status"] == "succeeded", run
         other = await _upload(c, f"{prefix}-2", _hourly_csv())
@@ -188,7 +190,9 @@ async def _seed(owner_url: str, cache_dir: str) -> Seed:
         seed.a = await _seed_org(app_a, "a")
         seed.b = await _seed_org(app_b, "b")
         # A queued run keeps its upload row (and its job): the uploads table gets a row.
-        async with AsyncClient(transport=ASGITransport(app=queued), base_url="http://test") as c:
+        async with AsyncClient(
+            transport=ASGITransport(app=queued), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+        ) as c:
             seed.a["queued_run"] = (await _upload(c, "a-queued", _hourly_csv()))["id"]
     finally:
         for app in (app_a, app_b, queued):
@@ -346,6 +350,9 @@ READ_BACK = {
     "group": "/api/series-groups/{}",
     "dataset": "/api/datasets/{}",
 }
+# Scoped to the signed-in user, not to a tenant: `test_auth_flow.py` checks that another user's
+# session gives 404 (spec 013).
+USER_SCOPED_ROUTES = {("DELETE", "/api/auth/sessions/{session_id}")}
 LISTS = ["/api/runs", "/api/findings", "/api/series", "/api/sources", "/api/series-groups", "/api/datasets"]
 
 
@@ -354,7 +361,9 @@ def _url(template: str, value: str) -> str:
 
 
 async def _call(app: Any, method: str, url: str, body: Any = None) -> Any:
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         return await c.request(method, url, json=body)
 
 
@@ -382,7 +391,7 @@ def test_every_route_with_a_path_id_is_covered():
         if "{" in path
         for method in operations
     }
-    assert found == {(m, p) for m, p, _, _ in ROUTES}
+    assert found - USER_SCOPED_ROUTES == {(m, p) for m, p, _, _ in ROUTES}
 
 
 @pytest.mark.parametrize(("method", "template", "kind", "body"), ROUTES)

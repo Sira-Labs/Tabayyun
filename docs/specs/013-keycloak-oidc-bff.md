@@ -85,7 +85,7 @@ The dependency for spec 014: `require_recent_passkey()` → 403 `{"detail":
 | Table | Columns | Access for `tabayyun_app` |
 |---|---|---|
 | `user_identities` | `issuer` text, `subject` text, `user_id` → users, `email_at_login` text, `created_at`, `last_login_at`; PK (`issuer`, `subject`) | SELECT only |
-| `sessions` | `id_hash` bytea PK, `user_id`, `org_id` (null = no access), `sign_in_method` text CHECK (`google`, `github`, `passkey`), `idp_sid` text, `id_token` text, `ip_address` inet, `user_agent` text, `created_at`, `last_seen_at`, `expires_at`, `revoked_at`; index on `idp_sid`, on `user_id` | SELECT, INSERT, UPDATE (no RLS: looked up by hash before any org is known) |
+| `sessions` | `id` uuid PK (what devices name), `id_hash` bytea unique, `user_id`, `org_id` (null = no access), `sign_in_method` text CHECK (`google`, `github`, `passkey`), `idp_sid` text, `id_token` text, `ip_address` inet, `user_agent` text, `created_at`, `last_seen_at`, `expires_at`, `revoked_at`; index on `idp_sid`, on `user_id` | SELECT, INSERT, UPDATE (no RLS: looked up by hash before any org is known) |
 | `login_flows` | `id_hash` bytea PK, `state` text, `nonce` text, `code_verifier` text, `method` text, `next` text, `created_at` | SELECT, INSERT, DELETE |
 
 `users` stays read-only to the app login (spec 007). The only write path is the SECURITY
@@ -148,7 +148,8 @@ membership. The function:
 ## Behaviour
 
 1. **Startup.**
-   - `TABAYYUN_AUTH_MODE=dev` in `prod` exits with code 2 and names the setting.
+   - `TABAYYUN_AUTH_MODE=dev` in `prod` stops the start with an error naming the setting, like
+     every other `require_secrets_in_prod` refusal.
    - With `oidc`, the api fetches the discovery document lazily on the first login and
      caches it for 1 h, together with the JWKS. When the IdP is unreachable, the login routes
      answer 503 and nothing else is affected.
@@ -283,7 +284,8 @@ Unit (`api/tests/auth`):
 - `test_require_recent_passkey`
 - `test_prod_refuses_dev_mode`
 
-Integration (`api/tests/auth`, database fixtures of spec 007), with a fake IdP served in
+Integration (`api/tests/db/test_auth_flow.py`, next to the database fixtures of spec 007), with a
+fake IdP served in
 process (discovery, JWKS with a generated RSA key, token endpoint, end-session URL):
 - `test_full_login_per_method`
 - `test_admin_email_becomes_owner_once`
@@ -317,7 +319,10 @@ Web (`web/src/__tests__`):
 2. **Who gets in before spec 014:** only `TABAYYUN_ADMIN_EMAIL`. Everyone else sees "No
    access yet". This differs from Arqam's open sign-up on purpose: Tabayyun holds
    organisations' operational data.
-3. **Authlib** as the OIDC client (discovery, PKCE, JWKS and JWT validation).
+3. **joserfc** (Authlib's JOSE library) for JWKS and JWT validation, and httpx for discovery
+   and the token endpoint. Authlib 1.8 deprecates its own `authlib.jose` and its httpx client
+   in favour of these, so depending on Authlib itself would add nothing (see implementation
+   notes).
 4. **Sessions in Postgres**, as in Arqam; no Redis.
 5. **One realm per install:** staging uses realm `tabayyun` on the current Keycloak;
    production gets its own Keycloak on the production server (ADR-0016).
@@ -352,6 +357,21 @@ Recorded while implementing (2026-09-26); the spec above is corrected accordingl
   user" failed with `invalid_user_credentials`. "Create user if unique" or "Automatically set
   existing user", as alternatives, links an existing email and creates a new one (checked
   with the fake Google realm).
+- **Callback failures are pages.** The callback is a browser navigation, so its failures
+  answer with the stated status and a short HTML page naming the code (`login_expired`,
+  `invalid_token`, `passkey_required`, `idp_error`, `idp_unavailable`) and linking to
+  `/login`. Two more codes: `login_cancelled` when the IdP returns `access_denied`, and 403
+  `account_disabled` for a disabled user, who gets no session.
+- **`no_access` names the email.** `/me`'s 403 body is `{"detail": "no_access", "email": ...}`,
+  so the "No access yet" page can say who is signed in; API routes answer `no_access` alone.
+- **Every other router needs a principal.** `create_app` attaches `get_principal` to every
+  router but `/api/auth`, so a route without `authorize()` (the stateless check run) is not
+  anonymous either.
+- **Checked against Keycloak 26.4.** The api in `oidc` mode against the realm in a container,
+  in Chromium with a virtual authenticator: a passkey login and a "Continue with Google" login
+  through a second realm standing in for Google, both linked to one user who became owner;
+  the `__Host-` cookie flags; the device list; logout through the end-session URL; and a
+  back-channel logout sent by Keycloak when an admin ended the user's sessions.
 - **Placeholder URL.** The realm export carries `__PUBLIC_URL__`; `deploy/keycloak/render.py
   <url>` fills it for an install. `make dev-infra` renders it for `http://localhost:5173`,
   and the dev Keycloak (now 26.4) imports it at start.

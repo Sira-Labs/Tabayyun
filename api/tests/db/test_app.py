@@ -45,7 +45,9 @@ async def test_session_rolls_back_on_error(settings, fresh_schema):
 
     try:
         before = await _count_teams(app)
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+        ) as c:
             assert (await c.post("/_test/teams", params={"fail": "true"})).status_code == 418
             assert await _count_teams(app) == before
             assert (await c.post("/_test/teams")).status_code == 200
@@ -73,7 +75,9 @@ async def test_lifespan_reports_schema_revision_and_db_ok(settings, fresh_schema
     app = create_app(settings)
     async with (
         LifespanManager(app),
-        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c,
+        AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+        ) as c,
     ):
         version = (await c.get("/api/version")).json()
         assert version["schema_revision"] == migrate.head_revision()
@@ -98,7 +102,9 @@ async def test_rls_violation_is_logged_and_answers_500(settings, fresh_schema):
 
     try:
         with capture_logs() as logs:
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+            ) as c:
                 r = await c.post("/_test/foreign-team")
         assert r.status_code == 500 and r.json() == {"detail": "internal error"}
         assert [e["path"] for e in logs if e["event"] == "db.rls_violation"] == ["/_test/foreign-team"]
