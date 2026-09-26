@@ -245,8 +245,10 @@ tags.
      On `tabayyun-web`, connect `tabayyun-stg.siralabs.org` next to `tabayyun.siralabs.org`
      and enable HTTPS. On the `staging` environment, set `CAPROVER_APP_API=tabayyun-api`,
      `CAPROVER_APP_WEB=tabayyun-web`, `CAPROVER_APP_WORKER=tabayyun-worker`, and move the
-     existing three app tokens there. The data in these apps becomes staging data, which
-     suits the rule above: it is test data, and people sign up again on production.
+     existing three app tokens there. Until step 4, `tabayyun.siralabs.org` is served by
+     these staging apps, so every push to `main` reaches it, as before ADR-0016; nothing is
+     promoted anywhere yet. The API has no login until spec 013, so anyone can upload there
+     (as on route B's staging); step 5 therefore empties the database and the bucket.
    - **B. New `-stg` apps**, the same names as Arqam and Suffa use. Create them as in
      sections 1–4 with the suffix (persistent data on `tabayyun-db-stg`), with new secrets
      and the `tabayyun-stg.siralabs.org` domain on `tabayyun-web-stg`. The `CAPROVER_APP_*`
@@ -263,7 +265,12 @@ tags.
    Force HTTPS), set `CAPROVER_WEB_URL=https://tabayyun.siralabs.org` on `production`, and
    check `GET /api/version` on the public domain.
 5. Clean up the current server.
-   - Route A: remove `tabayyun.siralabs.org` from `tabayyun-web`; the apps stay as staging.
+   - Route A: remove `tabayyun.siralabs.org` from `tabayyun-web`; the apps stay as staging,
+     but nothing uploaded before the switch may stay on them. Set the instance count of
+     `tabayyun-api` and `tabayyun-worker` to 0, run `dropdb -U tabayyun tabayyun && createdb
+     -U tabayyun tabayyun` in the `tabayyun-db` terminal, delete the objects in the
+     `tabayyun-cache` bucket, and set both instance counts back to 1. The api migrates the
+     empty database on start and sets the `tabayyun_app` password again.
    - Route B: delete the old `tabayyun-db`, `tabayyun-api`, `tabayyun-worker` and
      `tabayyun-web` apps together with their volumes (CapRover asks when deleting an app;
      afterwards `docker volume ls | grep tabayyun` should list only `-stg` volumes), and the
