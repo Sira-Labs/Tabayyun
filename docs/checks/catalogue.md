@@ -351,7 +351,8 @@ Profiles are versioned and stored; findings link to the profile they used.
   dropped, runs closer than `min_duration` merge; one finding per episode, on the member that
   was the suspect in ≥ 80 % of its bins, else on the first member with `suspect` null.
   Tolerance: `tolerance`, else `tolerance_pct` of the members' median magnitude, else
-  k × 1.4826 × MAD of the differences floored at 2 × the coarsest resolution. Metric
+  k × 1.4826 × MAD of the differences (pair) or of the deviations from the bin median without
+  the median member's own 0 (three or more), floored at 2 × the coarsest resolution. Metric
   `max_abs_diff:<group>` per member and day. Class-accuracy presets (meters: 1.5 × class
   accuracy at full load) are S14-1.
 - **Params:** `tolerance`, `tolerance_pct`, `k` 4, `min_duration` 15 min, `grid` auto; group
