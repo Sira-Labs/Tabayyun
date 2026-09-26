@@ -54,9 +54,14 @@ export function Account() {
             Could not load devices: {devices.error.message}
           </p>
         )}
-        {(revoke.isError || revokeOthers.isError) && (
+        {revoke.isError && (
           <p role="alert" className="text-red-700 dark:text-red-400">
-            Could not sign out: {(revoke.error ?? revokeOthers.error)?.message}
+            Could not sign out: {revoke.error.message}
+          </p>
+        )}
+        {revokeOthers.isError && (
+          <p role="alert" className="text-red-700 dark:text-red-400">
+            Could not sign out other devices: {revokeOthers.error.message}
           </p>
         )}
         {devices.data && devices.data.length > 0 && (

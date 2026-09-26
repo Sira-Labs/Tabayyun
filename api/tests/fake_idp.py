@@ -33,6 +33,7 @@ _KEY = RSAKey.generate_key(2048, parameters={"kid": "k1", "use": "sig", "alg": "
 
 
 def _b64(data: bytes) -> str:
+    """base64url without padding."""
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
@@ -119,6 +120,7 @@ class FakeIdp:
 
         @app.get(f"{path}/.well-known/openid-configuration")
         async def discovery() -> dict[str, Any]:
+            """The endpoints Keycloak publishes, under the fake issuer."""
             base = f"{ISSUER}/protocol/openid-connect"
             return {
                 "issuer": ISSUER,
@@ -130,6 +132,7 @@ class FakeIdp:
 
         @app.get(f"{path}/protocol/openid-connect/certs")
         async def certs() -> dict[str, Any]:
+            """The public half of the realm key."""
             return {"keys": [self.key.as_dict(private=False)]}
 
         @app.post(f"{path}/protocol/openid-connect/token")
@@ -140,6 +143,7 @@ class FakeIdp:
             redirect_uri: str = Form(),
             code_verifier: str = Form(),
         ) -> JSONResponse:
+            """Code exchange: client secret, redirect URI and PKCE verifier must match."""
             expected = "Basic " + base64.b64encode(f"{CLIENT_ID}:{CLIENT_SECRET}".encode()).decode()
             if request.headers.get("authorization") != expected:
                 return JSONResponse({"error": "unauthorized_client"}, status_code=401)

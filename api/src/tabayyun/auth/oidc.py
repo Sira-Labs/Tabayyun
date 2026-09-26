@@ -107,6 +107,7 @@ class OidcClient:
         return (await self._cached()).metadata
 
     async def _cached(self) -> _Cache:
+        """Discovery document and JWKS, fetched again once they are an hour old."""
         async with self._lock:
             now = self._clock()
             if self._cache is None or now - self._cache.fetched_at > CACHE_TTL_S:
@@ -116,6 +117,7 @@ class OidcClient:
             return self._cache
 
     async def _get_json(self, url: str) -> dict[str, Any]:
+        """A JSON object from the IdP; IdpUnavailableError on any transport or format error."""
         try:
             response = await self._http.get(url)
             response.raise_for_status()
@@ -128,6 +130,7 @@ class OidcClient:
         return body
 
     async def _discover(self) -> ProviderMetadata:
+        """Fetch and check the discovery document."""
         doc = await self._get_json(f"{self.issuer}/.well-known/openid-configuration")
         try:
             metadata = ProviderMetadata(
@@ -145,6 +148,7 @@ class OidcClient:
         return metadata
 
     async def _fetch_keys(self, jwks_uri: str) -> KeySet:
+        """The IdP's RSA and EC signing keys."""
         body = await self._get_json(jwks_uri)
         # Encryption keys and algorithms outside ALGORITHMS are of no use for verification.
         keys = [
@@ -232,6 +236,7 @@ class OidcClient:
         return dict(decoded.claims)
 
     def _validate(self, claims: dict[str, Any], **options: Any) -> None:
+        """Check `iss`, `aud` (and `azp` with several audiences) plus `options`, with leeway."""
         registry = JWTClaimsRegistry(
             leeway=LEEWAY_S,
             iss={"essential": True, "value": self.issuer},

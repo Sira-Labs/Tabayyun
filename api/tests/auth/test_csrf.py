@@ -12,7 +12,10 @@ PUBLIC = "https://tabayyun.example.org"
 
 
 def _app(public_url: str | None = PUBLIC) -> CsrfMiddleware:
+    """Two routes behind the guard; `/api/hook` is exempt."""
+
     async def ok(request):
+        """Any method succeeds once past the guard."""
         return PlainTextResponse("ok")
 
     methods = ["GET", "POST", "PUT", "PATCH", "DELETE"]
@@ -21,6 +24,7 @@ def _app(public_url: str | None = PUBLIC) -> CsrfMiddleware:
 
 
 async def _status(app, method: str, path: str = "/api/x", **headers: str) -> int:
+    """Status of one request with `headers`."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url=PUBLIC) as c:
         return (await c.request(method, path, headers=headers)).status_code
 

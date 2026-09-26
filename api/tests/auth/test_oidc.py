@@ -25,6 +25,7 @@ OTHER_KEY = RSAKey.generate_key(2048, parameters={"kid": "k1"}, private=True)
 
 @pytest.fixture
 def idp() -> FakeIdp:
+    """A fresh fake IdP with the shared realm key."""
     return FakeIdp()
 
 
@@ -110,6 +111,7 @@ async def test_discovery_must_name_its_issuer(idp):
         await wrong.metadata()
 
     def refuse(request: httpx.Request) -> httpx.Response:
+        """An IdP that cannot be reached."""
         raise httpx.ConnectError("down", request=request)
 
     down = OidcClient(ISSUER, CLIENT_ID, "s", httpx.AsyncClient(transport=httpx.MockTransport(refuse)))
@@ -199,6 +201,7 @@ def test_sign_in_method_from_claims(method, claims, proven):
 
 
 def _session(method: str, age: timedelta) -> CurrentSession:
+    """A live session signed in with `method`, `age` ago."""
     now = datetime.now(UTC)
     return CurrentSession(
         id=uuid.uuid4(),

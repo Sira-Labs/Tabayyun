@@ -100,15 +100,18 @@ def _oidc(request: Request) -> OidcClient:
 
 
 def _public_url(settings: Settings) -> str:
+    """The public URL without a trailing slash."""
     # Set whenever the OIDC client exists (create_app checks it).
     return (settings.public_url or "").rstrip("/")
 
 
 def _set_cookie(response: Response, name: str, value: str, max_age: int) -> None:
+    """Set a `__Host-` cookie: HttpOnly, Secure, SameSite=Lax, Path=/."""
     response.set_cookie(name, value, max_age=max_age, path="/", secure=True, httponly=True, samesite="lax")
 
 
 def _clear_cookie(response: Response, name: str) -> None:
+    """Expire a cookie set by `_set_cookie` (same attributes, as `__Host-` requires)."""
     response.delete_cookie(name, path="/", secure=True, httponly=True, samesite="lax")
 
 
@@ -263,7 +266,9 @@ async def callback(
             )
     if result.disabled:
         log.info("auth.rejected", reason="user_disabled", user_id=str(result.user_id), method=flow.method)
-        return _failure(403, "account_disabled")
+        failed = _failure(403, "account_disabled")
+        _clear_cookie(failed, SESSION_COOKIE)
+        return failed
     log.info(
         "auth.login",
         user_id=str(result.user_id),
@@ -292,6 +297,7 @@ async def _describe(request: Request, user_id: uuid.UUID, org_id: uuid.UUID) -> 
 
 
 async def _email_of(request: Request, user_id: uuid.UUID) -> str | None:
+    """The user's email (users span orgs: no tenant context needed)."""
     async with factory_of(request)() as db, db.begin():
         email: str | None = await db.scalar(select(User.email).where(User.id == user_id))
     return email

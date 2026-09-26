@@ -42,6 +42,7 @@ class CsrfMiddleware:
         self.exempt_paths = exempt_paths
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Pass safe and exempt requests through; answer 403 for unsafe ones that fail."""
         if (
             scope["type"] == "http"
             and scope["method"] in UNSAFE_METHODS

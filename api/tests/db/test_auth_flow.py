@@ -52,6 +52,7 @@ async def env(db_url, fresh_schema):
     apps = []
 
     def make(oidc: OidcClient | None = None, **overrides: Any):
+        """An app in oidc mode; `oidc` replaces the fake IdP's client."""
         app = create_app(auth_settings(db_url, **overrides), oidc=oidc or idp.client())
         apps.append(app)
         return app
@@ -81,6 +82,7 @@ def method_claims(method: str) -> dict[str, Any]:
 
 
 async def start(c: AsyncClient, method: str, next_path: str | None = None) -> httpx.Response:
+    """The first leg: `/api/auth/login`, which answers with the redirect to the IdP."""
     params = {"method": method} | ({"next": next_path} if next_path else {})
     return await c.get("/api/auth/login", params=params)
 
@@ -108,6 +110,7 @@ async def sign_in(
 
 
 def live_sessions(env) -> int:
+    """Sessions not revoked, across all users."""
     return sql(env, "SELECT count(*) FROM sessions WHERE revoked_at IS NULL")[0][0]
 
 
@@ -145,6 +148,7 @@ async def test_anonymous_requests(env):
 
 
 def _bad_signature(claims: dict[str, Any]) -> str:
+    """The claims signed with a foreign key under the realm's key id."""
     return FakeIdp().sign(claims, key=OTHER_KEY)
 
 
@@ -278,6 +282,7 @@ async def test_disabled_user_loses_sessions(env):
         sql(env, "UPDATE users SET disabled_at = now() WHERE email = :e", e=ADMIN)
         again = await sign_in(env, c2)
         assert again.status_code == 403 and "account_disabled" in again.text
+        assert any(h.startswith(f"{SESSION_COOKIE}=") for h in again.headers.get_list("set-cookie"))
     assert live_sessions(env) == 0
 
 
@@ -360,6 +365,7 @@ async def test_require_recent_passkey_gate(env):
 
     @env.app.get("/api/_test/admin", dependencies=[Depends(require_recent_passkey)])
     async def admin_only() -> dict[str, bool]:
+        """A stand-in for a spec 014 admin route."""
         return {"ok": True}
 
     async with browser(env.app) as google, browser(env.app) as passkey:
@@ -407,6 +413,7 @@ async def test_idp_unavailable_only_affects_login(env):
     """With the IdP down, login answers 503 and the rest of the api keeps working."""
 
     def refuse(request: httpx.Request) -> httpx.Response:
+        """An IdP that cannot be reached."""
         raise httpx.ConnectError("down", request=request)
 
     down = env.make(

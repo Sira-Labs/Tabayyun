@@ -29,7 +29,7 @@ review item, or an ops runbook entry.
 - [ ] CORS disabled (same origin) except documented API-token clients.
 
 ## CSRF and XSS
-- [x] Unsafe methods require `X-Tabayyun-Request` header and JSON content type; `Origin` checked. (Spec 013: `CsrfMiddleware`. Uploads are multipart, so the header, not the content type, is what a cross-site form cannot send.)
+- [x] Unsafe methods require the `X-Tabayyun-Request` header; `Origin` checked when present. (Spec 013: `CsrfMiddleware`. The item first also asked for a JSON content type; uploads are multipart, so the header, which a cross-site form cannot send, is the guard.)
 - [ ] No inline scripts; no `dangerouslySetInnerHTML`; DOMPurify for markdown.
 
 ## Secrets and configuration

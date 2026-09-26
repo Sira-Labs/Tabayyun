@@ -45,6 +45,7 @@ import uuid
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from urllib import error, request
+from urllib.parse import urlsplit
 
 DAYS = 42
 STEP = timedelta(minutes=15)
@@ -65,13 +66,17 @@ class Api:
     def __init__(self, base_url: str, session: str | None = None) -> None:
         self.base = base_url.rstrip("/")
         self.session = session
+        if session and urlsplit(self.base).scheme.lower() != "https":
+            # The session is the operator's credential: never over plain HTTP.
+            raise SeedError("TABAYYUN_SESSION needs an https:// --url")
 
     def _send(self, method: str, path: str, body: bytes | None, content_type: str | None) -> dict:
         req = request.Request(self.base + path, data=body, method=method)
         # The api refuses unsafe requests without it (CSRF guard, spec 013).
         req.add_header("X-Tabayyun-Request", "1")
         if self.session:
-            req.add_header("Cookie", f"__Host-tby_session={self.session}")
+            # Unredirected: a redirect to another host must not carry the session.
+            req.add_unredirected_header("Cookie", f"__Host-tby_session={self.session}")
         if content_type:
             req.add_header("Content-Type", content_type)
         try:
