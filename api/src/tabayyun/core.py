@@ -285,16 +285,19 @@ _LENIENT_TS_FORMATS = ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:
 
 
 def _lenient_text_ts(ts: pa.ChunkedArray, name: str) -> pa.ChunkedArray:
-    """Parse a text timestamp column with the first format that fits every non-null cell."""
+    """Parse each text timestamp with the first format that fits it, keeping row order.
+
+    A column may mix the formats (offset and naive cells); a non-null cell no format fits
+    fails the column, naming the first such cell.
+    """
+    utc = pa.timestamp("ns", tz="UTC")
+    candidates = []
     for fmt in _LENIENT_TS_FORMATS:
-        try:
-            parsed = pc.strptime(ts, format=fmt, unit="ns")
-        except pa.ArrowInvalid:
-            continue
-        return (
-            parsed.cast(pa.timestamp("ns", tz="UTC"))
-            if parsed.type.tz
-            else parsed.cast(pa.timestamp("ns")).cast(pa.timestamp("ns", tz="UTC"))
-        )
-    first = next((v for v in ts.to_pylist() if v is not None), None)
-    raise ValueError(f"column {name!r} is not a timestamp or integer column (cannot parse {first!r})")
+        parsed = pc.strptime(ts, format=fmt, unit="ns", error_is_null=True)
+        candidates.append(parsed.cast(utc) if parsed.type.tz else parsed.cast(pa.timestamp("ns")).cast(utc))
+    combined = pc.coalesce(*candidates)
+    unparsed = pc.and_(pc.is_valid(ts), pc.is_null(combined))
+    if pc.any(unparsed).as_py():
+        first = ts.filter(unparsed)[0].as_py()
+        raise ValueError(f"column {name!r} is not a timestamp or integer column (cannot parse {first!r})")
+    return combined

@@ -226,15 +226,58 @@ def series_ids(api: Api) -> dict[str, str]:
             return out
 
 
-def check_ids_of_run(api: Api, run_id: str) -> set[str]:
-    found: set[str] = set()
+def findings_of_run(api: Api, run_id: str) -> list[dict]:
+    """Every finding the run created or saw again, over all pages."""
+    found: list[dict] = []
     cursor = ""
     while True:
         page = api.get(f"/api/findings?run_id={run_id}&limit=200" + (f"&cursor={cursor}" if cursor else ""))
-        found.update(item["check_id"] for item in page["items"])
+        found += page["items"]
         cursor = page.get("next_cursor") or ""
         if not cursor:
             return found
+
+
+# Planted faults: (series, check, first day, last day) of the timeline. A fault counts as found
+# when a finding of that check on that series overlaps the interval.
+PLANTED = [
+    ("demo-flow", "tby.completeness", 5.0, 5.5),  # half a day missing
+    ("demo-flow", "tby.flatline", 10.0, 11.0),
+    ("demo-flow", "tby.completeness", 15.0, 15.1),  # nulls
+    ("demo-flow", "tby.non_negative", 20.0, 20.2),
+    ("demo-flow", "tby.physical_range", 20.0, 20.2),  # below physical_min 0
+    ("demo-flow", "tby.physical_range", 25.0, 25.1),  # above physical_max 200
+    ("site-load", "tby.seasonality_break", DAYS - 10, DAYS),
+    ("hvac-load", "tby.correlation_break", 28.0, DAYS),
+    ("flow-c", "tby.redundant_disagreement", 30.0, 33.0),
+    ("out-2", "tby.balance_residual", 35.0, 37.0),
+]
+
+
+def missing_faults(findings: list[dict], names: dict[str, str], start: datetime) -> list[str]:
+    """The planted faults no finding covers; `names` maps series uuid to external id."""
+
+    def ns(day: float) -> int:
+        return int((start + timedelta(days=day)).timestamp() * 1e9)
+
+    missing = []
+    for series, check, first, last in PLANTED:
+        lo, hi = ns(first), ns(last)
+        if not any(
+            names.get(f["series_id"]) == series
+            and f["check_id"] == check
+            and f["window"]["start"] < hi
+            and f["window"]["end"] > lo
+            for f in findings
+        ):
+            missing.append(f"{check} on {series}, days {first:g}-{last:g}")
+    return missing
+
+
+def exact_duplicates(api: Api, series_uuid: str) -> float:
+    """The latest `exact_duplicates` metric: exact duplicates are counted, not a finding."""
+    items = api.get(f"/api/series/{series_uuid}/metrics?name=exact_duplicates&limit=1")["items"]
+    return float(items[0]["value"]) if items else 0.0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -271,12 +314,12 @@ def main(argv: list[str] | None = None) -> int:
         "out-3": (outs[2], "kW", None),
     }
     print("uploading series")
-    single: dict[str, set[str]] = {}
+    findings: list[dict] = []
     failed = False
     for name, (rows, unit, extra) in uploads.items():
         run = upload(api, name, rows, unit, extra)
         failed |= run["status"] != "succeeded"
-        single[name] = check_ids_of_run(api, run["id"])
+        findings += findings_of_run(api, run["id"])
 
     ids = series_ids(api)
     member: Callable[[str, str], dict[str, str]] = lambda name, role="member": {  # noqa: E731
@@ -323,23 +366,18 @@ def main(argv: list[str] | None = None) -> int:
     run = wait_run(api, created["id"])
     print(f"  dataset run {run['id']} {run['status']}" + (f": {run['error']}" if run.get("error") else ""))
     failed |= run["status"] != "succeeded"
-    multi = check_ids_of_run(api, run["id"])
+    findings += findings_of_run(api, run["id"])
 
-    expected = [
-        ("demo-flow", "single", "tby.physical_range", single.get("demo-flow", set())),
-        ("demo-flow", "single", "tby.flatline", single.get("demo-flow", set())),
-        ("site-load", "single", "tby.seasonality_break", single.get("site-load", set())),
-        ("dataset", "multi", "tby.correlation_break", multi),
-        ("dataset", "multi", "tby.redundant_disagreement", multi),
-        ("dataset", "multi", "tby.balance_residual", multi),
-    ]
-    print("planted faults")
-    for where, _, check, found in expected:
-        ok = check in found
-        failed |= not ok
-        print(f"  {'found  ' if ok else 'MISSING'} {check:28} on {where}")
-    print("all checks with findings: " + ", ".join(sorted(set().union(*single.values(), multi))))
-    return 1 if failed else 0
+    names = {uuid_: name for name, uuid_ in ids.items()}
+    missing = missing_faults(findings, names, ts[0])
+    duplicates = exact_duplicates(api, ids["demo-flow"])
+    if duplicates < 1:
+        missing.append("exact_duplicates metric on demo-flow")
+    print(f"planted faults: {len(PLANTED) + 1 - len(missing)} of {len(PLANTED) + 1} found")
+    for item in missing:
+        print(f"  MISSING {item}")
+    print("checks with findings: " + ", ".join(sorted({f["check_id"] for f in findings})))
+    return 1 if failed or missing else 0
 
 
 if __name__ == "__main__":

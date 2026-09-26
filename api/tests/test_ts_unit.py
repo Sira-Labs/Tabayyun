@@ -142,3 +142,17 @@ def test_unparseable_text_timestamps_name_the_cell():
     """Text that fits no format fails with the first cell in the message."""
     with pytest.raises(ValueError, match="cannot parse 'yesterday'"):
         core.read_csv(b"ts,value\nyesterday,1\n", "ts", "value", None)
+
+
+def test_mixed_unpadded_text_timestamps_parse_per_cell():
+    """Offset and naive cells in one column each parse; order and nulls are kept."""
+    data = b"ts,value\n2007-1-1T00:00:00+01:00,1\n2007-1-1T01:00:00,2\n2007-1-1 02:00:00,3\n"
+    parsed = core.read_csv(data, "ts", "value", None)
+    hours = [
+        datetime(2006, 12, 31, 23, tzinfo=UTC),
+        datetime(2007, 1, 1, 1, tzinfo=UTC),
+        datetime(2007, 1, 1, 2, tzinfo=UTC),
+    ]
+    assert parsed.table.column("ts").cast(pa.int64()).to_pylist() == [
+        int(h.timestamp()) * 1_000_000_000 for h in hours
+    ]
