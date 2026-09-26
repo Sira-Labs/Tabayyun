@@ -266,6 +266,13 @@ Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, S
 
 ## Later sprints
 
+- [ ] **Scores that barely move** (26 Sep, owner: backlog for S10-6): on staging, `flow-a` had
+      166 high-severity findings and an overall score of 98.1, and most dimension tiles read
+      100.0. Scores are time-weighted per dimension (a 15-minute finding over 42 days costs
+      almost nothing), each finding counts in one dimension, and the runs list shows only the
+      first series of a dataset run. To decide with the overview: severity weight, a penalty
+      per episode, showing the worst dimension, and a dataset run's worst member in the list.
+
 Stories S9-1 onwards in `docs/roadmap/sprints.md` become specs 018+ when their sprint
 starts; the plan is the backlog until then.
 
