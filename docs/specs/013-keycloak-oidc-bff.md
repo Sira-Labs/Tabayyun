@@ -51,8 +51,10 @@ Tabayyun password.
 | `TABAYYUN_SESSION_ABSOLUTE` | `30d` | Absolute lifetime (Arqam: 30 days too) |
 | `TABAYYUN_PASSKEY_FRESH` | `12h` | How recent a passkey sign-in must be for admin actions (Arqam spec 012) |
 
-In `prod` with `oidc`, `require_secrets_in_prod` refuses to start without `PUBLIC_URL` (https),
-`OIDC_ISSUER`, `OIDC_CLIENT_SECRET` and `SESSION_SECRET`, or with placeholder values.
+In `prod` with `oidc`, `require_secrets_in_prod` refuses to start without `TABAYYUN_PUBLIC_URL`
+(https), `TABAYYUN_OIDC_ISSUER`, `TABAYYUN_OIDC_CLIENT_SECRET`, `TABAYYUN_SESSION_SECRET` and a
+non-empty `TABAYYUN_ADMIN_EMAIL`, or with placeholder values. Without an admin email no
+login could ever become owner: the migration's bootstrap owner has no login.
 `TABAYYUN_SESSION_SECRET` (existing) keys the HMAC of session and login-flow IDs.
 
 ### Routes (all under `/api/auth`, none behind `authorize()`)
@@ -164,7 +166,10 @@ membership. The function:
      `invalid_token`.
    - **Sign-in method:** `passkey` when the token's `acr` is `passkey`, else the
      `identity_provider` claim (`google`/`github`). For `method=passkey`, a token whose `acr`
-     is not `passkey` gives 400 `passkey_required`. A token with neither → 400 `invalid_token`.
+     is not `passkey` gives 400 `passkey_required`. A token with neither claim, or a derived
+     method that differs from the flow's recorded `method`, gives 400 `invalid_token`:
+     `kc_idp_hint` only routes the request, so a user could otherwise finish a Google flow
+     through another provider, including one switched off in `TABAYYUN_SIGN_IN_METHODS`.
    - **User and membership:** `tabayyun_login(...)` runs with issuer, `sub`, lower-cased email,
      `email_verified`, `name` and `TABAYYUN_ADMIN_EMAIL`. Its admin rule (Arqam's bootstrap
      rule): the user becomes `owner` of the default org only if the email equals
@@ -225,8 +230,9 @@ membership. The function:
       `passkey` via `acr`. `/api/auth/me` returns the user and the method; an API list call
       returns their org's rows.
 - [ ] State mismatch, a reused flow, an expired flow, a wrong nonce, a wrong audience, a bad
-      signature, `alg=none`, `email_verified=false` and a passkey flow without
-      `acr=passkey` each fail with the stated status, and no session is created.
+      signature, `alg=none`, `email_verified=false`, a passkey flow without `acr=passkey` and
+      a Google flow that returns through GitHub each fail with the stated status, and no
+      session is created.
 - [ ] `next=https://evil.example` and `next=//evil.example` redirect to `/`. A disabled
       `method` gives 400.
 - [ ] `TABAYYUN_ADMIN_EMAIL` becomes owner at the first verified login, only while the
@@ -242,7 +248,8 @@ membership. The function:
       back-channel logout token revokes the matching sessions; an invalid one gives 400.
 - [ ] `require_recent_passkey()` passes a passkey session younger than 12 h. It refuses an
       older one, and a Google or GitHub one, with 403 `second-factor-required`.
-- [ ] `prod` refuses `AUTH_MODE=dev` and missing or placeholder OIDC settings.
+- [ ] `prod` refuses `AUTH_MODE=dev`, missing or placeholder OIDC settings, and an empty
+      `TABAYYUN_ADMIN_EMAIL`.
 - [ ] RLS still isolates: a session of org A cannot read org B's rows (007's cross-tenant test
       with real sessions instead of the dependency override).
 - [ ] The web app:
