@@ -18,7 +18,9 @@ def app():
 
 async def test_healthz(app):
     """/healthz answers 200 with a db field whatever the database state."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.get("/healthz")
     assert r.status_code == 200
     body = r.json()
@@ -29,7 +31,9 @@ async def test_healthz(app):
 async def test_healthz_degraded_when_db_unreachable():
     """/healthz stays 200 and reports db degraded when nothing answers."""
     app = create_app(Settings(env="test", database_url=UNREACHABLE_DB))
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.get("/healthz")
     assert r.status_code == 200
     assert r.json() == {"status": "ok", "db": DB_DEGRADED, "queue": None}
@@ -56,7 +60,9 @@ async def test_schema_guard_tolerates_unreachable_db():
 
 async def test_version(app):
     """/api/version reports the environment and a schema_revision field."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.get("/api/version")
     assert r.status_code == 200
     assert r.json()["env"] == "test"
@@ -67,7 +73,9 @@ async def test_version(app):
 async def test_version_without_database_reports_no_workers():
     """With the database unreachable, the workers field is null rather than an error."""
     app = create_app(Settings(env="test", database_url=UNREACHABLE_DB))
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.get("/api/version")
     assert r.status_code == 200
     assert r.json()["workers"] is None
@@ -76,7 +84,9 @@ async def test_version_without_database_reports_no_workers():
 async def test_version_reports_the_build_commit():
     """/api/version reports the commit the image was built from (TABAYYUN_COMMIT)."""
     app = create_app(Settings(env="test", commit="ce4c37fbfc9efff2d44289d05fc6c42049be2f5c"))
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.get("/api/version")
     assert r.json()["commit"] == "ce4c37fbfc9efff2d44289d05fc6c42049be2f5c"
 
@@ -95,13 +105,22 @@ def test_prod_refuses_placeholders():
         )
 
 
-def test_prod_starts_without_oidc_when_secrets_are_real():
-    """Prod starts with real secrets even before OIDC is configured."""
+def test_prod_requires_the_oidc_login():
+    """Prod starts with real secrets and the OIDC settings, and refuses without them (spec 013)."""
+    real = {
+        "env": "prod",
+        "session_secret": "9f1c2a7d4e8b6c0f3a5d7e9b1c2d4f6a8b0c2d4e",
+        "database_url": "postgresql+psycopg://tabayyun:s3cr3t-long-enough-value@db/tabayyun",
+    }
+    with pytest.raises(RuntimeError, match="TABAYYUN_OIDC_ISSUER"):
+        create_app(Settings(**real))
     app = create_app(
         Settings(
-            env="prod",
-            session_secret="9f1c2a7d4e8b6c0f3a5d7e9b1c2d4f6a8b0c2d4e",
-            database_url="postgresql+psycopg://tabayyun:s3cr3t-long-enough-value@db/tabayyun",
+            **real,
+            public_url="https://tabayyun.example.org",
+            oidc_issuer="https://keycloak.example.org/realms/tabayyun",
+            oidc_client_secret="7c1e9a3b5d7f9e1c3a5b7d9f1e3c5a7b",
+            admin_email="owner@example.org",
         )
     )
     assert app.title == "Tabayyun API"

@@ -28,7 +28,9 @@ def app(db_url, fresh_schema):
 @pytest.fixture
 async def client(app):
     """HTTP client whose requests complete their background tasks before returning."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         yield c
     await app.state.engine.dispose()
 
@@ -145,7 +147,9 @@ async def test_enqueue_is_transactional_with_the_run(db_url, fresh_schema):
     fresh_schema("auto")
     app = create_app(app_settings(db_url, inline_jobs=False))
     try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+        ) as c:
             body = await _post_run(c, faulty_csv([]))
             run = (await c.get(f"/api/runs/{body['id']}")).json()
         assert run["status"] == "queued"

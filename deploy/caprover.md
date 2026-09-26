@@ -85,6 +85,14 @@ Rules:
     | `TABAYYUN_SESSION_SECRET` | a generated value, e.g. the output of `openssl rand -base64 48` |
     | `TABAYYUN_CACHE_URL` | `/data/cache` (the image default; the older name `TABAYYUN_CACHE_DIR` still works) |
     | `TABAYYUN_TIMESCALE` | optional; `auto` (default) uses TimescaleDB when the extension exists, `off` never does |
+    | `TABAYYUN_PUBLIC_URL` | the web app's address, e.g. `https://tabayyun.siralabs.org` (sign-in, section 4a) |
+    | `TABAYYUN_OIDC_ISSUER` | the realm, e.g. `https://miftachun.apps.data-and-ai-dude.ch/realms/tabayyun` |
+    | `TABAYYUN_OIDC_CLIENT_SECRET` | secret of the realm's `tabayyun-api` client (section 4a) |
+    | `TABAYYUN_ADMIN_EMAIL` | the owner's email; becomes owner at its first verified sign-in |
+    | `TABAYYUN_SIGN_IN_METHODS` | optional; default `google,github,passkey` |
+
+    With `TABAYYUN_ENV=prod` the api refuses to start without the four sign-in settings
+    (spec 013); staging runs `prod` too, so set up the realm (section 4a) first.
 
   - The image runs the schema migration (`python -m tabayyun.db.migrate upgrade head`) on every start before
     serving, so a redeploy upgrades the database in place; the app log shows the revision
@@ -190,6 +198,74 @@ Until the switch, both apps keep serving and log `db.rls_bypassed` as an error o
   `ghcr.io/sira-labs/tabayyun-web:latest`.
 
 Open the domain: the page should show the API version and let you upload a CSV.
+
+## 4a. Sign-in: Keycloak realm, Google and GitHub (spec 013)
+
+Tabayyun signs people in through a Keycloak realm with Google, GitHub and passkeys, no
+passwords. One realm per install: staging uses realm `tabayyun` on the current Keycloak
+(`miftachun.apps.data-and-ai-dude.ch`); production gets its own Keycloak (ADR-0016). Below,
+`<kc>` is the Keycloak host and `<public>` the install's address.
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant W as tabayyun-web (/api)
+    participant K as Keycloak realm
+    participant G as Google or GitHub
+    B->>W: GET /api/auth/login?method=google
+    W-->>B: 302 to K (state, nonce, PKCE)
+    B->>K: authorize
+    K-->>B: 302 to G (kc_idp_hint)
+    B->>G: sign in
+    G-->>B: 302 to K broker endpoint
+    B->>K: broker callback
+    K-->>B: 302 to /api/auth/callback?code
+    B->>W: callback
+    W->>K: code + verifier + client secret
+    K-->>W: ID token
+    W-->>B: 302 to the app, session cookie
+```
+
+1. **Import the realm.** From a checkout of this repository:
+
+   ```bash
+   python3 deploy/keycloak/render.py https://<public> > tabayyun-realm.json
+   ```
+
+   Keycloak admin console → realm drop-down → **Create realm** → *Resource file*: the rendered
+   file → Create. It sets the client's redirect URI, logout URIs and back-channel logout URL
+   to `<public>`. A second install (production) renders with its own address.
+2. **Client secret.** Realm `tabayyun` → Clients → `tabayyun-api` → Credentials → Regenerate,
+   and copy it into the api app's `TABAYYUN_OIDC_CLIENT_SECRET`.
+3. **Google.** Google Cloud console → APIs & Services:
+   - OAuth consent screen: External, app name "Tabayyun", scopes `openid`, `email`, `profile`.
+   - Credentials → Create credentials → OAuth client ID → *Web application*; authorised
+     redirect URI `https://<kc>/realms/tabayyun/broker/google/endpoint`.
+   - Keycloak → Identity providers → `google`: paste the client ID and secret → Save.
+4. **GitHub.** GitHub → Settings (of the `Sira-Labs` organisation, or your account) →
+   Developer settings → OAuth Apps → New OAuth App:
+   - Homepage URL `https://<public>`; authorization callback URL
+     `https://<kc>/realms/tabayyun/broker/github/endpoint`.
+   - Generate a client secret; Keycloak → Identity providers → `github`: paste the client ID
+     and secret → Save.
+   - GitHub accounts whose primary email is not verified cannot sign in (spec 013 links only
+     verified email).
+5. **API settings.** Set the sign-in rows of section 2 on the api app, then Save & Update.
+   `TABAYYUN_ADMIN_EMAIL` is the one person who becomes owner of the default org at their
+   first sign-in; everyone else sees "No access yet" until spec 014 brings invitations.
+6. **Check.** Open `<public>`: the sign-in page shows the three buttons. Sign in with Google
+   as the admin email; the header shows your name, Settings → Account lists the device.
+   `curl -s -o /dev/null -w '%{http_code}' https://<public>/api/series` answers `401`.
+7. **Passkeys.** Signed in, Settings → Account → **Manage passkeys** opens Keycloak's account
+   console → *Signing in* → Passkey → Set up. After that, "Sign in with a passkey" works on
+   that device. A first sign-in always goes through Google or GitHub. Passkeys belong to the
+   Keycloak host: a new Keycloak host (production) needs new passkeys.
+
+**Recovering an admin who lost every passkey** (operator step, spec 013): confirm the
+person's identity out of band (a call on a known number, not the email that asked). Then in
+Keycloak → Users → the user → Credentials, delete the passkey (WebAuthn passwordless)
+credentials. They sign in with Google or GitHub and set up a new passkey. Note the reason and
+date in the operations log.
 
 ## 5. Continuous deployment: staging, then promotion to production
 
@@ -349,6 +425,12 @@ Staging needs none of it: its data can be rebuilt.
 | Run `stats.cache.error` ends in `URL scheme is not allowed` | `http://` endpoint without `TABAYYUN_S3_ALLOW_HTTP=true` | Set it (internal endpoints only) |
 | Run `stats.cache.error` says `not found (does the bucket exist?)` | the bucket in `TABAYYUN_CACHE_URL` does not exist | Create it in the store's console, or fix the name |
 | An AWS-SDK tool (pyarrow, boto3, `aws s3`) uploading to an old MinIO fails with `411 MissingContentLength` | pre-2025 MinIO rejects the streamed checksums that newer AWS SDKs send | Tabayyun is unaffected; for the tool set `AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED` and `AWS_RESPONSE_CHECKSUM_VALIDATION=WHEN_REQUIRED`, or move to RustFS |
+| API log: `refusing to start in prod` naming `TABAYYUN_PUBLIC_URL`, `TABAYYUN_OIDC_ISSUER`, `TABAYYUN_OIDC_CLIENT_SECRET` or `TABAYYUN_ADMIN_EMAIL` | a sign-in setting missing (spec 013), or `TABAYYUN_AUTH_MODE=dev` | Set it (section 4a); `dev` mode is never allowed in prod |
+| Sign-in button answers `503` / log `auth.idp_unavailable` | the api cannot fetch `<issuer>/.well-known/openid-configuration` | Check `TABAYYUN_OIDC_ISSUER` (no trailing path beyond the realm) and that the api container reaches Keycloak |
+| Keycloak shows `Invalid parameter: redirect_uri` | the realm was rendered for another address than `TABAYYUN_PUBLIC_URL` | Clients → `tabayyun-api` → Settings: valid redirect URI `<public>/api/auth/callback`, or re-render and re-import |
+| After Google or GitHub: "Sign-in failed (invalid_token)" | the provider's email is unverified, or the realm lacks the `identity provider` mapper | Verify the email at the provider; re-import the realm |
+| Sign-in page says "runs without sign-in (dev mode)" | `TABAYYUN_AUTH_MODE=dev` on a non-prod install | Unset it (oidc is the default in prod) |
+| Signing out of Keycloak elsewhere does not end the Tabayyun session | Keycloak cannot reach `<public>/api/auth/backchannel-logout` | Check the client's back-channel logout URL and that Keycloak reaches the public address |
 | DB log: `superuser password is not specified` | image deployed before the env vars were saved | Save & Update the db app; it initialises on the next start |
 
 Environment variable changes only take effect after **Save & Update** on that app's App Configs tab.

@@ -23,7 +23,9 @@ def app(db_url, fresh_schema):
 
 @pytest.fixture
 async def client(app):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         yield c
     await app.state.engine.dispose()
 

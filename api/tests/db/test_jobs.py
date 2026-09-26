@@ -99,7 +99,9 @@ async def test_version_lists_the_commits_of_connected_workers(db_url, fresh_sche
     try:
         async with worker.open_async():
             await worker.connector.execute_query_one_async("SELECT 1 AS one")
-            async with AsyncClient(transport=ASGITransport(app=api), base_url="http://test") as c:
+            async with AsyncClient(
+                transport=ASGITransport(app=api), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+            ) as c:
                 workers = (await c.get("/api/version")).json()["workers"]
         assert "c0ffee1" in workers
     finally:
@@ -139,14 +141,18 @@ def _org_b(db_url: str) -> None:
 
 
 async def _queue_run(app, csv: bytes) -> str:
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.post("/api/runs", files={"file": ("f.csv", csv, "text/csv")}, data={"series_id": "w"})
         assert r.status_code == 202, r.text
         return r.json()["id"]
 
 
 async def _status(app, run_id: str) -> int | str:
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.get(f"/api/runs/{run_id}")
         return r.json()["status"] if r.status_code == 200 else r.status_code
 

@@ -214,7 +214,7 @@ function Header({ run }: { run: Run }) {
 
 /** `/runs/$runId`: polls until the run is terminal, then shows the report. */
 export function RunReport() {
-  const { runId } = useParams({ from: "/runs/$runId" });
+  const { runId } = useParams({ from: "/_app/runs/$runId" });
   const run = useRunPolling(runId);
 
   if (run.isPending) return <p>Loading run…</p>;

@@ -83,6 +83,10 @@ def _prod(**overrides) -> Settings:
         "env": "prod",
         "database_url": "postgresql+psycopg://u:a-long-real-password@db:5432/t",
         "session_secret": "a" * 32,
+        "public_url": "https://tabayyun.example.org",
+        "oidc_issuer": "https://keycloak.example.org/realms/tabayyun",
+        "oidc_client_secret": "c" * 32,
+        "admin_email": "owner@example.org",
     }
     return Settings(**{**base, **overrides})
 
@@ -111,11 +115,67 @@ def test_migration_url_falls_back_to_the_app_url(monkeypatch):
 
 def test_prod_refuses_a_placeholder_migration_url():
     """A placeholder owner URL is refused in prod like the app URL."""
-    s = Settings(
-        env="prod",
-        session_secret="9f1c2a7d4e8b6c0f3a5d7e9b1c2d4f6a8b0c2d4e",
-        database_url="postgresql+psycopg://tabayyun_app:s3cr3t-long-enough-value@db/tabayyun",
-        migration_database_url="postgresql+psycopg://tabayyun:tabayyun@db/tabayyun",
-    )
+    s = _prod(migration_database_url="postgresql+psycopg://tabayyun:tabayyun@db/tabayyun")
     with pytest.raises(RuntimeError, match="TABAYYUN_MIGRATION_DATABASE_URL"):
         s.require_secrets_in_prod()
+
+
+AUTH_ENV = (
+    "TABAYYUN_AUTH_MODE",
+    "TABAYYUN_PUBLIC_URL",
+    "TABAYYUN_OIDC_ISSUER",
+    "TABAYYUN_OIDC_CLIENT_SECRET",
+    "TABAYYUN_ADMIN_EMAIL",
+    "TABAYYUN_SIGN_IN_METHODS",
+    "TABAYYUN_SESSION_IDLE",
+)
+
+
+def test_auth_mode_defaults_by_environment(monkeypatch):
+    """oidc in prod, dev elsewhere, unless set (spec 013)."""
+    for name in AUTH_ENV:
+        monkeypatch.delenv(name, raising=False)
+    assert Settings(env="dev").resolved_auth_mode == "dev"
+    assert Settings(env="test").resolved_auth_mode == "dev"
+    assert Settings(env="prod").resolved_auth_mode == "oidc"
+    assert Settings(env="dev", auth_mode="oidc").resolved_auth_mode == "oidc"
+
+
+def test_prod_refuses_dev_mode_and_missing_oidc_settings(monkeypatch):
+    """prod refuses the dev auth mode, and the OIDC login needs its settings."""
+    for name in AUTH_ENV:
+        monkeypatch.delenv(name, raising=False)
+    _prod().require_secrets_in_prod()
+    with pytest.raises(RuntimeError, match="TABAYYUN_AUTH_MODE"):
+        _prod(auth_mode="dev").require_secrets_in_prod()
+    for field, value, name in (
+        ("public_url", None, "TABAYYUN_PUBLIC_URL"),
+        ("public_url", "http://tabayyun.example.org", "TABAYYUN_PUBLIC_URL"),
+        ("public_url", "https://tabayyun.example.org/app", "TABAYYUN_PUBLIC_URL"),
+        ("oidc_issuer", None, "TABAYYUN_OIDC_ISSUER"),
+        ("oidc_client_secret", None, "TABAYYUN_OIDC_CLIENT_SECRET"),
+        ("oidc_client_secret", "change-me", "TABAYYUN_OIDC_CLIENT_SECRET"),
+        ("admin_email", None, "TABAYYUN_ADMIN_EMAIL"),
+        ("admin_email", "  ", "TABAYYUN_ADMIN_EMAIL"),
+    ):
+        with pytest.raises(RuntimeError, match=name):
+            _prod(**{field: value}).require_secrets_in_prod()
+
+
+def test_sign_in_methods_and_durations(monkeypatch):
+    """Methods are checked and deduplicated; durations accept 12h-style values."""
+    for name in AUTH_ENV:
+        monkeypatch.delenv(name, raising=False)
+    assert Settings().enabled_sign_in_methods == ("google", "github", "passkey")
+    methods = Settings(sign_in_methods="passkey, google,passkey").enabled_sign_in_methods
+    assert methods == ("passkey", "google")
+    for bad in ("", "password", "google,sms"):
+        with pytest.raises(ValidationError):
+            Settings(sign_in_methods=bad)
+    monkeypatch.setenv("TABAYYUN_SESSION_IDLE", "90m")
+    s = Settings(session_absolute="7d", passkey_fresh="30s")
+    assert (s.session_idle.total_seconds(), s.session_absolute.days, s.passkey_fresh.total_seconds()) == (
+        5400,
+        7,
+        30,
+    )

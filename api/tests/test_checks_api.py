@@ -12,7 +12,9 @@ def app():
 
 
 async def test_list_checks(app):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.get("/api/checks")
     assert r.status_code == 200
     assert "tby.flatline" in r.json()
@@ -20,7 +22,9 @@ async def test_list_checks(app):
 
 async def test_run_checks_on_csv(app):
     csv = faulty_csv(["gap", "flatline", "nans", "negative"])
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.post(
             "/api/checks/run",
             files={"file": ("f.csv", csv, "text/csv")},
@@ -36,7 +40,9 @@ async def test_run_checks_on_csv(app):
 
 async def test_latency_via_ingest_column(app):
     csv = faulty_csv([], late_minutes=10)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.post(
             "/api/checks/run",
             files={"file": ("f.csv", csv, "text/csv")},
@@ -48,13 +54,17 @@ async def test_latency_via_ingest_column(app):
 
 
 async def test_bad_csv_is_422(app):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.post("/api/checks/run", files={"file": ("f.csv", b"a,b\n1,2\n", "text/csv")})
     assert r.status_code == 422
 
 
 async def test_empty_upload_is_400(app):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.post("/api/checks/run", files={"file": ("f.csv", b"", "text/csv")})
     assert r.status_code == 400
 
@@ -62,7 +72,9 @@ async def test_empty_upload_is_400(app):
 @pytest.mark.parametrize(("now_ns", "status"), [(2**63 - 1, 200), (2**63, 422), (-(2**63) - 1, 422)])
 async def test_now_ns_must_fit_the_core(app, now_ns, status):
     """`now_ns` is an `i64` in the core; beyond that range the request is rejected, not a 500."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         r = await c.post(
             "/api/checks/run",
             files={"file": ("f.csv", faulty_csv([]), "text/csv")},

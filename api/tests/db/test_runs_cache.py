@@ -22,7 +22,9 @@ from tenancy import app_settings, org_session
 async def _run(settings: Settings, csv: bytes) -> tuple[dict, list[Coverage], Series]:
     """Post one upload with inline jobs; return the finished run, coverage rows and series."""
     app = create_app(settings)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as client:
         r = await client.post(
             "/api/runs",
             files={"file": ("f.csv", csv, "text/csv")},

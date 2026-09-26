@@ -27,6 +27,10 @@ EXPECTED_TABLES = {
     "teams",
     "team_members",
     "workspace_team_roles",
+    # Spec 013.
+    "user_identities",
+    "sessions",
+    "login_flows",
 }
 HYPERTABLES = {"findings", "metrics", "scores"}
 

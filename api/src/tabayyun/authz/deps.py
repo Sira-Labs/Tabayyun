@@ -1,8 +1,9 @@
 """FastAPI dependencies: who the request acts for, its tenant session, and its scope.
 
-Until login exists (spec 013) every request acts as the bootstrap user, owner of the default
-org, in the default workspace; until the workspace picker exists (spec 014, S8-5) the
-workspace is the default one. Tests override `get_principal` and `get_workspace_id`.
+With the OIDC login (spec 013) the principal is the session's user in the org it signed in to;
+in `dev` mode every request acts as the bootstrap user, owner of the default org. Until the
+workspace picker exists (spec 014, S8-5) the workspace is the default one. Tests override
+`get_principal` and `get_workspace_id`.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tabayyun.auth.deps import require_session, settings_of
 from tabayyun.authz.policy import ForbiddenError, NotVisibleError, authorize
 from tabayyun.authz.roles import Action
 from tabayyun.authz.scope import Principal, Scope
@@ -23,9 +25,15 @@ from tabayyun.db.models import BOOTSTRAP_USER_ID, DEFAULT_ORG_ID, DEFAULT_WORKSP
 BOOTSTRAP_PRINCIPAL = Principal(user_id=BOOTSTRAP_USER_ID, org_id=DEFAULT_ORG_ID)
 
 
-async def get_principal() -> Principal:
-    """The user the request acts for; the bootstrap user until spec 013 brings sessions."""
-    return BOOTSTRAP_PRINCIPAL
+async def get_principal(request: Request) -> Principal:
+    """The user the request acts for: 401 without a live session, 403 `no_access` for a session
+    without an org; the bootstrap user in dev mode."""
+    if settings_of(request).resolved_auth_mode == "dev":
+        return BOOTSTRAP_PRINCIPAL
+    session = await require_session(request)
+    if session.org_id is None:
+        raise HTTPException(status_code=403, detail="no_access")
+    return Principal(user_id=session.user_id, org_id=session.org_id)
 
 
 async def get_workspace_id() -> uuid.UUID:

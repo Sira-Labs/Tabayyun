@@ -62,7 +62,7 @@ login could ever become owner: the migration's bootstrap owner has no login.
 | Route | Request | Response |
 |---|---|---|
 | `GET /api/auth/sign-in-options` | — | `{"google": true, "github": true, "passkey": true}` from `SIGN_IN_METHODS` (Arqam's `/v1/sign-in-options`) |
-| `GET /api/auth/login?method=google&next=/runs` | `method` ∈ enabled methods; `next`: relative path, default `/` | 302 to the IdP's authorization endpoint (`response_type=code`, `scope=openid email profile`, `state`, `nonce`, `code_challenge` S256). `google`/`github` add `kc_idp_hint`. `passkey` adds `acr_values=passkey` and `prompt=login`. Sets `__Host-tby_login` (flow ID, 10 min). An unknown or disabled method → 400 |
+| `GET /api/auth/login?method=google&next=/runs` | `method` ∈ enabled methods; `next`: relative path, default `/` | 302 to the IdP's authorization endpoint (`response_type=code`, `scope=openid email profile`, `state`, `nonce`, `code_challenge` S256). `google`/`github` add `kc_idp_hint`. `passkey` adds `prompt=login`. Sets `__Host-tby_login` (flow ID, 10 min). An unknown or disabled method → 400 |
 | `GET /api/auth/callback?code&state` | from the IdP | 302 to `next`; sets `__Host-tby_session`; clears `__Host-tby_login` |
 | `GET /api/auth/me` | cookie | 200 with `user` (`id`, `email`, `display_name`), `org` (`id`, `name`), `role` (e.g. `owner`), `sign_in_method` (`google`/`github`/`passkey`) and `passkey_fresh` (bool); 401 without a session; 403 `{"detail": "no_access"}` for a signed-in user without a membership |
 | `GET /api/auth/sessions` | cookie | `[{"id", "current", "sign_in_method", "created_at", "last_seen_at", "user_agent", "ip_address"}]`, never tokens |
@@ -85,7 +85,7 @@ The dependency for spec 014: `require_recent_passkey()` → 403 `{"detail":
 | Table | Columns | Access for `tabayyun_app` |
 |---|---|---|
 | `user_identities` | `issuer` text, `subject` text, `user_id` → users, `email_at_login` text, `created_at`, `last_login_at`; PK (`issuer`, `subject`) | SELECT only |
-| `sessions` | `id_hash` bytea PK, `user_id`, `org_id` (null = no access), `sign_in_method` text CHECK (`google`, `github`, `passkey`), `idp_sid` text, `id_token` text, `ip_address` inet, `user_agent` text, `created_at`, `last_seen_at`, `expires_at`, `revoked_at`; index on `idp_sid`, on `user_id` | SELECT, INSERT, UPDATE (no RLS: looked up by hash before any org is known) |
+| `sessions` | `id` uuid PK (what devices name), `id_hash` bytea unique, `user_id`, `org_id` (null = no access), `sign_in_method` text CHECK (`google`, `github`, `passkey`), `idp_sid` text, `id_token` text, `ip_address` inet, `user_agent` text, `created_at`, `last_seen_at`, `expires_at`, `revoked_at`; index on `idp_sid`, on `user_id` | SELECT, INSERT, UPDATE (no RLS: looked up by hash before any org is known) |
 | `login_flows` | `id_hash` bytea PK, `state` text, `nonce` text, `code_verifier` text, `method` text, `next` text, `created_at` | SELECT, INSERT, DELETE |
 
 `users` stays read-only to the app login (spec 007). The only write path is the SECURITY
@@ -104,19 +104,22 @@ membership. The function:
   - URLs: redirect URI `<PUBLIC_URL>/api/auth/callback`, post-logout redirect
     `<PUBLIC_URL>/`, back-channel logout URL `<PUBLIC_URL>/api/auth/backchannel-logout` with
     "session required".
-  - Mappers: `identity_provider` (the broker alias, `google` or `github`) and `acr`.
+  - Mappers: `identity_provider` (user-session note, the broker alias `google` or `github`)
+    and `amr` (Keycloak's authentication-method-reference mapper).
 - **Identity providers:**
   - Google: "trust email".
   - GitHub: scope `user:email`, "trust email" (GitHub returns the primary verified email).
-  - First-broker-login flow: link to an existing Keycloak user only by a verified email with
-    the same address, create otherwise, no review page. This is Arqam's rule: an unverified
-    email never links.
+  - First-broker-login flow: create the user if the email is new, else link to the existing
+    Keycloak user with that email; no review page. Linking is safe because both providers are
+    trusted for email and the API refuses `email_verified = false`. This is Arqam's rule: an
+    unverified email never links.
 - **Passkeys:**
   - Policy: WebAuthn passwordless, discoverable credentials, user verification required,
     relying-party ID = the Keycloak host.
-  - Browser flow: passkey sign-in beside the identity-provider buttons, no password form.
-  - Step-up: level of assurance `passkey` mapped to the passkey authenticator, so
-    `acr_values=passkey` asks for it and the ID token's `acr` reports it.
+  - Browser flow, in this order: identity-provider redirector (follows `kc_idp_hint`),
+    SSO cookie, passkey. There is no password form.
+  - The passkey execution carries the AMR reference `passkey` with a maximum age of 120 s, so
+    the ID token's `amr` contains `passkey` only right after a passkey sign-in.
 - **Account settings:** no self-registration with a password; no password credential type
   at all ("no passwords", as Arqam). Brute-force protection and OTP policy as in the master
   realm.
@@ -145,7 +148,8 @@ membership. The function:
 ## Behaviour
 
 1. **Startup.**
-   - `TABAYYUN_AUTH_MODE=dev` in `prod` exits with code 2 and names the setting.
+   - `TABAYYUN_AUTH_MODE=dev` in `prod` stops the start with an error naming the setting, like
+     every other `require_secrets_in_prod` refusal.
    - With `oidc`, the api fetches the discovery document lazily on the first login and
      caches it for 1 h, together with the JWKS. When the IdP is unreachable, the login routes
      answer 503 and nothing else is affected.
@@ -164,12 +168,15 @@ membership. The function:
    - **ID token:** it must pass signature (JWKS, RS256/ES256 only), `iss`, `aud`/`azp`, `exp`
      (60 s leeway), `nonce` and `email_verified = true`. Any failure gives 400
      `invalid_token`.
-   - **Sign-in method:** `passkey` when the token's `acr` is `passkey`, else the
-     `identity_provider` claim (`google`/`github`). For `method=passkey`, a token whose `acr`
-     is not `passkey` gives 400 `passkey_required`. A token with neither claim, or a derived
-     method that differs from the flow's recorded `method`, gives 400 `invalid_token`:
-     `kc_idp_hint` only routes the request, so a user could otherwise finish a Google flow
-     through another provider, including one switched off in `TABAYYUN_SIGN_IN_METHODS`.
+   - **Sign-in method:** the token must prove the method the flow recorded, and the session
+     stores that method.
+     - `passkey`: `amr` contains `passkey`, else 400 `passkey_required`.
+     - `google`/`github`: the `identity_provider` claim equals the method, else 400
+       `invalid_token`. `kc_idp_hint` only routes the request, so a user could otherwise
+       finish a Google flow through another provider, including one switched off in
+       `TABAYYUN_SIGN_IN_METHODS`.
+     - Only the claim for the recorded method counts: within one Keycloak session the other
+       claim can be stale (see "Implementation notes").
    - **User and membership:** `tabayyun_login(...)` runs with issuer, `sub`, lower-cased email,
      `email_verified`, `name` and `TABAYYUN_ADMIN_EMAIL`. Its admin rule (Arqam's bootstrap
      rule): the user becomes `owner` of the default org only if the email equals
@@ -225,34 +232,34 @@ membership. The function:
 
 ## Acceptance criteria
 
-- [ ] With a mocked IdP (discovery, JWKS, token endpoint), the full code+PKCE flow sets a
+- [x] With a mocked IdP (discovery, JWKS, token endpoint), the full code+PKCE flow sets a
       session cookie for each method: `google` and `github` via `identity_provider`,
-      `passkey` via `acr`. `/api/auth/me` returns the user and the method; an API list call
+      `passkey` via `amr`. `/api/auth/me` returns the user and the method; an API list call
       returns their org's rows.
-- [ ] State mismatch, a reused flow, an expired flow, a wrong nonce, a wrong audience, a bad
-      signature, `alg=none`, `email_verified=false`, a passkey flow without `acr=passkey` and
+- [x] State mismatch, a reused flow, an expired flow, a wrong nonce, a wrong audience, a bad
+      signature, `alg=none`, `email_verified=false`, a passkey flow without `passkey` in `amr` and
       a Google flow that returns through GitHub each fail with the stated status, and no
       session is created.
-- [ ] `next=https://evil.example` and `next=//evil.example` redirect to `/`. A disabled
+- [x] `next=https://evil.example` and `next=//evil.example` redirect to `/`. A disabled
       `method` gives 400.
-- [ ] `TABAYYUN_ADMIN_EMAIL` becomes owner at the first verified login, only while the
+- [x] `TABAYYUN_ADMIN_EMAIL` becomes owner at the first verified login, only while the
       default org has no other owner; a second login or a changed setting grants nothing.
       Any other email gets a session and a 403 `no_access` from `/me` and from API routes.
-- [ ] Unknown, revoked, idle-expired and absolute-expired sessions each give 401. A disabled
+- [x] Unknown, revoked, idle-expired and absolute-expired sessions each give 401. A disabled
       user gives 401 and loses every session.
-- [ ] `GET /api/auth/sessions` lists only the user's sessions without tokens. Deleting another
+- [x] `GET /api/auth/sessions` lists only the user's sessions without tokens. Deleting another
       user's session gives 404. `revoke-others` keeps only the current one.
-- [ ] Unsafe requests without `X-Tabayyun-Request` or with a foreign `Origin` give 403. The
+- [x] Unsafe requests without `X-Tabayyun-Request` or with a foreign `Origin` give 403. The
       back-channel logout is exempt.
-- [ ] Logout revokes the session and returns an end-session URL with `id_token_hint`. A
+- [x] Logout revokes the session and returns an end-session URL with `id_token_hint`. A
       back-channel logout token revokes the matching sessions; an invalid one gives 400.
-- [ ] `require_recent_passkey()` passes a passkey session younger than 12 h. It refuses an
+- [x] `require_recent_passkey()` passes a passkey session younger than 12 h. It refuses an
       older one, and a Google or GitHub one, with 403 `second-factor-required`.
-- [ ] `prod` refuses `AUTH_MODE=dev`, missing or placeholder OIDC settings, and an empty
+- [x] `prod` refuses `AUTH_MODE=dev`, missing or placeholder OIDC settings, and an empty
       `TABAYYUN_ADMIN_EMAIL`.
-- [ ] RLS still isolates: a session of org A cannot read org B's rows (007's cross-tenant test
+- [x] RLS still isolates: a session of org A cannot read org B's rows (007's cross-tenant test
       with real sessions instead of the dependency override).
-- [ ] The web app:
+- [x] The web app:
       - shows the enabled sign-in buttons;
       - redirects to `/login` when signed out;
       - shows "No access yet" for 403;
@@ -261,7 +268,7 @@ membership. The function:
 - [ ] Staging: the owner signs in with Google, with GitHub and with a passkey on
       `tabayyun-stg.siralabs.org`, sees the example data, sees the three sessions under
       devices and signs out. An anonymous `curl` of `/api/series` gives 401.
-- [ ] `docs/frontend/02-security-baseline.md`: the authentication and session items and the
+- [x] `docs/frontend/02-security-baseline.md`: the authentication and session items and the
       CSRF item are ticked.
 
 ## Test cases
@@ -277,7 +284,8 @@ Unit (`api/tests/auth`):
 - `test_require_recent_passkey`
 - `test_prod_refuses_dev_mode`
 
-Integration (`api/tests/auth`, database fixtures of spec 007), with a fake IdP served in
+Integration (`api/tests/db/test_auth_flow.py`, next to the database fixtures of spec 007), with a
+fake IdP served in
 process (discovery, JWKS with a generated RSA key, token endpoint, end-session URL):
 - `test_full_login_per_method`
 - `test_admin_email_becomes_owner_once`
@@ -311,7 +319,10 @@ Web (`web/src/__tests__`):
 2. **Who gets in before spec 014:** only `TABAYYUN_ADMIN_EMAIL`. Everyone else sees "No
    access yet". This differs from Arqam's open sign-up on purpose: Tabayyun holds
    organisations' operational data.
-3. **Authlib** as the OIDC client (discovery, PKCE, JWKS and JWT validation).
+3. **joserfc** (Authlib's JOSE library) for JWKS and JWT validation, and httpx for discovery
+   and the token endpoint. Authlib 1.8 deprecates its own `authlib.jose` and its httpx client
+   in favour of these, so depending on Authlib itself would add nothing (see implementation
+   notes).
 4. **Sessions in Postgres**, as in Arqam; no Redis.
 5. **One realm per install:** staging uses realm `tabayyun` on the current Keycloak;
    production gets its own Keycloak on the production server (ADR-0016).
@@ -320,6 +331,50 @@ Web (`web/src/__tests__`):
      Keycloak should get its final host name before the first passkey is registered.
 6. **No magic link:** Keycloak has no built-in email-link sign-in. Google, GitHub and passkeys
    cover sign-in; revisit if a customer needs email-only sign-in.
+
+## Implementation notes
+
+Recorded while implementing (2026-09-26); the spec above is corrected accordingly.
+
+- **Passkey proof via `amr`, not `acr`.** Checked with Keycloak 26.4.7 in a container, with a
+  virtual authenticator in Chromium: register a passkey, then sign in with it only.
+  - Keycloak's AMR mapper reports the reference configured on the passkey execution
+    (`amr: ["passkey"]`).
+  - A level-of-assurance step-up (`acr_values`) would have needed conditional sub-flows and
+    does not add anything here, so the login asks for no `acr`.
+- **Stale claims within one Keycloak session.** Measured with a second realm standing in for
+  Google (alias `google`):
+  - a passkey sign-in after a Google sign-in still carries `identity_provider: google`;
+  - a Google sign-in shortly after a passkey sign-in still carries `amr: ["passkey"]`.
+
+  Hence the callback checks only the claim of the method it asked for, and the passkey
+  reference expires after 120 s instead of 12 h.
+- **Flow order.** With the SSO cookie first, `kc_idp_hint` was ignored while a Keycloak
+  session existed, and `prompt=login` turned "Continue with Google" into a passkey
+  re-authentication. The identity-provider redirector now runs first. Only the passkey
+  method sends `prompt=login`.
+- **First broker login.** "Detect existing broker user" with "Automatically set existing
+  user" failed with `invalid_user_credentials`. "Create user if unique" or "Automatically set
+  existing user", as alternatives, links an existing email and creates a new one (checked
+  with the fake Google realm).
+- **Callback failures are pages.** The callback is a browser navigation, so its failures
+  answer with the stated status and a short HTML page naming the code (`login_expired`,
+  `invalid_token`, `passkey_required`, `idp_error`, `idp_unavailable`) and linking to
+  `/login`. Two more codes: `login_cancelled` when the IdP returns `access_denied`, and 403
+  `account_disabled` for a disabled user, who gets no session.
+- **`no_access` names the email.** `/me`'s 403 body is `{"detail": "no_access", "email": ...}`,
+  so the "No access yet" page can say who is signed in; API routes answer `no_access` alone.
+- **Every other router needs a principal.** `create_app` attaches `get_principal` to every
+  router but `/api/auth`, so a route without `authorize()` (the stateless check run) is not
+  anonymous either.
+- **Checked against Keycloak 26.4.** The api in `oidc` mode against the realm in a container,
+  in Chromium with a virtual authenticator: a passkey login and a "Continue with Google" login
+  through a second realm standing in for Google, both linked to one user who became owner;
+  the `__Host-` cookie flags; the device list; logout through the end-session URL; and a
+  back-channel logout sent by Keycloak when an admin ended the user's sessions.
+- **Placeholder URL.** The realm export carries `__PUBLIC_URL__`; `deploy/keycloak/render.py
+  <url>` fills it for an install. `make dev-infra` renders it for `http://localhost:5173`,
+  and the dev Keycloak (now 26.4) imports it at start.
 
 ## Out of scope
 

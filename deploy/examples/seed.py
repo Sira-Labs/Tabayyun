@@ -13,6 +13,12 @@ Standard library only. Run it once per install (a second run re-uploads the seri
 another set of groups and a dataset), and never against production, whose data belongs to
 real people.
 
+An install with sign-in (spec 013) needs a session: sign in with the browser as a member of
+the org, copy the value of the `__Host-tby_session` cookie (developer tools → Application →
+Cookies) and pass it in the environment, not on the command line:
+
+    TABAYYUN_SESSION='<cookie value>' python3 deploy/examples/seed.py --url https://...
+
 | Series | Planted fault | Expected check |
 |---|---|---|
 | `demo-flow` | gap, flatline, nulls, negatives, beyond 200, exact duplicates | single-series |
@@ -31,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import random
 import sys
 import time
@@ -38,6 +45,7 @@ import uuid
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from urllib import error, request
+from urllib.parse import urlsplit
 
 DAYS = 42
 STEP = timedelta(minutes=15)
@@ -55,11 +63,20 @@ class SeedError(RuntimeError):
 class Api:
     """Minimal JSON and multipart client for the Tabayyun API."""
 
-    def __init__(self, base_url: str) -> None:
+    def __init__(self, base_url: str, session: str | None = None) -> None:
         self.base = base_url.rstrip("/")
+        self.session = session
+        if session and urlsplit(self.base).scheme.lower() != "https":
+            # The session is the operator's credential: never over plain HTTP.
+            raise SeedError("TABAYYUN_SESSION needs an https:// --url")
 
     def _send(self, method: str, path: str, body: bytes | None, content_type: str | None) -> dict:
         req = request.Request(self.base + path, data=body, method=method)
+        # The api refuses unsafe requests without it (CSRF guard, spec 013).
+        req.add_header("X-Tabayyun-Request", "1")
+        if self.session:
+            # Unredirected: a redirect to another host must not carry the session.
+            req.add_unredirected_header("Cookie", f"__Host-tby_session={self.session}")
         if content_type:
             req.add_header("Content-Type", content_type)
         try:
@@ -67,6 +84,8 @@ class Api:
                 raw = resp.read()
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:500]
+            if exc.code in (401, 403) and any(c in detail for c in ("not_authenticated", "no_access")):
+                detail += " (sign in and set TABAYYUN_SESSION, see the docstring)"
             raise SeedError(f"{method} {path}: HTTP {exc.code}: {detail}") from exc
         return json.loads(raw) if raw else {}
 
@@ -288,7 +307,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=7, help="random seed of the synthetic data")
     args = parser.parse_args(argv)
 
-    api = Api(args.url)
+    api = Api(args.url, os.environ.get("TABAYYUN_SESSION") or None)
     version = api.get("/api/version")
     commit, schema = version.get("commit", "?")[:7], version.get("schema_revision")
     print(f"install {args.url}: commit {commit}, schema {schema}")

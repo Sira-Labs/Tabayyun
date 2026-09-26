@@ -30,7 +30,9 @@ def app(db_url, fresh_schema, tmp_path):
 
 @pytest.fixture
 async def client(app):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         yield c
     await app.state.engine.dispose()
 
@@ -213,13 +215,17 @@ async def test_worker_dispatches_dataset_runs(db_url, fresh_schema, tmp_path):
     """Queued (not inline) dataset runs are executed by the job through `execution.execute`."""
     fresh_schema("auto")
     inline = create_app(app_settings(db_url, inline_jobs=True, cache_url=str(tmp_path)))
-    async with AsyncClient(transport=ASGITransport(app=inline), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=inline), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         series_id = await _upload(c, "pt-w", _csv(24))
         body = {"name": "W", "series_ids": [series_id], "window": {"last": "24h"}}
         dataset_id = (await c.post("/api/datasets", json=body)).json()["id"]
     await inline.state.engine.dispose()
     queued = create_app(app_settings(db_url, inline_jobs=False, cache_url=str(tmp_path)))
-    async with AsyncClient(transport=ASGITransport(app=queued), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=queued), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as c:
         now = (HOUR0 + timedelta(hours=24)).isoformat()
         r = await c.post("/api/runs", json={"dataset_id": dataset_id, "now": now})
         run_id = uuid.UUID(r.json()["id"])

@@ -17,6 +17,8 @@ dependencies = [
     "psycopg[binary,pool]>=3.2",
     "alembic>=1.14",
     "procrastinate>=3.9,<4",
+    "joserfc>=1.2",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
