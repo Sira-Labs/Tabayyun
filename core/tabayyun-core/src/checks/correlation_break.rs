@@ -398,9 +398,8 @@ impl CorrelationBreak {
                 let at = |lag: i64| {
                     s.profile.get(usize::try_from(lag + self.max_lag as i64).ok()?).copied().flatten()
                 };
-                // The reference lag may lie outside this segment's usable lags: then nothing to
-                // compare with, and the moved lag stands.
-                at(lag_ref).is_none_or(|r| at(*l).is_some_and(|b| b - r >= self.lag_margin))
+                // Without a usable value at the reference lag the move cannot be tested: not reported.
+                at(lag_ref).zip(at(*l)).is_some_and(|(r, b)| b - r >= self.lag_margin)
             })
             .map(|(s, l)| (s.key, s.window, (s, l)))
             .collect();
