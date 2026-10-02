@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
-"""Email the owner what a deploy shipped, or that it failed (release.yml, promote.yml, ADR-0017).
+"""Email the owner that a release was published, with what it contains (cut-release.yml, ADR-0017).
 
-The pull requests come from git: the first-parent commits between the commit that was live
-before the deploy (PREV) and the one deployed (WANT). Merge commits name their PR as
-"Merge pull request #N from ..."; squash merges end in "(#N)". A merge commit carries the PR
-title only when the merger kept GitHub's default message, so titles come from the GitHub API
-(GITHUB_TOKEN), falling back to the commit body, then to the subject.
+The pull requests come from git: the first-parent commits after the previous release (PREV)
+up to the released commit (WANT). Merge commits name their PR as "Merge pull request #N from
+..."; squash merges end in "(#N)". A merge commit carries the PR title only when the merger
+kept GitHub's default message, so titles come from the GitHub API (GITHUB_TOKEN), falling
+back to the commit body.
 
 Settings (environment):
   SMTP_USERNAME, SMTP_PASSWORD  sender account; a Google Workspace app password
   SHIP_MAIL_TO                  recipient(s), comma-separated
   SMTP_HOST, SMTP_PORT          default smtp.gmail.com:465 (implicit TLS); 587 uses STARTTLS
-  TARGET                        staging | production
-  STATUS                        shipped | failed
-  PREV, WANT                    commits before and after (PREV may be empty or unknown)
-  APP_URL, RUN_URL              links in the mail; GITHUB_SERVER_URL and GITHUB_REPOSITORY
-                                build the PR links, GITHUB_API_URL and GITHUB_TOKEN read titles
+  TAG, PREV, WANT               the new tag, the previous release's tag (may be empty) and the
+                                released commit
+  PRERELEASE, REVIEW            "true" for a release candidate; "true" for a stable minor or
+                                major release, which gets a review meeting
+  RELEASE_URL                   the GitHub release page; GITHUB_SERVER_URL, GITHUB_REPOSITORY,
+                                GITHUB_API_URL and GITHUB_TOKEN build links and read titles
 
-Without SMTP_USERNAME, SMTP_PASSWORD or SHIP_MAIL_TO it prints a notice and exits 0, so a
-repository without mail set up deploys as before. `--dry-run` prints the message instead.
+Without SMTP_USERNAME, SMTP_PASSWORD or SHIP_MAIL_TO it prints a notice and exits 0. A send
+error exits 1 (the step is continue-on-error). `--dry-run` prints the message instead.
 Standard library only.
 """
 
@@ -87,12 +88,12 @@ def pr_title(env: dict[str, str], number: int) -> str | None:
 
 def shipped(prev: str, want: str, env: dict[str, str] | None = None) -> list[Shipped]:
     """Pull requests (or commits) on the first-parent line after `prev` up to `want`, oldest
-    first. Without a usable `prev`, only `want` itself."""
+    first. Without a usable `prev` (the first release), every pull request up to `want`."""
     if is_commit(prev) and prev != want:
         revs = f"{prev}..{want}"
         log = git("log", "--first-parent", "--reverse", "--format=%x1e%s%x1f%b", revs)
     else:
-        log = git("log", "-1", "--format=%x1e%s%x1f%b", want)
+        log = git("log", "--first-parent", "--reverse", "--format=%x1e%s%x1f%b", want)
     items: list[Shipped] = []
     for record in filter(None, log.split("\x1e")):
         subject, _, body = record.partition("\x1f")
@@ -111,25 +112,14 @@ def shipped(prev: str, want: str, env: dict[str, str] | None = None) -> list[Shi
 
 def compose(env: dict[str, str], items: list[Shipped]) -> tuple[str, str]:
     """Subject and plain-text body of the mail."""
-    target = env.get("TARGET", "staging")
-    status = env.get("STATUS", "shipped")
-    want = env["WANT"][:7]
-    prev = env.get("PREV", "")[:7] if is_commit(env.get("PREV", "")) else ""
+    tag, want = env["TAG"], env["WANT"][:7]
+    prev = env.get("PREV", "")
     repo = f"{env.get('GITHUB_SERVER_URL', 'https://github.com')}/{env.get('GITHUB_REPOSITORY', '')}"
-    last = items[-1] if items else None
-    first = want if last is None else (last.title if last.number is None else f"#{last.number} {last.title}")
-    more = f" (+{len(items) - 1} more)" if len(items) > 1 else ""
-    if status == "failed":
-        subject = f"Tabayyun {target} deploy failed: {first}{more}"
-        intro = (
-            f"The deploy of {want} to {target} did not go live. The apps may run a mix of the "
-            f"old and the new version until it is fixed; the run log says which."
-        )
-    else:
-        subject = f"Shipped to Tabayyun {target}: {first}{more}"
-        was = f" (was {prev})" if prev and prev != want else ""
-        intro = f"Tabayyun {target} now runs {want}{was}."
-    lines = [intro, "", "Changes:" if status == "shipped" else "In this deploy:"]
+    kind = "release candidate" if env.get("PRERELEASE") == "true" else "release"
+    count = f"{len(items)} change" + ("" if len(items) == 1 else "s")
+    subject = f"Tabayyun {tag} published: {count}"
+    since = f" since {prev}" if prev else ""
+    lines = [f"Tabayyun {tag} ({kind}, commit {want}) is published, with {count}{since}.", ""]
     for item in items[:MAX_LISTED]:
         if item.number is None:
             lines.append(f"- {item.title}")
@@ -137,14 +127,14 @@ def compose(env: dict[str, str], items: list[Shipped]) -> tuple[str, str]:
             lines.append(f"- #{item.number} {item.title}")
             lines.append(f"  {repo}/pull/{item.number}")
     if len(items) > MAX_LISTED:
-        lines.append(f"- and {len(items) - MAX_LISTED} more: {repo}/compare/{prev}...{want}")
+        rest = f"{repo}/compare/{prev}...{tag}" if prev else f"{repo}/commits/{tag}"
+        lines.append(f"- and {len(items) - MAX_LISTED} more: {rest}")
     lines.append("")
-    if env.get("APP_URL"):
-        lines.append(f"Open: {env['APP_URL']}")
-    if env.get("RUN_URL"):
-        lines.append(f"Deploy run: {env['RUN_URL']}")
-    if target == "staging" and status == "shipped":
-        lines.append("Production follows only when you approve a promote run (ADR-0016).")
+    if env.get("RELEASE_URL"):
+        lines.append(f"Release notes: {env['RELEASE_URL']}")
+    lines.append("It runs on staging; production follows when you approve a promote run (ADR-0016).")
+    if env.get("REVIEW") == "true":
+        lines.append("A release review with slides follows in your calendar.")
     return subject, "\n".join(lines) + "\n"
 
 
@@ -176,8 +166,8 @@ def send(env: dict[str, str], subject: str, body: str) -> None:
 def main(argv: list[str]) -> int:
     """Compose the mail and send it (or print it with --dry-run)."""
     env = dict(os.environ)
-    if not env.get("WANT"):
-        print("::error::WANT (the deployed commit) is required")
+    if not env.get("WANT") or not env.get("TAG"):
+        print("::error::TAG and WANT (the released commit) are required")
         return 2
     items = shipped(env.get("PREV", ""), env["WANT"], env)
     subject, body = compose(env, items)
@@ -186,15 +176,15 @@ def main(argv: list[str]) -> int:
         return 0
     missing = [k for k in ("SMTP_USERNAME", "SMTP_PASSWORD", "SHIP_MAIL_TO") if not env.get(k)]
     if missing:
-        print(f"::notice::ship mail not set up ({', '.join(missing)} missing); nothing sent")
+        print(f"::notice::release mail not set up ({', '.join(missing)} missing); nothing sent")
         return 0
     try:
         send(env, subject, body)
     except (smtplib.SMTPException, OSError) as exc:
-        # The deploy itself is done; the step is continue-on-error, so this only warns.
-        print(f"::warning::ship mail not sent: {type(exc).__name__}: {exc}")
+        # The release is published; the step is continue-on-error, so this only warns.
+        print(f"::warning::release mail not sent: {type(exc).__name__}: {exc}")
         return 1
-    print(f"ship mail sent: {subject}")
+    print(f"release mail sent: {subject}")
     return 0
 
 

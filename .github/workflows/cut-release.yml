@@ -1,0 +1,103 @@
+name: cut release
+
+# Publishes a version of main (ADR-0017): tags the commit, creates the GitHub release with notes
+# from the merged pull requests, and emails it. Run by Claude Code or the owner: Actions → cut
+# release → Run workflow on main.
+#   patch  a finished spec or a set of fixes
+#   minor  a finished sprint (a stable minor or major release gets slides and a review meeting)
+#   major  a product milestone, decided by the owner
+# The v* tag then builds versioned images and deploys them to staging (release.yml);
+# production is promoted separately (promote.yml).
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "patch (a spec or fixes), minor (a sprint) or major (a milestone)"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      prerelease:
+        description: "A release candidate (vX.Y.Z-rc.N)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  # The check that release.yml deployed this commit to staging.
+  actions: read
+  # The release mail reads the titles of the pull requests it lists.
+  pull-requests: read
+
+concurrency:
+  group: cut-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: cut release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: version
+        name: next version
+        env:
+          BUMP: ${{ inputs.bump }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: .github/scripts/next-version.sh
+      - name: something to release, and live on staging
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREV: ${{ steps.version.outputs.prev }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ -n "$PREV" ] && [ "$(git rev-list --count "$PREV..$SHA")" = "0" ]; then
+            echo "::error::nothing to release: main has not changed since $PREV"
+            exit 1
+          fi
+          ok=$(gh run list --workflow release.yml --commit "$SHA" --status success --json databaseId --jq 'length')
+          if [ "${ok:-0}" = "0" ]; then
+            echo "::error::release.yml has not succeeded for $SHA: release what staging runs, after its deploy went live"
+            exit 1
+          fi
+      - name: tag and publish
+        id: publish
+        env:
+          # The owner's token: a tag pushed with GITHUB_TOKEN would start no workflow, and only
+          # organisation admins may create v* tags (protect-release-tags).
+          GH_TOKEN: ${{ secrets.AUTOMATION_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+          PREV: ${{ steps.version.outputs.prev }}
+          SHA: ${{ github.sha }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "::error::AUTOMATION_TOKEN is not set (deploy/caprover.md, section 5)"; exit 1; fi
+          git tag "$TAG" "$SHA"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "refs/tags/$TAG"
+          args=(--verify-tag --title "Tabayyun $TAG" --generate-notes)
+          if [ -n "$PREV" ]; then args+=(--notes-start-tag "$PREV"); fi
+          if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease --latest=false); fi
+          gh release create "$TAG" --repo "$REPO" "${args[@]}"
+          echo "url=$(gh release view "$TAG" --repo "$REPO" --json url --jq .url)" >> "$GITHUB_OUTPUT"
+          echo "Published [$TAG]($(gh release view "$TAG" --repo "$REPO" --json url --jq .url))" >> "$GITHUB_STEP_SUMMARY"
+      - name: email the release
+        continue-on-error: true
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          PREV: ${{ steps.version.outputs.prev }}
+          WANT: ${{ github.sha }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          REVIEW: ${{ steps.version.outputs.review }}
+          RELEASE_URL: ${{ steps.publish.outputs.url }}
+          GITHUB_TOKEN: ${{ github.token }}
+          SMTP_HOST: ${{ vars.SMTP_HOST }}
+          SMTP_PORT: ${{ vars.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SHIP_MAIL_TO: ${{ vars.SHIP_MAIL_TO }}
+        run: .github/scripts/release-mail.py

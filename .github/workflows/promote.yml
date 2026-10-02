@@ -83,8 +83,6 @@ jobs:
     permissions:
       contents: read
       packages: read
-      # The ship mail reads the titles of the pull requests it lists.
-      pull-requests: read
     # Required reviewer, deployment branch `main` and the production secrets live on this
     # environment (deploy/caprover.md, "Staging and production").
     environment: production
@@ -117,16 +115,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-          # History for the ship mail's list of merged pull requests.
-          fetch-depth: 0
-      - name: what runs before
-        id: before
-        env:
-          URL: ${{ vars.CAPROVER_WEB_URL }}
-        # For the ship mail: the commit live before this deploy (empty when it does not answer).
-        run: |
-          prev=$(curl -fsS -m 10 "${URL%/}/api/version" 2>/dev/null | jq -r '.commit // empty' 2>/dev/null || true)
-          echo "commit=$prev" >> "$GITHUB_OUTPUT"
 
       # CapRover (the Sīra family production server)
       - name: deploy api
@@ -193,22 +181,3 @@ jobs:
           WANT: ${{ needs.staged.outputs.commit }}
           CHECK_WORKER: "true"
         run: .github/scripts/wait-live.sh
-      - name: email what shipped
-        # Shipped or failed, once the deploy was attempted (ADR-0017). Without SMTP_USERNAME,
-        # SMTP_PASSWORD and SHIP_MAIL_TO it only logs a notice; a mail error never fails the job.
-        if: ${{ !cancelled() && steps.gate.outcome == 'success' }}
-        continue-on-error: true
-        env:
-          TARGET: production
-          STATUS: ${{ job.status == 'success' && 'shipped' || 'failed' }}
-          PREV: ${{ steps.before.outputs.commit }}
-          WANT: ${{ needs.staged.outputs.commit }}
-          APP_URL: ${{ vars.CAPROVER_WEB_URL }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          GITHUB_TOKEN: ${{ github.token }}
-          SMTP_HOST: ${{ vars.SMTP_HOST }}
-          SMTP_PORT: ${{ vars.SMTP_PORT }}
-          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          SHIP_MAIL_TO: ${{ vars.SHIP_MAIL_TO }}
-        run: .github/scripts/ship-mail.py
