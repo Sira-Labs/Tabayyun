@@ -78,9 +78,10 @@ The owner decided on 2 Oct 2026:
   keeps its human approval. Dependabot majors merge once CI passes, so CI coverage of the
   web build and tests carries more weight.
 - A CodeRabbit outage blocks every merge, manual ones included, because the required status
-  never arrives and the ruleset has no bypass. The owner then removes `CodeRabbit` from
-  `protect-main`'s required checks, merges, and adds it back (CONTRIBUTING.md, "Repository
-  settings").
+  never arrives and the ruleset has no bypass. The owner first turns off auto-merge on the
+  open pull requests (they would otherwise merge unreviewed), then removes `CodeRabbit` from
+  `protect-main`'s required checks, merges what is needed by hand, adds the check back and
+  re-enables auto-merge (CONTRIBUTING.md, "Repository settings").
 - `AUTOMATION_TOKEN` can push to the repository as the owner. It is scoped to this one
   repository, expires, and is renewed by the owner. It is read only by workflow files on
   `main`.

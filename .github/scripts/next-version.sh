@@ -4,9 +4,11 @@
 #
 #   BUMP=patch|minor|major PRERELEASE=true|false [SHA=<commit>] next-version.sh
 #
-# A re-run after a failed publish reuses the tag of the same kind (stable or candidate) that
-# already points at SHA, so the version is not skipped. Otherwise the next tag is computed;
-# without any tag the base is v0.0.0, so the first minor release is v0.1.0.
+# Only tags in SHA's history count, so a tag on an unmerged branch never sets the base. A
+# re-run after a failed publish reuses the tag of the same kind (stable or candidate) that
+# already points at SHA, so the version is not skipped; it fails when that tag is not what
+# BUMP would give. Otherwise the next tag is computed; without any tag the base is v0.0.0,
+# so the first minor release is v0.1.0.
 #
 # Prints, and appends to $GITHUB_OUTPUT when set:
 #   tag=     vX.Y.Z, or vX.Y.Z-rc.N for a release candidate
@@ -23,9 +25,21 @@ sha=$(git rev-parse "${SHA:-HEAD}^{commit}")
 stable_re='^v[0-9]+\.[0-9]+\.[0-9]+$'
 case "$bump" in patch | minor | major) ;; *) echo "::error::BUMP must be patch, minor or major, not '$bump'" >&2; exit 2 ;; esac
 
-# Tags sorted by version, newest first; `below TAG` lists those older than TAG.
-stable_tags() { git tag --list 'v*' --sort=-v:refname | grep -E "$stable_re" || true; }
+# Tags in SHA's history sorted by version, newest first; `below TAG` lists those older than
+# TAG; `bumped BASE` is the version BUMP gives after the stable tag BASE (empty: v0.0.0).
+tags() { git tag --list "$1" --merged "$sha" --sort=-v:refname; }
+stable_tags() { tags 'v*' | grep -E "$stable_re" || true; }
 below() { awk -v t="$1" 'found { print } $0 == t { found = 1 }'; }
+bumped() {
+  local major minor patch
+  IFS=. read -r major minor patch <<< "${1#v}"
+  major=${major:-0} minor=${minor:-0} patch=${patch:-0}
+  case "$bump" in
+    major) echo "v$((major + 1)).0.0" ;;
+    minor) echo "v$major.$((minor + 1)).0" ;;
+    patch) echo "v$major.$minor.$((patch + 1))" ;;
+  esac
+}
 
 if [ "$pre" = "true" ]; then kind_re='^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$'; else kind_re="$stable_re"; fi
 existing=$(git tag --points-at "$sha" --list 'v*' --sort=-v:refname | grep -E "$kind_re" | head -n 1 || true)
@@ -34,26 +48,25 @@ if [ -n "$existing" ]; then
   tag="$existing"
   reused=true
   version="${tag%%-rc.*}"
+  # The stable release before this version (the version itself may exist as a stable tag).
+  base=$({ stable_tags; echo "$version"; } | sort -u -V -r | below "$version" | head -n 1)
+  if [ "$(bumped "$base")" != "$version" ]; then
+    echo "::error::$tag already points at this commit but is not a $bump release after ${base:-v0.0.0}; re-run with the bump that made it" >&2
+    exit 1
+  fi
   if [ "$pre" = "true" ]; then
-    prev=$(git tag --list "$version-rc.*" --sort=-v:refname | below "$tag" | head -n 1)
-    if [ -z "$prev" ]; then prev=$(stable_tags | grep -vx "$version" | head -n 1 || true); fi
+    prev=$(tags "$version-rc.*" | below "$tag" | head -n 1)
+    if [ -z "$prev" ]; then prev="$base"; fi
   else
-    prev=$(stable_tags | below "$tag" | head -n 1)
+    prev="$base"
   fi
 else
   reused=false
   stable=$(stable_tags | head -n 1)
-  IFS=. read -r major minor patch <<< "${stable#v}"
-  major=${major:-0} minor=${minor:-0} patch=${patch:-0}
-  case "$bump" in
-    major) major=$((major + 1)) minor=0 patch=0 ;;
-    minor) minor=$((minor + 1)) patch=0 ;;
-    patch) patch=$((patch + 1)) ;;
-  esac
-  version="v$major.$minor.$patch"
+  version=$(bumped "$stable")
   prev="$stable"
   if [ "$pre" = "true" ]; then
-    last_rc=$(git tag --list "$version-rc.*" --sort=-v:refname | head -n 1)
+    last_rc=$(tags "$version-rc.*" | head -n 1)
     n=1
     if [ -n "$last_rc" ]; then n=$(( ${last_rc##*-rc.} + 1 )); prev="$last_rc"; fi
     tag="$version-rc.$n"
