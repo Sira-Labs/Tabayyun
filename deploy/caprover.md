@@ -309,21 +309,24 @@ that bind the environment and pass its rules. The rules hold even if a branch ed
 workflow file: a job that names `production` from any branch other than `main` is refused
 before it sees a secret.
 
-Settings → Secrets and variables → Actions, repository level (both deploy jobs read them),
-for the ship email (ADR-0017):
+Auto-merge and releases (ADR-0017):
 
-| Kind | Name | Value |
-|---|---|---|
-| secret | `SMTP_USERNAME` | the sending Google Workspace address |
-| secret | `SMTP_PASSWORD` | an app password of that account (Google account → Security → 2-Step Verification on → App passwords → "Tabayyun CI") |
-| variable | `SHIP_MAIL_TO` | who gets the mail, comma-separated |
-| variable | `SMTP_HOST`, `SMTP_PORT` | optional; default `smtp.gmail.com` and `465` |
+- Settings → General → Pull Requests → **Allow auto-merge**.
+- Activate both rulesets (CONTRIBUTING.md, "Repository settings"). `protect-main` now also
+  requires the `CodeRabbit` status; update it if it was imported before.
+- Settings → Secrets and variables, repository level:
 
-Without them the deploys run as before and the log notes that no mail was sent.
+  | Where | Kind | Name | Value |
+  |---|---|---|---|
+  | Actions **and** Dependabot | secret | `AUTOMATION_TOKEN` | a fine-grained personal access token of an organisation admin (you): resource owner Sira-Labs, only the `Tabayyun` repository, permissions Contents and Pull requests read and write, expiry at most a year (renew it) |
+  | Actions | secret | `SMTP_USERNAME` | the sending Google Workspace address |
+  | Actions | secret | `SMTP_PASSWORD` | an app password of that account (Google account → Security → 2-Step Verification on → App passwords → "Tabayyun CI") |
+  | Actions | variable | `SHIP_MAIL_TO` | who gets the release mail, comma-separated |
+  | Actions | variable | `SMTP_HOST`, `SMTP_PORT` | optional; default `smtp.gmail.com` and `465` |
 
-Auto-merge (ADR-0017): Settings → General → Pull Requests → **Allow auto-merge**, and the
-`protect-main` ruleset updated from `.github/rulesets/protect-main.json` so that it also
-requires the `CodeRabbit` status (CONTRIBUTING.md, "Repository settings").
+  Dependabot's pull requests read secrets from the Dependabot store, hence the token in both.
+  Without the token, pull requests wait for a manual merge and no release can be cut; without
+  the SMTP values, releases publish without a mail.
 
 Release tags: import `.github/rulesets/protect-release-tags.json` (CONTRIBUTING.md,
 "Repository settings") so that only organisation admins can create, move or delete `v*`

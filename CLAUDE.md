@@ -21,17 +21,24 @@ Self-hostable time-series data-quality platform. Read `docs/` before changing de
 
 ## Shipping (ADR-0017)
 
-- Open pull requests ready for review and enable auto-merge (merge commit) right away; they
-  merge when CI, CodeRabbit and resolved threads allow. Subscribe to the PR and handle every
-  finding until it merges. A PR that needs an owner step first (setting, secret, Keycloak)
-  stays a draft, and the owner gets the steps.
-- The owner learns what shipped from the CI ship email; do not ask them to merge.
-- **Release review:** when the last story of a sprint (`docs/roadmap/sprints.md`) is live on
-  staging, or a production promotion carries new features:
+- Open pull requests ready for review; `automerge.yml` (or you, with the GitHub tools)
+  enables auto-merge, and they merge once CI, CodeRabbit and resolved threads allow.
+  Subscribe to the PR and handle every finding until it merges. A PR that needs an owner
+  step first (setting, secret, Keycloak) stays a draft, and the owner gets the steps. Do not
+  ask the owner to merge.
+- **Releases** are cut with `cut-release.yml` on `main` (dispatch it with the GitHub tools)
+  once the change is live on staging:
+  - **patch:** when a spec's acceptance criteria are met, or after a set of fixes;
+  - **minor:** when the last story of a sprint (`docs/roadmap/sprints.md`) is live; first
+    move `CHANGELOG.md`'s `[Unreleased]` entries under the new version in a PR;
+  - **major:** only when the owner names a milestone.
+
+  The workflow emails the owner the release.
+- **Release review**, for every stable minor or major release:
   - make a slide deck of what shipped, with screenshots from staging;
-  - book a 45-minute "Tabayyun release review: <sprint>" event in the owner's Google
-    calendar, on the next working day at 10:00 in the calendar's time zone, with the deck and
-    staging links in the description;
+  - book a one-hour "Tabayyun <version> release review" event in the owner's Google
+    calendar, on the next working day at 10:00 in the calendar's time zone, with the deck,
+    the release notes and the staging link in the description;
   - tell the owner, who moves it if needed.
 
 ## Layout

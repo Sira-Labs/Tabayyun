@@ -47,8 +47,11 @@ series; `make dev-infra` starts Postgres+TimescaleDB and Keycloak via docker com
    possible.
 5. CI must be green (`rust core`, `python bindings`, `python api`, `web`), CodeRabbit's review
    complete (`CodeRabbit` status) and every review thread resolved. Merge with a merge commit
-   or squash; rebase-merge is off. Pull requests auto-merge once these hold (ADR-0017): enable
-   auto-merge when you open one, or open it as a draft while it waits for an owner step.
+   or squash; rebase-merge is off. Pull requests from branches of this repository auto-merge
+   once these hold (`automerge.yml`, ADR-0017); open a draft while a change waits for an
+   owner step. Pull requests from forks are merged by a maintainer.
+6. Releases are cut from `main` with **Actions → cut release** (patch, minor or major,
+   ADR-0017); the workflow tags the commit, publishes the GitHub release and emails it.
 
 ## Adding a check
 

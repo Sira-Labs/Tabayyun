@@ -289,12 +289,15 @@ Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, S
 
 ## Shipping without merge clicks (ADR-0017, 2 Oct 2026)
 
-- [x] Ship email at the end of both deploy jobs (`.github/scripts/ship-mail.py`), auto-merge
-      and release reviews as conventions (`CLAUDE.md`, "Shipping"), CodeRabbit required in
-      `protect-main.json`.
-- [ ] Owner: Settings → General → Allow auto-merge; update the `protect-main` ruleset from
-      the JSON (adds `CodeRabbit`); SMTP app password into `SMTP_USERNAME`/`SMTP_PASSWORD`
-      and `SHIP_MAIL_TO` (`deploy/caprover.md`, section 5).
+- [x] `automerge.yml` for every pull request from this repository, `cut-release.yml` with the
+      release mail, CodeRabbit required in `protect-main.json`, conventions in `CLAUDE.md`
+      ("Shipping"). Owner's choices: every PR, a mail per published release, a stable
+      minor or major is a bigger release, with slides and a one-hour slot.
+- [ ] Owner: allow auto-merge; activate both rulesets (`protect-main` with `CodeRabbit`);
+      `AUTOMATION_TOKEN` (Actions and Dependabot), `SMTP_USERNAME`, `SMTP_PASSWORD`,
+      `SHIP_MAIL_TO` (`deploy/caprover.md`, section 5).
+- [ ] First release v0.1.0 when sprint 8 is live (specs 014 and 015), with the first release
+      review.
 
 ## Later sprints
 
