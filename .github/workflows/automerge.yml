@@ -36,11 +36,12 @@ jobs:
             echo "::notice::AUTOMATION_TOKEN is not set: auto-merge is left to whoever opened the pull request"
             exit 0
           fi
-          # Without required checks GitHub would merge at once: only enable auto-merge while
-          # the base branch's ruleset requires status checks.
-          rules=$(gh api "repos/$REPO/rules/branches/$BASE" --jq '[.[].type] | join(",")')
-          if [[ ",$rules," != *",required_status_checks,"* ]]; then
-            echo "::error::$BASE has no required status checks (rules: ${rules:-none}); activate the protect-main ruleset (CONTRIBUTING.md) before auto-merge"
+          # Only while the base branch requires the CodeRabbit review among its status checks:
+          # without required checks GitHub would merge at once, and while the check is removed
+          # for a CodeRabbit outage (CONTRIBUTING.md) a new push must not merge unreviewed.
+          required=$(gh api "repos/$REPO/rules/branches/$BASE" --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | join(",")')
+          if [[ ",$required," != *",CodeRabbit,"* ]]; then
+            echo "::error::$BASE does not require the CodeRabbit check (required: ${required:-none}); auto-merge stays off until protect-main requires it (CONTRIBUTING.md)"
             exit 1
           fi
           gh pr merge --auto --merge "$PR"

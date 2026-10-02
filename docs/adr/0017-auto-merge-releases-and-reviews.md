@@ -30,7 +30,8 @@ The owner decided on 2 Oct 2026:
   - every review thread is resolved.
 
   `automerge.yml` enables GitHub's auto-merge (merge commit) on every non-draft pull request
-  from a branch of this repository, Dependabot's included. It uses `AUTOMATION_TOKEN`, a
+  from a branch of this repository, Dependabot's included, but only while `main` requires the
+  `CodeRabbit` check, so it stays off during an outage too. It uses `AUTOMATION_TOKEN`, a
   fine-grained token of the owner. GitHub starts no workflow for a merge made through
   `GITHUB_TOKEN`, so a merge through it would never deploy. The workflow refuses while `main`
   requires no status checks, because GitHub would then merge at once. Pull requests from
@@ -81,7 +82,8 @@ The owner decided on 2 Oct 2026:
   never arrives and the ruleset has no bypass. The owner first turns off auto-merge on the
   open pull requests (they would otherwise merge unreviewed), then removes `CodeRabbit` from
   `protect-main`'s required checks, merges what is needed by hand, adds the check back and
-  re-enables auto-merge (CONTRIBUTING.md, "Repository settings").
+  re-enables auto-merge (CONTRIBUTING.md, "Repository settings"). While the check is out,
+  `automerge.yml` refuses to enable auto-merge, so a new push cannot merge unreviewed.
 - `AUTOMATION_TOKEN` can push to the repository as the owner. It is scoped to this one
   repository, expires, and is renewed by the owner. It is read only by workflow files on
   `main`.

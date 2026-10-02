@@ -94,7 +94,8 @@ has no bypass). First disable auto-merge on the open pull requests (each PR → 
 auto-merge"), or they merge unreviewed as soon as the check is gone. Then remove the
 `CodeRabbit` entry from `protect-main`'s required status checks in the settings page, merge
 what is needed, add the entry back with the source set to the CodeRabbit app as in the JSON,
-and re-enable auto-merge (ADR-0017).
+and re-enable auto-merge (ADR-0017). While the entry is gone, `automerge.yml` refuses to turn
+auto-merge on, so pushes during the outage do not merge by themselves.
 
 `.github/rulesets/protect-release-tags.json` lets only organisation admins create, move or
 delete `v*` tags (a tag on `main` publishes a release, ADR-0016); import it the same way.
