@@ -320,10 +320,11 @@ Auto-merge and releases (ADR-0017):
   |---|---|---|---|
   | Actions **and** Dependabot | secret | `AUTOMATION_TOKEN` | a fine-grained personal access token of an organisation admin (you): resource owner Sira-Labs, only the `Tabayyun` repository, permissions Contents and Pull requests read and write, expiry at most a year (renew it) |
 
-  Dependabot's pull requests read secrets from the Dependabot store, hence the token in both.
-  Without the token, pull requests wait for a manual merge and no release is published. The
-  release mail needs no secret here: the "Tabayyun release notifier" routine sends it from
-  your Gmail (ADR-0017).
+  The token is optional. Dependabot's pull requests read secrets from the Dependabot store,
+  hence the token in both. Without it, Claude sessions still enable auto-merge on their pull
+  requests with the GitHub tools; other pull requests wait for a manual merge. Releases need
+  no secret: `cut-release.yml` uses `GITHUB_TOKEN`, as in Suffa. The release mail needs none
+  either: the "Tabayyun release notifier" routine sends it from your Gmail (ADR-0017).
 
 Release tags: import `.github/rulesets/protect-release-tags.json` (CONTRIBUTING.md,
 "Repository settings") so that only organisation admins can create, move or delete `v*`

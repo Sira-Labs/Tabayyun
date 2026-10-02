@@ -296,9 +296,11 @@ Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, S
       bigger release with slides and a one-hour slot, all as in Suffa and Thawr.
 - [x] "Tabayyun release notifier" routine (08:47 and 20:47 Riyadh): mail per release, deck and
       calendar slot for minor and major releases, to markus@thedatadude.de.
-- [ ] Owner: allow auto-merge; activate both rulesets (`protect-main` with `CodeRabbit`);
-      `AUTOMATION_TOKEN` in the Actions and Dependabot secrets (`deploy/caprover.md`,
-      section 5).
+- [x] Owner: allow auto-merge.
+- [x] Releases publish with `GITHUB_TOKEN`, as in Suffa (v0.1.1 was skipped on 2 Oct because
+      the first version needed `AUTOMATION_TOKEN`); the images get the version tag in GHCR.
+- [ ] Owner: activate `protect-main` (with `CodeRabbit`); optionally `AUTOMATION_TOKEN` for
+      Dependabot's pull requests (`deploy/caprover.md`, section 5).
 - [ ] v0.2.0 (`[minor]`) when sprint 8 is live (specs 014 and 015), with the first release
       presentation; patch releases from v0.1.1 until then.
 
