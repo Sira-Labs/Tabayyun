@@ -105,6 +105,13 @@ jobs:
           SHA: ${{ inputs.sha || github.sha }}
         run: |
           short=$(git rev-parse --short=7 "$SHA")
+          # Both sources first, so a missing image never leaves the other one versioned alone.
+          for name in api web; do
+            if ! docker buildx imagetools inspect "ghcr.io/sira-labs/tabayyun-$name:sha-$short" >/dev/null 2>&1; then
+              echo "::error::ghcr.io/sira-labs/tabayyun-$name:sha-$short does not exist: release.yml has not published $SHA"
+              exit 1
+            fi
+          done
           for name in api web; do
             image="ghcr.io/sira-labs/tabayyun-$name"
             docker buildx imagetools create -t "$image:${TAG#v}" "$image:sha-$short"
