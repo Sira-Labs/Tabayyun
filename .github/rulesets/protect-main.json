@@ -24,7 +24,8 @@
           { "context": "rust core" },
           { "context": "python bindings" },
           { "context": "python api" },
-          { "context": "web" }
+          { "context": "web" },
+          { "context": "CodeRabbit", "integration_id": 347564 }
         ]
       } }
   ]

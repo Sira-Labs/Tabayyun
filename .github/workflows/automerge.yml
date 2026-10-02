@@ -1,0 +1,47 @@
+name: automerge
+
+# Every pull request from a branch of this repository, Dependabot's included, merges itself
+# once the protect-main ruleset allows it: CI green, CodeRabbit's review complete, review
+# threads resolved (ADR-0017). Drafts wait until they are marked ready. Pull requests from
+# forks are left to a person.
+#
+# Auto-merge is enabled with AUTOMATION_TOKEN, the owner's fine-grained token: GitHub starts no
+# workflow for a merge made through GITHUB_TOKEN, so release.yml would never deploy it. The
+# token is read in pull_request_target, which runs this file as it is on main; the pull
+# request's code is never checked out here.
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, synchronize]
+
+permissions: {}
+
+concurrency:
+  group: automerge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  enable:
+    name: enable auto-merge
+    if: ${{ !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_TOKEN }}
+          PR: ${{ github.event.pull_request.html_url }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::AUTOMATION_TOKEN is not set: auto-merge is left to whoever opened the pull request"
+            exit 0
+          fi
+          # Only while the base branch requires the CodeRabbit review among its status checks:
+          # without required checks GitHub would merge at once, and while the check is removed
+          # for a CodeRabbit outage (CONTRIBUTING.md) a new push must not merge unreviewed.
+          required=$(gh api "repos/$REPO/rules/branches/$BASE" --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | join(",")')
+          if [[ ",$required," != *",CodeRabbit,"* ]]; then
+            echo "::error::$BASE does not require the CodeRabbit check (required: ${required:-none}); auto-merge stays off until protect-main requires it (CONTRIBUTING.md)"
+            exit 1
+          fi
+          gh pr merge --auto --merge "$PR"

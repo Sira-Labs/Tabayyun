@@ -1,0 +1,128 @@
+name: cut release
+
+# Publishes a version (ADR-0017): tags the commit, and creates the GitHub release with notes
+# from the merged pull requests. The "Tabayyun release notifier" routine then emails the owner
+# about it, and adds slides and a calendar slot for a stable minor or major release.
+#
+# - Automatic: release.yml calls it for every main commit right after staging reported that
+#   commit live. The merge commit's message picks the part to raise: a line starting with
+#   `[minor]` (a finished sprint) or `[major]` (a milestone the owner names), else a patch. The
+#   pull request's title carries the marker; GitHub's merge commit includes the title.
+# - By hand: Actions → cut release → Run workflow on main, to choose the part or cut a release
+#   candidate (vX.Y.Z-rc.N). It releases main's head and checks that staging runs it.
+#
+# Without any tag, the first release follows the code's version (api/pyproject.toml).
+on:
+  workflow_call:
+    inputs:
+      sha:
+        description: The main commit staging just reported live
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "patch (a spec or fixes), minor (a sprint) or major (a milestone)"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      prerelease:
+        description: "A release candidate (vX.Y.Z-rc.N)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  # The check that release.yml deployed the commit to staging (runs by hand).
+  actions: read
+
+jobs:
+  release:
+    name: cut release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # One release at a time, so two quick merges never claim the same version. A queued run
+    # loses nothing: the next release's notes list its pull requests too.
+    concurrency:
+      group: cut-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.sha || github.sha }}
+          persist-credentials: false
+      - id: version
+        name: next version
+        env:
+          SHA: ${{ inputs.sha || github.sha }}
+          # Empty when called after a deploy: the commit message decides.
+          BUMP: ${{ inputs.bump }}
+          PRERELEASE: ${{ inputs.prerelease || 'false' }}
+        run: |
+          BASE="v$(sed -n 's/^version = "\(.*\)"/\1/p' api/pyproject.toml | head -n 1)"
+          export BASE
+          .github/scripts/next-version.sh
+      - name: something to release, and live on staging
+        # Called by release.yml, the caller has just seen staging serve the commit.
+        if: inputs.sha == '' && steps.version.outputs.reused != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREV: ${{ steps.version.outputs.prev }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ -n "$PREV" ] && [ "$(git rev-list --count "$PREV..$SHA")" = "0" ]; then
+            echo "::error::nothing to release: main has not changed since $PREV"
+            exit 1
+          fi
+          # A successful run is not enough: a run skips the deploy when staging is not set up.
+          # Only a push run on main whose live check passed shows that staging runs this commit.
+          ok=0
+          while read -r run_id; do
+            live=$(gh run view "$run_id" --json jobs --jq 'any(.jobs[]?; .name == "deploy to staging" and any(.steps[]?; .name == "wait until the new version is live" and .conclusion == "success"))')
+            if [ "$live" = "true" ]; then ok=1; break; fi
+          done < <(gh run list --workflow release.yml --branch main --event push --commit "$SHA" --status success --json databaseId --jq '.[].databaseId')
+          if [ "$ok" = "0" ]; then
+            echo "::error::staging has not been confirmed to run $SHA (release.yml's live check): release what staging runs"
+            exit 1
+          fi
+      - name: tag and publish
+        env:
+          # The owner's token: only organisation admins may create v* tags
+          # (protect-release-tags), and a tag pushed with GITHUB_TOKEN would start no workflow,
+          # so the versioned images (release.yml on the tag) would never be built.
+          GH_TOKEN: ${{ secrets.AUTOMATION_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+          PREV: ${{ steps.version.outputs.prev }}
+          SHA: ${{ inputs.sha || github.sha }}
+          PRERELEASE: ${{ inputs.prerelease || 'false' }}
+          REUSED: ${{ steps.version.outputs.reused }}
+        # A re-run after a failure here reuses the tag already at SHA (next-version.sh) and only
+        # creates what is still missing.
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::AUTOMATION_TOKEN is not set (deploy/caprover.md, section 5): $TAG not published"
+            exit 0
+          fi
+          if [ "$REUSED" = "true" ]; then
+            echo "::notice::$TAG already points at $SHA: not tagged again"
+          else
+            git tag "$TAG" "$SHA"
+            git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "refs/tags/$TAG"
+          fi
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "::notice::the release $TAG exists already"
+            exit 0
+          fi
+          args=(--verify-tag --title "Tabayyun $TAG")
+          if [ -n "$PREV" ]; then
+            args+=(--generate-notes --notes-start-tag "$PREV")
+          else
+            # The first release: its own merge commit only; earlier work is in CHANGELOG.md.
+            args+=(--notes "$(git log -1 --format=%B "$SHA")"$'\n\nFirst published release; earlier changes are listed in CHANGELOG.md.')
+          fi
+          if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease --latest=false); fi
+          gh release create "$TAG" --repo "$REPO" "${args[@]}"
+          echo "Published [$TAG]($(gh release view "$TAG" --repo "$REPO" --json url --jq .url))" >> "$GITHUB_STEP_SUMMARY"

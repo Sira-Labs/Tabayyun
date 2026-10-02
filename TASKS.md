@@ -287,6 +287,21 @@ Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, S
 - [ ] Around 7 Oct: move both DMARC records from `p=none` to `p=quarantine` once the
       reports show only Google sending (reminder scheduled).
 
+## Shipping without merge clicks (ADR-0017, 2 Oct 2026)
+
+- [x] `automerge.yml` for every pull request from this repository; a release for every merge
+      that reaches staging (`cut-release.yml`, `[minor]`/`[major]` in the merge commit);
+      CodeRabbit required in `protect-main.json`; conventions in `CLAUDE.md` ("Shipping").
+      Owner's choices: every PR, a mail per published release, a stable minor or major is a
+      bigger release with slides and a one-hour slot, all as in Suffa and Thawr.
+- [x] "Tabayyun release notifier" routine (08:47 and 20:47 Riyadh): mail per release, deck and
+      calendar slot for minor and major releases, to markus@thedatadude.de.
+- [ ] Owner: allow auto-merge; activate both rulesets (`protect-main` with `CodeRabbit`);
+      `AUTOMATION_TOKEN` in the Actions and Dependabot secrets (`deploy/caprover.md`,
+      section 5).
+- [ ] v0.2.0 (`[minor]`) when sprint 8 is live (specs 014 and 015), with the first release
+      presentation; patch releases from v0.1.1 until then.
+
 ## Later sprints
 
 - [ ] **Scores that barely move** (26 Sep, owner: backlog for S10-6): on staging, `flow-a` had

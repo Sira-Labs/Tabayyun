@@ -309,6 +309,22 @@ that bind the environment and pass its rules. The rules hold even if a branch ed
 workflow file: a job that names `production` from any branch other than `main` is refused
 before it sees a secret.
 
+Auto-merge and releases (ADR-0017):
+
+- Settings → General → Pull Requests → **Allow auto-merge**.
+- Activate both rulesets (CONTRIBUTING.md, "Repository settings"). `protect-main` now also
+  requires the `CodeRabbit` status; update it if it was imported before.
+- Settings → Secrets and variables, repository level:
+
+  | Where | Kind | Name | Value |
+  |---|---|---|---|
+  | Actions **and** Dependabot | secret | `AUTOMATION_TOKEN` | a fine-grained personal access token of an organisation admin (you): resource owner Sira-Labs, only the `Tabayyun` repository, permissions Contents and Pull requests read and write, expiry at most a year (renew it) |
+
+  Dependabot's pull requests read secrets from the Dependabot store, hence the token in both.
+  Without the token, pull requests wait for a manual merge and no release is published. The
+  release mail needs no secret here: the "Tabayyun release notifier" routine sends it from
+  your Gmail (ADR-0017).
+
 Release tags: import `.github/rulesets/protect-release-tags.json` (CONTRIBUTING.md,
 "Repository settings") so that only organisation admins can create, move or delete `v*`
 tags.

@@ -19,6 +19,23 @@ Self-hostable time-series data-quality platform. Read `docs/` before changing de
 6. A story in `docs/roadmap/sprints.md` gets its spec (copy `docs/specs/000-template.md`)
    before any code; a spec that turns out wrong is edited in the same PR, with the reason.
 
+## Shipping (ADR-0017)
+
+- Open pull requests ready for review; `automerge.yml` (or you, with the GitHub tools)
+  enables auto-merge, and they merge once CI, CodeRabbit and resolved threads allow.
+  Subscribe to the PR and handle every finding until it merges. A PR that needs an owner
+  step first (setting, secret, Keycloak) stays a draft, and the owner gets the steps. Do not
+  ask the owner to merge.
+- **Releases** publish themselves: every merge that reaches staging becomes a patch release
+  (`cut-release.yml`, called by `release.yml`). When the last story of a sprint
+  (`docs/roadmap/sprints.md`) merges, start that PR's title with `[minor]` (GitHub's merge
+  commit carries the title, and the release reads the marker from it), and move
+  `CHANGELOG.md`'s `[Unreleased]` entries under the new version in that PR. `[major]` only
+  when the owner names a milestone.
+- **Release notifier:** the owner's "Tabayyun release notifier" routine (twice a day) emails
+  each release and, for a stable minor or major, makes the slide deck and books a one-hour
+  presentation in the owner's calendar. Do not send release mail or book it by hand.
+
 ## Layout
 - `core/` Rust workspace: `tabayyun-core` (frame, profile, checks, score, downsample, synth), `tabayyun-cli` (`tabayyun` binary), `tabayyun-py` (PyO3 wheel `tabayyun_core`, Arrow PyCapsule in/out).
 - `api/` Python 3.11+ FastAPI (uv). `src/tabayyun/`, tests in `tests/`.
