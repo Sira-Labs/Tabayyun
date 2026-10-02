@@ -1,7 +1,8 @@
 name: cut release
 
-# Publishes a version (ADR-0017): tags the commit, and creates the GitHub release with notes
-# from the merged pull requests. The "Tabayyun release notifier" routine then emails the owner
+# Publishes a version (ADR-0017): gives the commit's scanned images their version tag, and
+# creates the GitHub release (and with it the v* tag) with notes from the merged pull requests.
+# Everything runs with GITHUB_TOKEN, as in Suffa: no personal token is needed. The "Tabayyun release notifier" routine then emails the owner
 # about it, and adds slides and a calendar slot for a stable minor or major release.
 #
 # - Automatic: release.yml calls it for every main commit right after staging reported that
@@ -32,7 +33,10 @@ on:
         default: false
 
 permissions:
-  contents: read
+  # The release and its v* tag.
+  contents: write
+  # The version tag on the images in GHCR.
+  packages: write
   # The check that release.yml deployed the commit to staging (runs by hand).
   actions: read
 
@@ -87,36 +91,41 @@ jobs:
             echo "::error::staging has not been confirmed to run $SHA (release.yml's live check): release what staging runs"
             exit 1
           fi
-      - name: tag and publish
+      # The images staging runs (sha-<short>, scanned in release.yml) get the version as a
+      # further tag: the same digest, nothing is rebuilt. A tag created with GITHUB_TOKEN starts
+      # no workflow, so release.yml's tag run would not do it.
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: version the images
         env:
-          # The owner's token: only organisation admins may create v* tags
-          # (protect-release-tags), and a tag pushed with GITHUB_TOKEN would start no workflow,
-          # so the versioned images (release.yml on the tag) would never be built.
-          GH_TOKEN: ${{ secrets.AUTOMATION_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          SHA: ${{ inputs.sha || github.sha }}
+        run: |
+          short=$(git rev-parse --short=7 "$SHA")
+          for name in api web; do
+            image="ghcr.io/sira-labs/tabayyun-$name"
+            docker buildx imagetools create -t "$image:${TAG#v}" "$image:sha-$short"
+          done
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
           PREV: ${{ steps.version.outputs.prev }}
           SHA: ${{ inputs.sha || github.sha }}
           PRERELEASE: ${{ inputs.prerelease || 'false' }}
-          REUSED: ${{ steps.version.outputs.reused }}
         # A re-run after a failure here reuses the tag already at SHA (next-version.sh) and only
         # creates what is still missing.
         run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::warning::AUTOMATION_TOKEN is not set (deploy/caprover.md, section 5): $TAG not published"
-            exit 0
-          fi
-          if [ "$REUSED" = "true" ]; then
-            echo "::notice::$TAG already points at $SHA: not tagged again"
-          else
-            git tag "$TAG" "$SHA"
-            git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "refs/tags/$TAG"
-          fi
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             echo "::notice::the release $TAG exists already"
             exit 0
           fi
-          args=(--verify-tag --title "Tabayyun $TAG")
+          # Creates the tag at SHA through the API unless it exists (a re-run).
+          args=(--target "$SHA" --title "Tabayyun $TAG")
           if [ -n "$PREV" ]; then
             args+=(--generate-notes --notes-start-tag "$PREV")
           else

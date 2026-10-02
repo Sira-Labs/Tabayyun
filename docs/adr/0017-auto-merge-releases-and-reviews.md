@@ -52,9 +52,11 @@ The owner decided on 2 Oct 2026:
   Without any tag the first release follows the code's version, `0.1.0`
   (`api/pyproject.toml`). A commit that already has a version is not released again. Run by
   hand on `main`, the workflow lets one choose the part, or cut a candidate (`vX.Y.Z-rc.N`),
-  after checking that staging runs the head. The `v*` tag is pushed with the owner's token:
-  only organisation admins may create those tags, and only such a push starts `release.yml`
-  for the versioned images. A tag run builds those images and does not deploy staging again.
+  after checking that staging runs the head. As in Suffa, it runs with `GITHUB_TOKEN`
+  (amended 2 Oct 2026; the first version pushed the tag with the owner's token, which then
+  was not set): it gives the images staging runs their version tag in GHCR, same digest, and
+  creates the release, which creates the `v*` tag. Such a tag starts no workflow; a `v*` tag
+  pushed by hand still builds versioned images in `release.yml`, without deploying staging.
   The release notes list the merged pull requests since the previous version. Before 1.0 a
   minor version may break APIs (`CHANGELOG.md`).
 - **Release notifier.** The "Tabayyun release notifier" routine in the owner's Claude account
@@ -91,12 +93,14 @@ The owner decided on 2 Oct 2026:
   `protect-main`'s required checks, merges what is needed by hand, adds the check back and
   re-enables auto-merge (CONTRIBUTING.md, "Repository settings"). While the check is out,
   `automerge.yml` refuses to enable auto-merge, so a new push cannot merge unreviewed.
-- `AUTOMATION_TOKEN` can push to the repository as the owner. It is scoped to this one
-  repository, expires, and is renewed by the owner. It is read only by workflow files on
-  `main`.
+- `AUTOMATION_TOKEN` (optional) can push to the repository as the owner. It is scoped to
+  this one repository, expires, and is renewed by the owner. It is read only by
+  `automerge.yml` on `main`. Without it, sessions enable auto-merge with the GitHub tools as
+  the owner, and other pull requests (Dependabot's) wait for a manual merge. Releases need no
+  secret.
 - The version strings in the code (`0.1.0` in the API, the web package and the crates) are
   not bumped by a release yet; `/api/version` keeps reporting the commit.
 - The mail depends on the notifier routine, not on the repository. If the routine is paused,
   releases still publish and can be read on GitHub.
-- Owner set-up, once: allow auto-merge, activate the rulesets, and add `AUTOMATION_TOKEN`
-  (`deploy/caprover.md`, section 5).
+- Owner set-up, once: allow auto-merge and activate `protect-main`; optionally
+  `AUTOMATION_TOKEN` (`deploy/caprover.md`, section 5).

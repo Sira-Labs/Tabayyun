@@ -150,8 +150,8 @@ jobs:
   deploy-staging:
     name: deploy to staging
     needs: images
-    # A v* tag only adds versioned images: it is cut for a commit staging already runs
-    # (cut-release.yml, ADR-0017).
+    # A v* tag pushed by hand only adds versioned images; cut-release.yml (ADR-0017) versions
+    # the images itself, as its tags start no workflow.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -216,9 +216,9 @@ jobs:
     needs: deploy-staging
     if: github.event_name == 'push' && needs.deploy-staging.outputs.deployed == 'true'
     permissions:
-      contents: read
+      contents: write
+      packages: write
       actions: read
     uses: ./.github/workflows/cut-release.yml
     with:
       sha: ${{ github.sha }}
-    secrets: inherit
