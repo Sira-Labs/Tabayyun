@@ -18,7 +18,9 @@ The owner decided on 2 Oct 2026:
   open;
 - an email for each published release;
 - a stable minor or major release counts as a bigger release;
-- for it, slides and a one-hour calendar slot.
+- for it, slides and a one-hour calendar slot;
+- the same way as Suffa and Thawr: a release for every change that reaches staging, and the
+  mail, slides and calendar slot from a release notifier routine.
 
 ## Decision
 
@@ -38,26 +40,31 @@ The owner decided on 2 Oct 2026:
   forks are left to a person: their code has had no trusted look, and auto-merge would
   deploy it to staging. Pull requests that need an owner step before they may deploy (a
   setting, a secret, a Keycloak change) stay drafts until it is done.
-- **Releases.** `cut-release.yml` (run on `main` by Claude Code or the owner) publishes a
-  version:
-  - **patch:** a finished spec or a set of fixes;
-  - **minor:** a finished sprint;
-  - **major:** a product milestone the owner names;
-  - **release candidate:** `vX.Y.Z-rc.N`, optional.
+- **A release for every change on staging** (Suffa's scheme, `docs/ops/releases.md` there).
+  Right after `deploy to staging` sees the new commit live, `release.yml` calls
+  `cut-release.yml`, which publishes the next version of that commit:
+  - **patch:** every merge that reaches staging;
+  - **minor:** a merge whose commit message has a line starting with `[minor]`, used when the
+    last story of a sprint lands. The pull request's title starts with it, and GitHub's merge
+    commit carries the title;
+  - **major:** a line starting with `[major]`, only when the owner names a milestone.
 
-  The job checks two things first: main changed since the last release, and `release.yml`
-  succeeded for the commit, so staging runs it. It then pushes the `v*` tag with the owner's
-  token (only organisation admins may create those tags, and only such a push starts
-  `release.yml` for the versioned images). Finally it creates the GitHub release with notes
-  from the merged pull requests. Before 1.0 a minor version may break APIs (`CHANGELOG.md`).
-- **Release email.** The same job emails `SHIP_MAIL_TO` the version, its pull requests with
-  links and the release notes link, over SMTP with a Google Workspace app password
-  (`SMTP_USERNAME`, `SMTP_PASSWORD`). Without them it only logs a notice; a mail error never
-  fails a release. Merges and deploys send no mail: a failed workflow already triggers
-  GitHub's own notification to the owner, as whose account merges and releases run.
-- **Release review.** For a stable minor or major release, Claude Code makes a slide deck of
-  what shipped and books a one-hour review in the owner's Google calendar (`CLAUDE.md`,
-  "Shipping").
+  Without any tag the first release follows the code's version, `0.1.0`
+  (`api/pyproject.toml`). A commit that already has a version is not released again. Run by
+  hand on `main`, the workflow lets one choose the part, or cut a candidate (`vX.Y.Z-rc.N`),
+  after checking that staging runs the head. The `v*` tag is pushed with the owner's token:
+  only organisation admins may create those tags, and only such a push starts `release.yml`
+  for the versioned images. A tag run builds those images and does not deploy staging again.
+  The release notes list the merged pull requests since the previous version. Before 1.0 a
+  minor version may break APIs (`CHANGELOG.md`).
+- **Release notifier.** The "Tabayyun release notifier" routine in the owner's Claude account
+  runs at 08:47 and 20:47 Riyadh time, as Thawr's does. For each new release it emails the
+  owner "[Tabayyun] <tag> shipped": what changed, what to check on staging, and links. For a
+  stable minor or major release it first makes a slide deck and books a one-hour
+  "Tabayyun <tag> release presentation" in the owner's Google calendar, with the deck linked.
+  It uses the owner's Gmail and Calendar connections, so the repository holds no mail
+  secret. Merges and deploys send no mail: a failed workflow already triggers GitHub's own
+  notification to the owner, as whose account merges and releases run.
 - **Production stays gated.** Promotion still needs the owner's approval of a `promote.yml`
   run (ADR-0016).
 
@@ -68,9 +75,9 @@ The owner decided on 2 Oct 2026:
 | Owner merges every PR | a human look before staging | waiting time; the owner judges results on staging anyway | the owner chose auto-merge |
 | Enable auto-merge with `GITHUB_TOKEN` | no extra secret | its merges start no workflows, so nothing would deploy | the owner's token |
 | Auto-merge for forks too | nothing waits | untrusted code reaches staging without a person | forks wait for a person |
-| An email per deploy | hears of every change | many mails, most for small fixes | the owner chose one per release |
-| release-please | changelog and version bumps from commits | its PRs, opened with `GITHUB_TOKEN`, start no CI, so they can never merge; one release per merge | releases are cut on purpose |
-| A mail action from the marketplace | less code | a third-party action sees the SMTP password | a short standard-library script |
+| Releases cut by hand only | fewer, larger releases | nothing reaches the owner until someone remembers to cut one | a release per change, as in Suffa |
+| release-please | changelog and version bumps from commits | its PRs, opened with `GITHUB_TOKEN`, start no CI, so they can never merge | the commit message picks the bump |
+| The release mail sent by CI over SMTP | works without a Claude session | an SMTP app password in GitHub; only a list of PR titles; no slides or calendar slot | the notifier routine does all three, as for Thawr |
 
 ## Consequences
 
@@ -89,5 +96,7 @@ The owner decided on 2 Oct 2026:
   `main`.
 - The version strings in the code (`0.1.0` in the API, the web package and the crates) are
   not bumped by a release yet; `/api/version` keeps reporting the commit.
-- Owner set-up, once: allow auto-merge, activate the rulesets, and add `AUTOMATION_TOKEN`, the
-  SMTP secrets and `SHIP_MAIL_TO` (`deploy/caprover.md`, section 5).
+- The mail depends on the notifier routine, not on the repository. If the routine is paused,
+  releases still publish and can be read on GitHub.
+- Owner set-up, once: allow auto-merge, activate the rulesets, and add `AUTOMATION_TOKEN`
+  (`deploy/caprover.md`, section 5).

@@ -50,8 +50,10 @@ series; `make dev-infra` starts Postgres+TimescaleDB and Keycloak via docker com
    or squash; rebase-merge is off. Pull requests from branches of this repository auto-merge
    once these hold (`automerge.yml`, ADR-0017); open a draft while a change waits for an
    owner step. Pull requests from forks are merged by a maintainer.
-6. Releases are cut from `main` with **Actions → cut release** (patch, minor or major,
-   ADR-0017); the workflow tags the commit, publishes the GitHub release and emails it.
+6. Every merge that reaches staging publishes a release (ADR-0017): a patch, or a minor or
+   major when the merge commit has a line starting with `[minor]` or `[major]` (start the pull
+   request's title with it; the merge commit carries the title). **Actions →
+   cut release** on `main` picks the part by hand or cuts a release candidate.
 
 ## Adding a check
 

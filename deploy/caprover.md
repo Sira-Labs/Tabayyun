@@ -319,14 +319,11 @@ Auto-merge and releases (ADR-0017):
   | Where | Kind | Name | Value |
   |---|---|---|---|
   | Actions **and** Dependabot | secret | `AUTOMATION_TOKEN` | a fine-grained personal access token of an organisation admin (you): resource owner Sira-Labs, only the `Tabayyun` repository, permissions Contents and Pull requests read and write, expiry at most a year (renew it) |
-  | Actions | secret | `SMTP_USERNAME` | the sending Google Workspace address |
-  | Actions | secret | `SMTP_PASSWORD` | an app password of that account (Google account → Security → 2-Step Verification on → App passwords → "Tabayyun CI") |
-  | Actions | variable | `SHIP_MAIL_TO` | who gets the release mail, comma-separated |
-  | Actions | variable | `SMTP_HOST`, `SMTP_PORT` | optional; default `smtp.gmail.com` and `465` |
 
   Dependabot's pull requests read secrets from the Dependabot store, hence the token in both.
-  Without the token, pull requests wait for a manual merge and no release can be cut; without
-  the SMTP values, releases publish without a mail.
+  Without the token, pull requests wait for a manual merge and no release is published. The
+  release mail needs no secret here: the "Tabayyun release notifier" routine sends it from
+  your Gmail (ADR-0017).
 
 Release tags: import `.github/rulesets/protect-release-tags.json` (CONTRIBUTING.md,
 "Repository settings") so that only organisation admins can create, move or delete `v*`
