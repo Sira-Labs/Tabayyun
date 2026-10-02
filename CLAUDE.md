@@ -19,6 +19,21 @@ Self-hostable time-series data-quality platform. Read `docs/` before changing de
 6. A story in `docs/roadmap/sprints.md` gets its spec (copy `docs/specs/000-template.md`)
    before any code; a spec that turns out wrong is edited in the same PR, with the reason.
 
+## Shipping (ADR-0017)
+
+- Open pull requests ready for review and enable auto-merge (merge commit) right away; they
+  merge when CI, CodeRabbit and resolved threads allow. Subscribe to the PR and handle every
+  finding until it merges. A PR that needs an owner step first (setting, secret, Keycloak)
+  stays a draft, and the owner gets the steps.
+- The owner learns what shipped from the CI ship email; do not ask them to merge.
+- **Release review:** when the last story of a sprint (`docs/roadmap/sprints.md`) is live on
+  staging, or a production promotion carries new features:
+  - make a slide deck of what shipped, with screenshots from staging;
+  - book a 45-minute "Tabayyun release review: <sprint>" event in the owner's Google
+    calendar, on the next working day at 10:00 in the calendar's time zone, with the deck and
+    staging links in the description;
+  - tell the owner, who moves it if needed.
+
 ## Layout
 - `core/` Rust workspace: `tabayyun-core` (frame, profile, checks, score, downsample, synth), `tabayyun-cli` (`tabayyun` binary), `tabayyun-py` (PyO3 wheel `tabayyun_core`, Arrow PyCapsule in/out).
 - `api/` Python 3.11+ FastAPI (uv). `src/tabayyun/`, tests in `tests/`.

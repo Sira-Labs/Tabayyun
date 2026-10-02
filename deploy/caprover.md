@@ -309,6 +309,22 @@ that bind the environment and pass its rules. The rules hold even if a branch ed
 workflow file: a job that names `production` from any branch other than `main` is refused
 before it sees a secret.
 
+Settings → Secrets and variables → Actions, repository level (both deploy jobs read them),
+for the ship email (ADR-0017):
+
+| Kind | Name | Value |
+|---|---|---|
+| secret | `SMTP_USERNAME` | the sending Google Workspace address |
+| secret | `SMTP_PASSWORD` | an app password of that account (Google account → Security → 2-Step Verification on → App passwords → "Tabayyun CI") |
+| variable | `SHIP_MAIL_TO` | who gets the mail, comma-separated |
+| variable | `SMTP_HOST`, `SMTP_PORT` | optional; default `smtp.gmail.com` and `465` |
+
+Without them the deploys run as before and the log notes that no mail was sent.
+
+Auto-merge (ADR-0017): Settings → General → Pull Requests → **Allow auto-merge**, and the
+`protect-main` ruleset updated from `.github/rulesets/protect-main.json` so that it also
+requires the `CodeRabbit` status (CONTRIBUTING.md, "Repository settings").
+
 Release tags: import `.github/rulesets/protect-release-tags.json` (CONTRIBUTING.md,
 "Repository settings") so that only organisation admins can create, move or delete `v*`
 tags.

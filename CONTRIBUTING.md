@@ -45,8 +45,10 @@ series; `make dev-infra` starts Postgres+TimescaleDB and Keycloak via docker com
 4. Open a pull request against `main` and fill in the template. Link the issue with
    `Closes #n`. Keep PRs reviewable: one concern per PR, under ~500 changed lines where
    possible.
-5. CI must be green (`rust core`, `python bindings`, `python api`, `web`). Review threads
-   must be resolved before merge. Merge with a merge commit or squash; rebase-merge is off.
+5. CI must be green (`rust core`, `python bindings`, `python api`, `web`), CodeRabbit's review
+   complete (`CodeRabbit` status) and every review thread resolved. Merge with a merge commit
+   or squash; rebase-merge is off. Pull requests auto-merge once these hold (ADR-0017): enable
+   auto-merge when you open one, or open it as a draft while it waits for an owner step.
 
 ## Adding a check
 
@@ -67,8 +69,8 @@ contribute code or data you are not entitled to license this way, and never real
 ## Repository settings (maintainers)
 
 Protection for `main` is defined as a ruleset in `.github/rulesets/protect-main.json`:
-pull request required, the four CI jobs required, review threads resolved, no force-push,
-no deletion, no bypass. Committing the file does not enforce anything: a repository admin
+pull request required, the four CI jobs and CodeRabbit's review required, review threads
+resolved, no force-push, no deletion, no bypass. Committing the file does not enforce anything: a repository admin
 has to import it once under **Settings → Rules → Rulesets → New ruleset → Import a
 ruleset**, or with the GitHub CLI:
 
@@ -88,7 +90,8 @@ gh api -X PUT "repos/Sira-Labs/Tabayyun/rulesets/$id" --input .github/rulesets/p
 delete `v*` tags (a tag on `main` publishes a release, ADR-0016); import it the same way.
 
 Until the rulesets are active, the CI, review-thread and tag gates above are convention, not
-enforcement. Recommended repository settings (Settings → General): automatically delete head branches,
-allow auto-merge, always suggest updating pull request branches, rebase merging off.
+enforcement. Repository settings (Settings → General): **allow auto-merge** (required by
+ADR-0017), automatically delete head branches, always suggest updating pull request
+branches, rebase merging off.
 Settings → Code security: private vulnerability reporting, Dependabot alerts and security
 updates, secret scanning with push protection.

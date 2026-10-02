@@ -287,6 +287,15 @@ Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, S
 - [ ] Around 7 Oct: move both DMARC records from `p=none` to `p=quarantine` once the
       reports show only Google sending (reminder scheduled).
 
+## Shipping without merge clicks (ADR-0017, 2 Oct 2026)
+
+- [x] Ship email at the end of both deploy jobs (`.github/scripts/ship-mail.py`), auto-merge
+      and release reviews as conventions (`CLAUDE.md`, "Shipping"), CodeRabbit required in
+      `protect-main.json`.
+- [ ] Owner: Settings → General → Allow auto-merge; update the `protect-main` ruleset from
+      the JSON (adds `CodeRabbit`); SMTP app password into `SMTP_USERNAME`/`SMTP_PASSWORD`
+      and `SHIP_MAIL_TO` (`deploy/caprover.md`, section 5).
+
 ## Later sprints
 
 - [ ] **Scores that barely move** (26 Sep, owner: backlog for S10-6): on staging, `flow-a` had
