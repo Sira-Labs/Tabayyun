@@ -59,9 +59,15 @@ jobs:
             echo "::error::nothing to release: main has not changed since $PREV"
             exit 1
           fi
-          ok=$(gh run list --workflow release.yml --commit "$SHA" --status success --json databaseId --jq 'length')
-          if [ "${ok:-0}" = "0" ]; then
-            echo "::error::release.yml has not succeeded for $SHA: release what staging runs, after its deploy went live"
+          # A successful run is not enough: a run skips the deploy when staging is not set up.
+          # Only a push run on main whose live check passed shows that staging runs this commit.
+          ok=0
+          while read -r run_id; do
+            live=$(gh run view "$run_id" --json jobs --jq 'any(.jobs[]?; .name == "deploy to staging" and any(.steps[]?; .name == "wait until the new version is live" and .conclusion == "success"))')
+            if [ "$live" = "true" ]; then ok=1; break; fi
+          done < <(gh run list --workflow release.yml --branch main --event push --commit "$SHA" --status success --json databaseId --jq '.[].databaseId')
+          if [ "$ok" = "0" ]; then
+            echo "::error::staging has not been confirmed to run $SHA (release.yml's live check): release what staging runs"
             exit 1
           fi
       - name: tag and publish
@@ -75,14 +81,25 @@ jobs:
           PREV: ${{ steps.version.outputs.prev }}
           SHA: ${{ github.sha }}
           PRERELEASE: ${{ inputs.prerelease }}
+          REUSED: ${{ steps.version.outputs.reused }}
+        # A re-run after a failure here reuses the tag already at SHA (next-version.sh) and
+        # only creates what is still missing.
         run: |
           if [ -z "$GH_TOKEN" ]; then echo "::error::AUTOMATION_TOKEN is not set (deploy/caprover.md, section 5)"; exit 1; fi
-          git tag "$TAG" "$SHA"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "refs/tags/$TAG"
-          args=(--verify-tag --title "Tabayyun $TAG" --generate-notes)
-          if [ -n "$PREV" ]; then args+=(--notes-start-tag "$PREV"); fi
-          if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease --latest=false); fi
-          gh release create "$TAG" --repo "$REPO" "${args[@]}"
+          if [ "$REUSED" = "true" ]; then
+            echo "::notice::$TAG already points at $SHA: not tagged again"
+          else
+            git tag "$TAG" "$SHA"
+            git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "refs/tags/$TAG"
+          fi
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "::notice::the release $TAG exists already"
+          else
+            args=(--verify-tag --title "Tabayyun $TAG" --generate-notes)
+            if [ -n "$PREV" ]; then args+=(--notes-start-tag "$PREV"); fi
+            if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease --latest=false); fi
+            gh release create "$TAG" --repo "$REPO" "${args[@]}"
+          fi
           echo "url=$(gh release view "$TAG" --repo "$REPO" --json url --jq .url)" >> "$GITHUB_OUTPUT"
           echo "Published [$TAG]($(gh release view "$TAG" --repo "$REPO" --json url --jq .url))" >> "$GITHUB_STEP_SUMMARY"
       - name: email the release

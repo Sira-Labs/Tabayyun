@@ -25,7 +25,7 @@
           { "context": "python bindings" },
           { "context": "python api" },
           { "context": "web" },
-          { "context": "CodeRabbit" }
+          { "context": "CodeRabbit", "integration_id": 347564 }
         ]
       } }
   ]

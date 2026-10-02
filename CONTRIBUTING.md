@@ -89,6 +89,11 @@ id=$(gh api repos/Sira-Labs/Tabayyun/rulesets --jq '.[] | select(.name=="protect
 gh api -X PUT "repos/Sira-Labs/Tabayyun/rulesets/$id" --input .github/rulesets/protect-main.json
 ```
 
+If CodeRabbit is down, its required status never arrives and nothing can merge (the ruleset
+has no bypass). Remove the `CodeRabbit` entry from `protect-main`'s required status checks in
+the settings page, merge, and add it back with the source set to the CodeRabbit app, as in
+the JSON (ADR-0017).
+
 `.github/rulesets/protect-release-tags.json` lets only organisation admins create, move or
 delete `v*` tags (a tag on `main` publishes a release, ADR-0016); import it the same way.
 

@@ -25,7 +25,8 @@ The owner decided on 2 Oct 2026:
 - **Auto-merge for every pull request.** A pull request merges itself once the `protect-main`
   ruleset is met:
   - the four CI jobs are green;
-  - CodeRabbit's review is complete (its `CodeRabbit` commit status is required);
+  - CodeRabbit's review is complete (its `CodeRabbit` commit status is required, and only
+    from CodeRabbit's GitHub App, integration 347564, so nothing else can post it);
   - every review thread is resolved.
 
   `automerge.yml` enables GitHub's auto-merge (merge commit) on every non-draft pull request
@@ -76,8 +77,10 @@ The owner decided on 2 Oct 2026:
   CodeRabbit, resolved threads and Claude Code's own checks before it pushes. Production
   keeps its human approval. Dependabot majors merge once CI passes, so CI coverage of the
   web build and tests carries more weight.
-- A CodeRabbit outage keeps pull requests open, because its status never arrives; the owner
-  can merge by hand.
+- A CodeRabbit outage blocks every merge, manual ones included, because the required status
+  never arrives and the ruleset has no bypass. The owner then removes `CodeRabbit` from
+  `protect-main`'s required checks, merges, and adds it back (CONTRIBUTING.md, "Repository
+  settings").
 - `AUTOMATION_TOKEN` can push to the repository as the owner. It is scoped to this one
   repository, expires, and is renewed by the owner. It is read only by workflow files on
   `main`.
