@@ -145,15 +145,20 @@ jobs:
           done < <(jq -r '.tags[]' <<< "$META")
           docker buildx imagetools create "${args[@]}" "$IMAGE"
 
-  # main and v* tags deploy to staging only (ADR-0016). Production gets the staging-tested
+  # main deploys to staging only (ADR-0016). Production gets the staging-tested
   # digest through promote.yml, behind the `production` environment's required reviewer.
   deploy-staging:
     name: deploy to staging
     needs: images
+    # A v* tag only adds versioned images: it is cut for a commit staging already runs
+    # (cut-release.yml, ADR-0017).
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
+    outputs:
+      deployed: ${{ steps.gate.outputs.on }}
     # CAPROVER_SERVER, CAPROVER_WEB_URL and the CAPROVER_APP_TOKEN_* secrets belong to the
     # `staging` environment. Environment values are only visible inside steps, so every step
     # carries the gate; the job is a no-op until CAPROVER_SERVER is set there.
@@ -203,3 +208,17 @@ jobs:
           WANT: ${{ github.sha }}
           CHECK_WORKER: ${{ steps.gate.outputs.worker }}
         run: .github/scripts/wait-live.sh
+
+  # Every main commit staging reported live becomes a release (ADR-0017): a patch, or a minor
+  # or major when the merge commit says `[minor]` or `[major]`.
+  github-release:
+    name: publish release
+    needs: deploy-staging
+    if: github.event_name == 'push' && needs.deploy-staging.outputs.deployed == 'true'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/cut-release.yml
+    with:
+      sha: ${{ github.sha }}
+    secrets: inherit

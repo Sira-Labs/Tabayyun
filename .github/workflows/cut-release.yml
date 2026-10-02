@@ -1,14 +1,24 @@
 name: cut release
 
-# Publishes a version of main (ADR-0017): tags the commit, creates the GitHub release with notes
-# from the merged pull requests, and emails it. Run by Claude Code or the owner: Actions → cut
-# release → Run workflow on main.
-#   patch  a finished spec or a set of fixes
-#   minor  a finished sprint (a stable minor or major release gets slides and a review meeting)
-#   major  a product milestone, decided by the owner
-# The v* tag then builds versioned images and deploys them to staging (release.yml);
-# production is promoted separately (promote.yml).
+# Publishes a version (ADR-0017): tags the commit, and creates the GitHub release with notes
+# from the merged pull requests. The "Tabayyun release notifier" routine then emails the owner
+# about it, and adds slides and a calendar slot for a stable minor or major release.
+#
+# - Automatic: release.yml calls it for every main commit right after staging reported that
+#   commit live. The merge commit's message picks the part to raise: a line starting with
+#   `[minor]` (a finished sprint) or `[major]` (a milestone the owner names), else a patch. The
+#   pull request's title carries the marker; GitHub's merge commit includes the title.
+# - By hand: Actions → cut release → Run workflow on main, to choose the part or cut a release
+#   candidate (vX.Y.Z-rc.N). It releases main's head and checks that staging runs it.
+#
+# Without any tag, the first release follows the code's version (api/pyproject.toml).
 on:
+  workflow_call:
+    inputs:
+      sha:
+        description: The main commit staging just reported live
+        type: string
+        required: true
   workflow_dispatch:
     inputs:
       bump:
@@ -23,14 +33,8 @@ on:
 
 permissions:
   contents: read
-  # The check that release.yml deployed this commit to staging.
+  # The check that release.yml deployed the commit to staging (runs by hand).
   actions: read
-  # The release mail reads the titles of the pull requests it lists.
-  pull-requests: read
-
-concurrency:
-  group: cut-release
-  cancel-in-progress: false
 
 jobs:
   release:
@@ -38,18 +42,31 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # One release at a time, so two quick merges never claim the same version. A queued run
+    # loses nothing: the next release's notes list its pull requests too.
+    concurrency:
+      group: cut-release
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ inputs.sha || github.sha }}
           persist-credentials: false
       - id: version
         name: next version
         env:
+          SHA: ${{ inputs.sha || github.sha }}
+          # Empty when called after a deploy: the commit message decides.
           BUMP: ${{ inputs.bump }}
-          PRERELEASE: ${{ inputs.prerelease }}
-        run: .github/scripts/next-version.sh
+          PRERELEASE: ${{ inputs.prerelease || 'false' }}
+        run: |
+          BASE="v$(sed -n 's/^version = "\(.*\)"/\1/p' api/pyproject.toml | head -n 1)"
+          export BASE
+          .github/scripts/next-version.sh
       - name: something to release, and live on staging
+        # Called by release.yml, the caller has just seen staging serve the commit.
+        if: inputs.sha == '' && steps.version.outputs.reused != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PREV: ${{ steps.version.outputs.prev }}
@@ -71,21 +88,24 @@ jobs:
             exit 1
           fi
       - name: tag and publish
-        id: publish
         env:
-          # The owner's token: a tag pushed with GITHUB_TOKEN would start no workflow, and only
-          # organisation admins may create v* tags (protect-release-tags).
+          # The owner's token: only organisation admins may create v* tags
+          # (protect-release-tags), and a tag pushed with GITHUB_TOKEN would start no workflow,
+          # so the versioned images (release.yml on the tag) would never be built.
           GH_TOKEN: ${{ secrets.AUTOMATION_TOKEN }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
           PREV: ${{ steps.version.outputs.prev }}
-          SHA: ${{ github.sha }}
-          PRERELEASE: ${{ inputs.prerelease }}
+          SHA: ${{ inputs.sha || github.sha }}
+          PRERELEASE: ${{ inputs.prerelease || 'false' }}
           REUSED: ${{ steps.version.outputs.reused }}
-        # A re-run after a failure here reuses the tag already at SHA (next-version.sh) and
-        # only creates what is still missing.
+        # A re-run after a failure here reuses the tag already at SHA (next-version.sh) and only
+        # creates what is still missing.
         run: |
-          if [ -z "$GH_TOKEN" ]; then echo "::error::AUTOMATION_TOKEN is not set (deploy/caprover.md, section 5)"; exit 1; fi
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::AUTOMATION_TOKEN is not set (deploy/caprover.md, section 5): $TAG not published"
+            exit 0
+          fi
           if [ "$REUSED" = "true" ]; then
             echo "::notice::$TAG already points at $SHA: not tagged again"
           else
@@ -94,27 +114,15 @@ jobs:
           fi
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             echo "::notice::the release $TAG exists already"
-          else
-            args=(--verify-tag --title "Tabayyun $TAG" --generate-notes)
-            if [ -n "$PREV" ]; then args+=(--notes-start-tag "$PREV"); fi
-            if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease --latest=false); fi
-            gh release create "$TAG" --repo "$REPO" "${args[@]}"
+            exit 0
           fi
-          echo "url=$(gh release view "$TAG" --repo "$REPO" --json url --jq .url)" >> "$GITHUB_OUTPUT"
+          args=(--verify-tag --title "Tabayyun $TAG")
+          if [ -n "$PREV" ]; then
+            args+=(--generate-notes --notes-start-tag "$PREV")
+          else
+            # The first release: its own merge commit only; earlier work is in CHANGELOG.md.
+            args+=(--notes "$(git log -1 --format=%B "$SHA")"$'\n\nFirst published release; earlier changes are listed in CHANGELOG.md.')
+          fi
+          if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease --latest=false); fi
+          gh release create "$TAG" --repo "$REPO" "${args[@]}"
           echo "Published [$TAG]($(gh release view "$TAG" --repo "$REPO" --json url --jq .url))" >> "$GITHUB_STEP_SUMMARY"
-      - name: email the release
-        continue-on-error: true
-        env:
-          TAG: ${{ steps.version.outputs.tag }}
-          PREV: ${{ steps.version.outputs.prev }}
-          WANT: ${{ github.sha }}
-          PRERELEASE: ${{ inputs.prerelease }}
-          REVIEW: ${{ steps.version.outputs.review }}
-          RELEASE_URL: ${{ steps.publish.outputs.url }}
-          GITHUB_TOKEN: ${{ github.token }}
-          SMTP_HOST: ${{ vars.SMTP_HOST }}
-          SMTP_PORT: ${{ vars.SMTP_PORT }}
-          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          SHIP_MAIL_TO: ${{ vars.SHIP_MAIL_TO }}
-        run: .github/scripts/release-mail.py

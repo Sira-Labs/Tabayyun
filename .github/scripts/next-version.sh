@@ -2,13 +2,16 @@
 # The release tag for the commit SHA (default HEAD), from the existing v* tags (cut-release.yml,
 # ADR-0017).
 #
-#   BUMP=patch|minor|major PRERELEASE=true|false [SHA=<commit>] next-version.sh
+#   [BUMP=patch|minor|major] [PRERELEASE=true|false] [SHA=<commit>] [BASE=vX.Y.Z] next-version.sh
 #
+# Without BUMP (an automatic release after a staging deploy) the bump comes from SHA's commit
+# message: a line starting with `[major]` or `[minor]` raises that part, anything else is a
+# patch (Suffa's convention).
 # Only tags in SHA's history count, so a tag on an unmerged branch never sets the base. A
 # re-run after a failed publish reuses the tag of the same kind (stable or candidate) that
 # already points at SHA, so the version is not skipped; it fails when that tag is not what
-# BUMP would give. Otherwise the next tag is computed; without any tag the base is v0.0.0,
-# so the first minor release is v0.1.0.
+# BUMP would give. Otherwise the next tag is computed; without any tag the base is BASE
+# (default v0.0.0; release.yml passes the code's version), so the first release follows it.
 #
 # Prints, and appends to $GITHUB_OUTPUT when set:
 #   tag=     vX.Y.Z, or vX.Y.Z-rc.N for a release candidate
@@ -19,9 +22,17 @@
 #   review=  true for a stable minor or major release (it gets a presentation and a meeting)
 set -euo pipefail
 
-bump="${BUMP:?BUMP must be patch, minor or major}"
 pre="${PRERELEASE:-false}"
 sha=$(git rev-parse "${SHA:-HEAD}^{commit}")
+base_default="${BASE:-v0.0.0}"
+bump="${BUMP:-}"
+if [ -z "$bump" ]; then
+  message=$(git log -1 --format=%B "$sha")
+  if grep -q '^\[major\]' <<< "$message"; then bump='major'
+  elif grep -q '^\[minor\]' <<< "$message"; then bump='minor'
+  else bump='patch'
+  fi
+fi
 stable_re='^v[0-9]+\.[0-9]+\.[0-9]+$'
 case "$bump" in patch | minor | major) ;; *) echo "::error::BUMP must be patch, minor or major, not '$bump'" >&2; exit 2 ;; esac
 
@@ -50,8 +61,8 @@ if [ -n "$existing" ]; then
   version="${tag%%-rc.*}"
   # The stable release before this version (the version itself may exist as a stable tag).
   base=$({ stable_tags; echo "$version"; } | sort -u -V -r | below "$version" | head -n 1)
-  if [ "$(bumped "$base")" != "$version" ]; then
-    echo "::error::$tag already points at this commit but is not a $bump release after ${base:-v0.0.0}; re-run with the bump that made it" >&2
+  if [ "$(bumped "${base:-$base_default}")" != "$version" ]; then
+    echo "::error::$tag already points at this commit but is not a $bump release after ${base:-$base_default}; re-run with the bump that made it" >&2
     exit 1
   fi
   if [ "$pre" = "true" ]; then
@@ -63,7 +74,7 @@ if [ -n "$existing" ]; then
 else
   reused=false
   stable=$(stable_tags | head -n 1)
-  version=$(bumped "$stable")
+  version=$(bumped "${stable:-$base_default}")
   prev="$stable"
   if [ "$pre" = "true" ]; then
     last_rc=$(tags "$version-rc.*" | head -n 1)
@@ -81,7 +92,7 @@ fi
 
 review=false
 if [[ "$tag" =~ $stable_re ]] && [[ "$tag" == *.0 ]]; then review=true; fi
-for line in "tag=$tag" "prev=$prev" "reused=$reused" "review=$review"; do
+for line in "tag=$tag" "prev=$prev" "reused=$reused" "review=$review" "bump=$bump"; do
   echo "$line"
   if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "$line" >> "$GITHUB_OUTPUT"; fi
 done
