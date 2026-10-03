@@ -66,7 +66,12 @@ export function FindingsTimeline({ findings, window, seriesNames, multiSeries, o
                       aria-label={`${f.severity} ${f.check_id}: ${f.summary}, ${formatLocalTime(f.window.start)}, ${formatDuration(f.window.end - f.window.start)}`}
                       title={`${f.summary}\n${formatLocalTime(f.window.start)} · ${formatDuration(f.window.end - f.window.start)}`}
                       className={`absolute inset-y-0.5 rounded-sm opacity-90 hover:opacity-100 focus:outline-2 focus:outline-offset-1 focus:outline-sky-600 ${severityClass[f.severity] ?? ""}`}
-                      style={{ left: `${left * 100}%`, width: `max(${MIN_MARK_PX}px, ${width * 100}%)` }}
+                      style={{
+                        left: `${left * 100}%`,
+                        width: `max(${MIN_MARK_PX}px, ${width * 100}%)`,
+                        // A mark at the window's end keeps its minimum width inside the track.
+                        maxWidth: `calc(100% - ${left * 100}%)`,
+                      }}
                     />
                   );
                 })}

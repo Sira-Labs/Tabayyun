@@ -24,6 +24,8 @@ export type RunSeries = { id: string; external_id: string; score: number };
 
 export type Run = {
   id: string;
+  /** Set on a dataset run (spec 008); absent or null on an upload run. */
+  dataset_id?: string | null;
   trigger: string;
   status: RunStatus;
   window: NsWindow | null;

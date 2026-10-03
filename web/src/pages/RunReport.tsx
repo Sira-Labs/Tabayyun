@@ -253,7 +253,8 @@ function windowSummary(run: Run, declaredStepNs: number | null | undefined): str
   const span = run.window.end - run.window.start;
   const n = run.stats.n_samples;
   const parts = [formatSpan(span)];
-  const single = run.series.length <= 1;
+  // A dataset run's series may differ in step, even when the dataset holds only one today.
+  const single = run.series.length <= 1 && !run.dataset_id;
   if (single && declaredStepNs) parts.push(formatStep(declaredStepNs));
   else if (single && n !== undefined && n >= 2 && span > 0) parts.push(`≈ ${formatStep(span / (n - 1))}`);
   return parts.join(" · ");
