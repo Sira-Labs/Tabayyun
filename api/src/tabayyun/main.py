@@ -1,8 +1,8 @@
 """FastAPI application factory.
 
 Exposes health, version, the login (spec 013), stateless check execution, runs, findings and
-series results, and owns the process-wide database engine (spec 001). Every other `/api` router
-requires a principal; routers for workspaces and corrections are added per
+series results, the caller's workspaces (spec 014), and owns the process-wide database engine
+(spec 001). Every other `/api` router requires a principal; routers for corrections are added per
 `docs/architecture/03-system-architecture.md`.
 """
 
@@ -21,7 +21,7 @@ from tabayyun.authz import get_principal
 from tabayyun.db import DB_OK, check_db, guard_schema, make_engine, make_session_factory, worker_commits
 from tabayyun.db.roles import check_login, is_rls_violation
 from tabayyun.jobs.names import WORKER_APPLICATION_NAME
-from tabayyun.routers import auth, checks, datasets, findings, groups, runs, series, sources
+from tabayyun.routers import auth, checks, datasets, findings, groups, runs, series, sources, workspaces
 from tabayyun.services import runs as runs_service
 from tabayyun.services.cache import RunCache
 from tabayyun.settings import Settings, get_settings
@@ -77,7 +77,7 @@ def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = No
     # Everything else needs a principal (spec 013), also routers that do not authorize() a
     # workspace, such as the stateless check run. FastAPI resolves it once per request.
     signed_in = [Depends(get_principal)]
-    for router in (checks, runs, findings, series, sources, groups, datasets):
+    for router in (checks, runs, findings, series, sources, groups, datasets, workspaces):
         app.include_router(router.router, dependencies=signed_in)
 
     @app.exception_handler(DBAPIError)

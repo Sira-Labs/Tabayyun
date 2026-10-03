@@ -383,7 +383,7 @@ async def test_require_recent_passkey_gate(env):
 
 
 async def test_cross_tenant_isolation_with_sessions(env):
-    """A session in org B cannot see org A's workspace; org A's owner can."""
+    """A session in org B cannot see org A's workspace or its rows; org A's owner can."""
     sql(
         env,
         "INSERT INTO sources (id, org_id, workspace_id, type, name) "
@@ -405,7 +405,10 @@ async def test_cross_tenant_isolation_with_sessions(env):
         )
         await sign_in(env, b, email=OTHER)
         assert (await b.get("/api/auth/me")).json()["org"]["id"] == str(ORG_B)
-        assert (await b.get("/api/sources")).status_code == 404
+        # Without a header B acts in its own workspace (spec 014); naming A's gives 404.
+        assert (await b.get("/api/sources")).json()["items"] == []
+        named_a = {"X-Tabayyun-Workspace": str(DEFAULT_WORKSPACE_ID)}
+        assert (await b.get("/api/sources", headers=named_a)).status_code == 404
         assert [s["name"] for s in (await a.get("/api/sources")).json()["items"]] == ["a"]
 
 
