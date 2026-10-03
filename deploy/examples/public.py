@@ -543,20 +543,29 @@ def upload_all(api: Api, built: list[Built], labels: dict[str, list[list[str]]])
     names = {b.series.name: b for b in built}
     group_name, members = ETT_GROUP
     if all(m in names and m in ids for m in members):
-        # A second run reuses the group and dataset by name (group names are unique).
-        group = named(api, "/api/series-groups", group_name) or api.post_json(
-            "/api/series-groups",
-            {"name": group_name, "kind": "related",
-             "members": [{"series_id": ids[m], "role": "member"} for m in members]},
-        )  # fmt: skip
+        wanted = [ids[m] for m in members]
         first = min(names[m].first for m in members)
         last = max(names[m].last for m in members)
         end = iso(datetime.fromtimestamp(ns(last) / 1e9, tz=UTC) + timedelta(hours=1))
-        dataset = named(api, "/api/datasets", ETT_DATASET) or api.post_json(
-            "/api/datasets",
-            {"name": ETT_DATASET, "series_ids": [ids[m] for m in members],
-             "window": {"start": first, "end": end}},
-        )  # fmt: skip
+        # A second run reuses the group and dataset by name (group names are unique), but only
+        # when they still hold the series uploaded now: a dataset run reads its stored series.
+        group = named(api, "/api/series-groups", group_name)
+        if group is None:
+            group = api.post_json(
+                "/api/series-groups",
+                {"name": group_name, "kind": "related",
+                 "members": [{"series_id": i, "role": "member"} for i in wanted]},
+            )  # fmt: skip
+        elif group["kind"] != "related" or sorted(m["series_id"] for m in group["members"]) != sorted(wanted):
+            raise SeedError(f"the existing group {group_name!r} holds other series; rename or delete it")
+        dataset = named(api, "/api/datasets", ETT_DATASET)
+        if dataset is None:
+            dataset = api.post_json(
+                "/api/datasets",
+                {"name": ETT_DATASET, "series_ids": wanted, "window": {"start": first, "end": end}},
+            )
+        elif sorted(ref["id"] for ref in dataset["series"]) != sorted(wanted):
+            raise SeedError(f"the existing dataset {ETT_DATASET!r} holds other series; rename or delete it")
         created = api.post_json("/api/runs", {"dataset_id": dataset["id"]})
         run = wait_run(api, created["id"])
         print(f"  group {group['name']}: dataset run {run['id']} {run['status']}")

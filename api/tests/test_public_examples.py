@@ -213,3 +213,57 @@ def test_redirect_to_plain_http_is_refused() -> None:
         handler.redirect_request(req, None, 302, "Found", {}, "http://example.test/a.csv")
     follow = handler.redirect_request(req, None, 302, "Found", {}, "https://mirror.test/a.csv")
     assert follow is not None and follow.full_url == "https://mirror.test/a.csv"
+
+
+class FakeApi:
+    """Enough of the API for `upload_all`: runs succeed at once, lists return `existing`."""
+
+    def __init__(self, existing: dict[str, list[dict]]) -> None:
+        self.existing = existing
+        self.posted: list[str] = []
+
+    def post_form(self, path: str, fields: dict[str, str], filename: str, data: bytes) -> dict:
+        return {"id": f"run-{fields['series_id']}"}
+
+    def post_json(self, path: str, payload: dict) -> dict:
+        self.posted.append(path)
+        return {"id": "dataset-run" if path == "/api/runs" else f"new{path}", "name": payload.get("name", "")}
+
+    def patch_json(self, path: str, payload: dict) -> dict:
+        return {}
+
+    def get(self, path: str) -> dict:
+        if path.startswith("/api/runs/"):
+            run_id = path.rsplit("/", 1)[1]
+            series = [] if run_id == "dataset-run" else [{"id": f"uuid-{run_id.removeprefix('run-')}"}]
+            return {"id": run_id, "status": "succeeded", "series": series}
+        for prefix, items in self.existing.items():
+            if path.startswith(prefix):
+                return {"items": items}
+        return {"items": []}
+
+
+def _ett_built() -> list:
+    rows = b"ts,value\n2016-07-01T00:00:00Z,1\n"
+    return [
+        pub.Built(s, rows, 1, "2016-07-01T00:00:00Z", "2016-07-01T00:00:00Z")
+        for s in pub.CATALOGUE
+        if s.name in pub.ETT_GROUP[1]
+    ]
+
+
+def test_reused_group_with_other_members_is_refused() -> None:
+    group = {"name": pub.ETT_GROUP[0], "kind": "related", "members": [{"series_id": "someone-else"}]}
+    api = FakeApi({"/api/series-groups": [group]})
+    with pytest.raises(pub.SeedError, match="holds other series"):
+        pub.upload_all(api, _ett_built(), {})
+    assert "/api/runs" not in api.posted
+
+
+def test_matching_group_and_dataset_are_reused() -> None:
+    wanted = [f"uuid-{m}" for m in pub.ETT_GROUP[1]]
+    group = {"name": pub.ETT_GROUP[0], "kind": "related", "members": [{"series_id": i} for i in wanted]}
+    dataset = {"id": "ds-1", "name": pub.ETT_DATASET, "series": [{"id": i} for i in reversed(wanted)]}
+    api = FakeApi({"/api/series-groups": [group], "/api/datasets": [dataset]})
+    assert pub.upload_all(api, _ett_built(), {}) is True
+    assert api.posted == ["/api/runs"]  # nothing created again, only the dataset run

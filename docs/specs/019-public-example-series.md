@@ -79,7 +79,8 @@ followed by one dataset run.
    - Uploads each series through `POST /api/runs`, with its unit and physical limits, and waits
      for the run.
    - Sets the metadata on each series, found by the series id its run returns, never by name.
-   - On a second run, reuses the ETT group and dataset of the same name.
+   - On a second run, reuses the ETT group and dataset of the same name when they hold the
+     uploaded series, and exits 2 when they hold others.
    - Creates the ETT group and dataset and runs the dataset when every ETT series is selected.
    - Prints the findings per series by check.
    - Prints, for each NAB series, the number of labelled windows that some finding overlaps,
