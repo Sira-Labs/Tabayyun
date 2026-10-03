@@ -26,6 +26,9 @@ Cookies) and pass it in the environment, not on the command line:
 | `outdoor-temp`, `hvac-load` | load stops following temperature on day 29 | `tby.correlation_break` |
 | `flow-a`, `flow-b`, `flow-c` | `flow-c` reads 8 % high on days 31–33 | `tby.redundant_disagreement` |
 | `feeder-in`, `out-1..3` | `out-2` under-reads by 30 % on days 36–37 | `tby.balance_residual` |
+
+For real data instead of planted faults, `public.py` beside this file loads well-known
+public series (NAB, ETT, OPSD, UCI household power, Jena weather; spec 019).
 """
 
 # A command-line tool: it prints its progress, opens the URL the operator names, and its
@@ -94,6 +97,9 @@ class Api:
 
     def post_json(self, path: str, payload: dict) -> dict:
         return self._send("POST", path, json.dumps(payload).encode(), "application/json")
+
+    def patch_json(self, path: str, payload: dict) -> dict:
+        return self._send("PATCH", path, json.dumps(payload).encode(), "application/json")
 
     def post_form(self, path: str, fields: dict[str, str], filename: str, data: bytes) -> dict:
         boundary = uuid.uuid4().hex
