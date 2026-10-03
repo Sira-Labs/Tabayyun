@@ -5,6 +5,7 @@ import { vi } from "vitest";
 import { makeRouter } from "../router";
 import type { Me } from "../auth";
 import type { Run } from "../types";
+import { setWorkspaceId, type Workspace } from "../workspace";
 
 export type Route = (url: string, init?: RequestInit) => unknown | Promise<unknown>;
 
@@ -22,13 +23,28 @@ export const ME: Me = {
   passkey_fresh: false,
 };
 
+/** The one workspace most tests run in, where the signed-in owner is admin. */
+export const WORKSPACE: Workspace = { id: "w1", name: "default", timezone: "UTC", role: "admin" };
+
 /** Stub `fetch` with a router function; a returned Response is passed through, anything else is JSON.
- * `/api/auth/me` answers `me` (the signed-in `ME` unless given). */
-export function stubFetch(route: Route, { me = ME }: { me?: Me | Response } = {}) {
+ * `/api/auth/me` answers `me` (the signed-in `ME` unless given), `/api/workspaces` the given
+ * workspaces (`WORKSPACE` alone unless given). The stored workspace choice is cleared. */
+export function stubFetch(
+  route: Route,
+  {
+    me = ME,
+    workspaces = [WORKSPACE],
+  }: { me?: Me | Response | (() => Me | Response); workspaces?: Workspace[] | (() => Workspace[]) } = {},
+) {
+  setWorkspaceId(null);
   const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.pathname + input.search : input.url;
     if (url.startsWith("/api/version")) return json({ version: "0.1.0", env: "test", schema_revision: "0002" });
-    if (url === "/api/auth/me") return me instanceof Response ? me.clone() : json(me);
+    if (url === "/api/auth/me") {
+      const answer = typeof me === "function" ? me() : me;
+      return answer instanceof Response ? answer.clone() : json(answer);
+    }
+    if (url === "/api/workspaces") return json(typeof workspaces === "function" ? workspaces() : workspaces);
     const out = await route(url, init);
     return out instanceof Response ? out : json(out);
   });

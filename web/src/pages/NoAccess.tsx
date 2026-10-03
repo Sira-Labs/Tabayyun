@@ -1,9 +1,12 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { signOut } from "../auth";
 import { PlainFrame, buttonClass } from "../components/Brand";
 
-/** Signed in, but without a membership in any organisation (403 `no_access`). */
+/** Signed in, but without a membership in any organisation (403 `no_access`). "Check again"
+ * asks `/api/auth/me` once more, which joins an invitation sent since (spec 014). */
 export function NoAccess({ email }: { email: string | null }) {
+  const client = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   return (
     <PlainFrame>
@@ -13,11 +16,16 @@ export function NoAccess({ email }: { email: string | null }) {
         </h1>
         <p>
           You are signed in{email ? <> as <strong>{email}</strong></> : null}, but this account has no access to an
-          organisation yet. Ask an owner of your organisation to invite you, then sign in again.
+          organisation yet. Ask an admin of your organisation to invite this email address, then check again.
         </p>
-        <button type="button" className={buttonClass} onClick={() => signOut().catch((e: Error) => setError(e.message))}>
-          Sign out
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={buttonClass} onClick={() => void client.invalidateQueries({ queryKey: ["me"] })}>
+            Check again
+          </button>
+          <button type="button" className={buttonClass} onClick={() => signOut().catch((e: Error) => setError(e.message))}>
+            Sign out
+          </button>
+        </div>
         {error && (
           <p role="alert" className="text-red-700 dark:text-red-400">
             Could not sign out: {error}

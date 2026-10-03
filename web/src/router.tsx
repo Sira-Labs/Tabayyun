@@ -1,6 +1,7 @@
 import { Outlet, createRootRoute, createRoute, createRouter, redirect, type RouterHistory } from "@tanstack/react-router";
 import { setUnauthorizedHandler } from "./api";
 import { Account } from "./pages/Account";
+import { ADMIN_TABS, Admin, type AdminTab } from "./pages/admin/Admin";
 import { Layout } from "./pages/Layout";
 import { Login } from "./pages/Login";
 import { RunForm } from "./pages/RunForm";
@@ -28,6 +29,13 @@ const runsRoute = createRoute({ getParentRoute: () => appRoute, path: "/runs", c
 const newRunRoute = createRoute({ getParentRoute: () => appRoute, path: "/runs/new", component: RunForm });
 const runRoute = createRoute({ getParentRoute: () => appRoute, path: "/runs/$runId", component: RunReport });
 const accountRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings/account", component: Account });
+const adminRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/admin",
+  validateSearch: (search: Record<string, unknown>): { tab?: AdminTab } =>
+    ADMIN_TABS.includes(search.tab as AdminTab) ? { tab: search.tab as AdminTab } : {},
+  component: Admin,
+});
 
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -38,7 +46,7 @@ const loginRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  appRoute.addChildren([indexRoute, runsRoute, newRunRoute, runRoute, accountRoute]),
+  appRoute.addChildren([indexRoute, runsRoute, newRunRoute, runRoute, accountRoute, adminRoute]),
   loginRoute,
 ]);
 
