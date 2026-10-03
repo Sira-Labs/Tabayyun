@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { adminApi, WORKSPACE_ROLES, type AdminWorkspace } from "../../admin";
+import { DEFAULT_WORKSPACE_ID, adminApi, WORKSPACE_ROLES, type AdminWorkspace } from "../../admin";
 import { buttonClass } from "../../components/Brand";
 import type { WorkspaceRole } from "../../workspace";
 import { ErrorLine, RoleSelect, dangerButtonClass, dialogs, inputClass, linkButtonClass, panelClass, selectClass } from "./ui";
@@ -107,7 +107,7 @@ function WorkspaceCard({ workspace, canDelete }: { workspace: AdminWorkspace; ca
           <button type="button" className={linkButtonClass} onClick={() => setEditing((v) => !v)}>
             Edit
           </button>
-          {canDelete && (
+          {canDelete && workspace.id !== DEFAULT_WORKSPACE_ID && (
             <button
               type="button"
               className={dangerButtonClass}
@@ -178,6 +178,9 @@ function AccessPanel({ workspace }: { workspace: AdminWorkspace }) {
       <ErrorLine error={error} prefix="Could not change access" />
       <section aria-label={`People in ${workspace.name}`} className="space-y-2">
         <h3 className="font-medium">People</h3>
+        {access.data.members.length === 0 && access.data.org_admins.length === 0 && (
+          <p className="text-slate-600 dark:text-slate-400">No one has a direct role here yet.</p>
+        )}
         <ul className="space-y-1">
           {access.data.members.map((m) => (
             <li key={m.user_id} aria-label={m.email} className="flex flex-wrap items-center gap-2">

@@ -29,6 +29,7 @@ export function WorkspacePicker({ workspaces, current }: { workspaces: Workspace
     <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
       Workspace
       <select
+        aria-label="Workspace"
         value={current.id}
         onChange={(e) => choose(e.target.value)}
         className="min-h-9 rounded border border-slate-300 bg-white px-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"

@@ -109,14 +109,24 @@ function Invite() {
         </label>
         <label className="flex flex-col gap-1 text-sm">
           Role in the organisation
-          <select className={selectClass} value={orgRole} onChange={(e) => setOrgRole(e.target.value as "member" | "admin")}>
+          <select
+            aria-label="Role in the organisation"
+            className={selectClass}
+            value={orgRole}
+            onChange={(e) => setOrgRole(e.target.value as "member" | "admin")}
+          >
             <option value="member">member</option>
             <option value="admin">admin</option>
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          Workspace
-          <select className={selectClass} value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)}>
+          Workspace (optional)
+          <select
+            aria-label="Workspace to give access to"
+            className={selectClass}
+            value={workspaceId}
+            onChange={(e) => setWorkspaceId(e.target.value)}
+          >
             <option value="">none</option>
             {workspaces.data?.map((w) => (
               <option key={w.id} value={w.id}>
@@ -269,7 +279,11 @@ function MemberList({ myRole }: { myRole: OrgRole }) {
           ))}
         </ul>
       )}
-      {members.isSuccess && items.length === 0 && <p className="text-slate-600 dark:text-slate-400">No members match.</p>}
+      {members.isSuccess && items.length === 0 && (
+        <p className="text-slate-600 dark:text-slate-400">
+          {search ? "No members match." : "No members yet. Invite someone above."}
+        </p>
+      )}
       {members.hasNextPage && (
         <button type="button" className={buttonClass} disabled={members.isFetchingNextPage} onClick={() => void members.fetchNextPage()}>
           Load more

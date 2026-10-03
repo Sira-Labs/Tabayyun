@@ -15,7 +15,7 @@ describe("Admin: members and invitations", () => {
     renderApp("/admin");
 
     await user.type(await screen.findByLabelText("Email"), "ada@example.org");
-    await user.selectOptions(screen.getByLabelText("Workspace"), "w1");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Workspace to give access to" }), "w1");
     await user.selectOptions(screen.getByRole("combobox", { name: "Role in the workspace" }), "editor");
     await user.click(screen.getByRole("button", { name: "Invite" }));
 
