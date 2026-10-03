@@ -56,6 +56,8 @@ MEMBER_ROLES = ("member", "input", "output")
 ORG_ROLES = ("owner", "admin", "member")
 WORKSPACE_ROLES = ("admin", "editor", "viewer")
 SIGN_IN_METHODS = ("google", "github", "passkey")
+INVITABLE_ORG_ROLES = ("admin", "member")
+EMAIL_STATUSES = ("not_configured", "queued", "sent", "failed")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -489,3 +491,76 @@ class Coverage(OrgMixin, Base):
     written_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class Invitation(OrgMixin, Base):
+    """An invitation bound to an email (spec 014): accepted when that verified email signs in.
+
+    At most one is open per org and email; an expired one is revoked when a new one is made.
+    """
+
+    __tablename__ = "invitations"
+    __table_args__ = (
+        CheckConstraint(_in("org_role", INVITABLE_ORG_ROLES), name="org_role"),
+        CheckConstraint(
+            f"workspace_role IS NULL OR {_in('workspace_role', WORKSPACE_ROLES)}", name="workspace_role"
+        ),
+        CheckConstraint("(workspace_id IS NULL) = (workspace_role IS NULL)", name="workspace_grant"),
+        CheckConstraint(_in("email_status", EMAIL_STATUSES), name="email_status"),
+        CheckConstraint("email = lower(email)", name="email_lower"),
+        Index(
+            "uq_invitations_open_email",
+            "org_id",
+            "email",
+            unique=True,
+            postgresql_where=text("accepted_at IS NULL AND revoked_at IS NULL"),
+        ),
+        Index("ix_invitations_email", "email"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    org_role: Mapped[str] = mapped_column(Text, nullable=False)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE")
+    )
+    workspace_role: Mapped[str | None] = mapped_column(Text)
+    invited_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = _created_at()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    accepted_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    email_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="not_configured")
+    email_error: Mapped[str | None] = mapped_column(Text)
+
+
+class AuditEvent(OrgMixin, Base):
+    """One authz-relevant change (spec 014). Append-only: the app login may only insert and read.
+
+    `workspace_id` has no foreign key, so events outlive a deleted workspace; `actor_user_id`
+    null means the system (an invitation accepted at sign-in).
+    """
+
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        Index("ix_audit_events_org_created", "org_id", text("created_at DESC"), text("id DESC")),
+        Index("ix_audit_events_workspace_created", "org_id", "workspace_id", text("created_at DESC")),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    target_type: Mapped[str] = mapped_column(Text, nullable=False)
+    target_id: Mapped[str] = mapped_column(Text, nullable=False)
+    details: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    ip_address: Mapped[str | None] = mapped_column(INET)
+    user_agent: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()

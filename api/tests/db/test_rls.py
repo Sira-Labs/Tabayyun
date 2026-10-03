@@ -44,6 +44,8 @@ TENANT_TABLES = sorted(
     key=str,
 )
 INSUFFICIENT_PRIVILEGE = "42501"
+# Statements the app login has no privilege for at all (spec 014): refused before any policy.
+NO_PRIVILEGE = {"invitations": {"DELETE"}, "audit_events": {"UPDATE", "DELETE"}}
 UNIQUE_VIOLATION = "23505"
 
 
@@ -147,6 +149,23 @@ def _seed_memberships(owner: Engine) -> None:
         ws=DEFAULT_WORKSPACE_ID,
         user=VIEWER,
     )
+    # Spec 014: an invitation and an audit event per org.
+    for org, inviter in ((DEFAULT_ORG_ID, BOOTSTRAP_USER_ID), (ORG_B, USER_B)):
+        _owner_sql(
+            owner,
+            "INSERT INTO invitations (id, org_id, email, org_role, invited_by, expires_at) "
+            "VALUES (gen_random_uuid(), :org, 'invitee@example.test', 'member', :by, "
+            "now() + interval '1 day')",
+            org=org,
+            by=inviter,
+        )
+        _owner_sql(
+            owner,
+            "INSERT INTO audit_events (id, org_id, actor_user_id, action, target_type, target_id) "
+            "VALUES (gen_random_uuid(), :org, :by, 'org.renamed', 'org', :org)",
+            org=org,
+            by=inviter,
+        )
     _owner_sql(
         owner, "INSERT INTO teams (id, org_id, name) VALUES (:id, :org, 'ops')", id=TEAM_A, org=DEFAULT_ORG_ID
     )
@@ -290,8 +309,16 @@ def test_policy_other_org_cannot_see_insert_update_or_delete(seed, table):
     a = str(DEFAULT_ORG_ID)
     assert _as_app(seed, ORG_B, f"SELECT count(*) FROM {table} WHERE {where}", a=a) == 0  # noqa: S608
     assert _insert_error(seed, ORG_B, table, row) == INSUFFICIENT_PRIVILEGE
-    assert _as_app(seed, ORG_B, f"UPDATE {table} SET {key} = {key} WHERE {where}", a=a) == 0  # noqa: S608
-    assert _as_app(seed, ORG_B, f"DELETE FROM {table} WHERE {where}", a=a) == 0  # noqa: S608
+    for verb, sql in (
+        ("UPDATE", f"UPDATE {table} SET {key} = {key} WHERE {where}"),  # noqa: S608
+        ("DELETE", f"DELETE FROM {table} WHERE {where}"),  # noqa: S608
+    ):
+        if verb in NO_PRIVILEGE.get(table, set()):
+            with pytest.raises(DBAPIError) as err:
+                _as_app(seed, ORG_B, sql, a=a)
+            assert _sqlstate(err.value) == INSUFFICIENT_PRIVILEGE, (table, verb)
+        else:
+            assert _as_app(seed, ORG_B, sql, a=a) == 0, (table, verb)
 
 
 @pytest.mark.parametrize("table", TENANT_TABLES)
