@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from tabayyun import core
 from tabayyun.authz import Scope
@@ -284,6 +284,27 @@ async def test_metrics_rewritten_by_a_rerun(ctx):
     async with ctx.factory() as session:
         rows = list((await session.execute(select(Metric))).scalars())
     assert [(r.name, r.value, r.run_id) for r in rows] == [("completeness", 0.8, second)]
+
+
+async def test_more_metric_points_than_one_statement_binds(ctx):
+    """12,000 points need 84,000 parameters, over PostgreSQL's 65,535 per statement: they are
+    written in batches (an 8-year 10-minute series failed its run before, spec 019)."""
+    day = 86_400 * 10**9
+    metrics = [
+        {
+            "check_id": "tby.completeness",
+            "name": "completeness",
+            "series_id": "demo",
+            "ts": T0 + i * day,
+            "value": 1.0,
+        }
+        for i in range(12_000)
+    ]
+    _, outcome = await ctx.persist([], metrics)
+    assert outcome.metrics == 12_000
+    async with ctx.factory() as session:
+        stored = (await session.execute(select(func.count()).select_from(Metric))).scalar_one()
+    assert stored == 12_000
 
 
 async def test_points_within_one_microsecond_keep_the_latest(ctx):

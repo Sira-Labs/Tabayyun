@@ -304,6 +304,26 @@ Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, S
 - [ ] v0.2.0 (`[minor]`) when sprint 8 is live (specs 014 and 015), with the first release
       presentation; patch releases from v0.1.1 until then.
 
+## Public example series (spec 019, 3 Oct 2026, owner request)
+
+- [x] `deploy/examples/public.py`: NAB, ETT, OPSD, UCI household power and Jena weather,
+      fetched from their publishers with pinned SHA-256 and converted to `ts,value`. It
+      writes the CSVs (`--out`) or uploads them with source and licence in the series metadata,
+      runs ETT's loads as a dataset, and reports NAB label windows touched (`--url`).
+      - Nothing is vendored: ETT is CC BY-ND 4.0, so the converted files are only for local
+        use. NAB and ETT are pinned to a commit, OPSD to its 2020-10-06 release.
+      - UCI defaults to the year 2007 (525,600 rows, 14 MB), because the full file is over
+        the 50 MiB upload limit.
+      - Bug found: runs with more than about 9,400 metric points failed with PostgreSQL's
+        65,535-parameter limit (eight years of Jena data). `persist_report` now inserts
+        metrics in batches of 5,000.
+- [ ] Follow-up: `tby.distribution_drift` and `tby.noise_level` should skip values outside the
+      physical limits, since Jena's -9999 sentinels cause 103 drift findings on wind speed.
+- [ ] Follow-up: `tby.correlation_break` is very chatty on ETT's loads (157 findings over two
+      years); review its per-segment thresholds against that data.
+- [ ] Owner: run `public.py --url https://tabayyun-stg.siralabs.org` on staging (needs
+      `TABAYYUN_SESSION`).
+
 ## Later sprints
 
 - [ ] **Scores that barely move** (26 Sep, owner: backlog for S10-6): on staging, `flow-a` had

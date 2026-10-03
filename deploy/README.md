@@ -80,6 +80,18 @@ zstd -d < tabayyun-images.tar.zst | docker load
 `make api-dev`, `make web-dev`). The Parquet cache defaults to `./data/cache`; to use RustFS,
 run `make dev-bucket` once and set the S3 lines in `api/.env` (see `api/.env.example`).
 
+Example data for any install (never production):
+
+- `python3 deploy/examples/seed.py --url URL` loads synthetic series with planted faults and
+  fails when one goes unfound.
+- `python3 deploy/examples/public.py --url URL` loads well-known public series: NAB, ETT, Open
+  Power System Data, UCI household power and the Jena weather station (spec 019). The series
+  are downloaded from their publishers and checked against pinned checksums.
+- `python3 deploy/examples/public.py --out DIR` only writes the series as CSV files for the
+  upload form.
+
+Both scripts take `TABAYYUN_SESSION` for an install with sign-in (see their docstrings).
+
 ## Parquet cache
 
 Successful upload runs are written to the Parquet cache (spec 006), configured by

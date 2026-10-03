@@ -64,6 +64,8 @@ TRANSITIONS: dict[str, frozenset[str]] = {
 # two runs of the same series deduplicate one after the other instead of racing.
 FINDINGS_LOCK_NAMESPACE = 7_412_003
 ONE_MICROSECOND = timedelta(microseconds=1)
+# Metric rows per INSERT: 7 bound parameters each, under PostgreSQL's 65,535 per statement.
+METRIC_BATCH_ROWS = 5_000
 
 
 @dataclass(frozen=True)
@@ -262,8 +264,10 @@ async def persist_report(
         {"ns": FINDINGS_LOCK_NAMESPACE, "series": str(series_id)},
     )
     rows = _metric_rows(scope.org_id, run_id, series_id, report.metrics)
-    if rows:
-        stmt = pg_insert(Metric).values(rows)
+    # In batches: one statement may bind at most 65,535 parameters (7 per row), and a long
+    # series has a daily metric point per check for years.
+    for start in range(0, len(rows), METRIC_BATCH_ROWS):
+        stmt = pg_insert(Metric).values(rows[start : start + METRIC_BATCH_ROWS])
         # Re-running the same data rewrites the same (series, check, name, ts) points.
         await session.execute(
             stmt.on_conflict_do_update(
