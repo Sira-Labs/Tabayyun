@@ -380,6 +380,24 @@ READ_BACK = {
 # Scoped to the signed-in user, not to a tenant: `test_auth_flow.py` checks that another user's
 # session gives 404 (spec 013).
 USER_SCOPED_ROUTES = {("DELETE", "/api/auth/sessions/{session_id}")}
+# Admin routes (spec 014) with ids of org A: placeholders are filled by name, and org B's owner
+# (an org admin of B) must get 404 from each, leaving org A unchanged.
+ADMIN_ROUTES = [
+    ("PATCH", "/api/admin/members/{user_id}", {"role": "admin"}),
+    ("DELETE", "/api/admin/members/{user_id}", None),
+    ("PATCH", "/api/admin/teams/{team_id}", {"name": "renamed"}),
+    ("DELETE", "/api/admin/teams/{team_id}", None),
+    ("PUT", "/api/admin/teams/{team_id}/members/{user_id}", None),
+    ("DELETE", "/api/admin/teams/{team_id}/members/{user_id}", None),
+    ("PATCH", "/api/admin/workspaces/{workspace_id}", {"name": "renamed"}),
+    ("DELETE", "/api/admin/workspaces/{workspace_id}", None),
+    ("GET", "/api/admin/workspaces/{workspace_id}/access", None),
+    ("PUT", "/api/admin/workspaces/{workspace_id}/members/{user_id}", {"role": "viewer"}),
+    ("DELETE", "/api/admin/workspaces/{workspace_id}/members/{user_id}", None),
+    ("PUT", "/api/admin/workspaces/{workspace_id}/teams/{team_id}", {"role": "viewer"}),
+    ("DELETE", "/api/admin/workspaces/{workspace_id}/teams/{team_id}", None),
+]
+ADMIN_IDS = {"user_id": VIEWER, "team_id": TEAM_A, "workspace_id": DEFAULT_WORKSPACE_ID}
 LISTS = ["/api/runs", "/api/findings", "/api/series", "/api/sources", "/api/series-groups", "/api/datasets"]
 
 
@@ -418,7 +436,8 @@ def test_every_route_with_a_path_id_is_covered():
         if "{" in path
         for method in operations
     }
-    assert found - USER_SCOPED_ROUTES == {(m, p) for m, p, _, _ in ROUTES}
+    covered = {(m, p) for m, p, _, _ in ROUTES} | {(m, p) for m, p, _ in ADMIN_ROUTES}
+    assert found - USER_SCOPED_ROUTES == covered
 
 
 @pytest.mark.parametrize(("method", "template", "kind", "body"), ROUTES)
@@ -429,6 +448,32 @@ async def test_other_org_gets_404_for_every_route(seed, app_for, method, templat
     assert r.status_code == 404, (method, template, r.text)
     owner_a = app_for(BOOTSTRAP_USER_ID)
     assert (await _call(owner_a, "GET", READ_BACK[kind].format(seed.a[kind]))).status_code == 200
+
+
+@pytest.mark.parametrize(("method", "template", "body"), ADMIN_ROUTES)
+async def test_other_org_gets_404_for_every_admin_route(seed, app_for, method, template, body):
+    """Org B's owner cannot read or change org A's members, teams or workspaces by id."""
+    b = app_for(USER_B, ORG_B, WORKSPACE_B)
+    r = await _call(b, method, template.format(**ADMIN_IDS), body)
+    assert r.status_code == 404, (method, template, r.text)
+    owner = create_engine(seed.owner_url)
+    try:
+        with owner.connect() as conn:
+            assert (
+                conn.execute(
+                    text("SELECT role FROM org_memberships WHERE user_id = :u"), {"u": VIEWER}
+                ).scalar()
+                == "member"
+            )
+            assert conn.execute(text("SELECT name FROM teams WHERE id = :t"), {"t": TEAM_A}).scalar() == "ops"
+            assert (
+                conn.execute(
+                    text("SELECT count(*) FROM audit_events WHERE org_id = :o"), {"o": ORG_B}
+                ).scalar()
+                == 1
+            )
+    finally:
+        owner.dispose()
 
 
 @pytest.mark.parametrize("path", LISTS)

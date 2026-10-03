@@ -5,6 +5,7 @@ from tabayyun.auth.csrf import CsrfMiddleware
 from tabayyun.auth.deps import (
     LOGIN_COOKIE,
     SESSION_COOKIE,
+    client_ip,
     current_session,
     require_recent_passkey,
     require_session,
@@ -44,6 +45,7 @@ __all__ = [
     "CsrfMiddleware",
     "OidcClient",
     "build_oidc",
+    "client_ip",
     "current_session",
     "require_recent_passkey",
     "require_session",

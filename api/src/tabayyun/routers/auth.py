@@ -7,7 +7,6 @@ mode there is no login: `/me` describes the bootstrap user and the login routes 
 from __future__ import annotations
 
 import html
-import ipaddress
 import uuid
 from datetime import datetime
 from typing import Annotated, Any
@@ -22,6 +21,7 @@ from tabayyun.auth import store
 from tabayyun.auth.deps import (
     LOGIN_COOKIE,
     SESSION_COOKIE,
+    client_ip,
     current_session,
     factory_of,
     passkey_is_fresh,
@@ -125,17 +125,6 @@ def _failure(status: int, code: str) -> HTMLResponse:
     response = HTMLResponse(body, status_code=status, headers={"Cache-Control": "no-store"})
     _clear_cookie(response, LOGIN_COOKIE)
     return response
-
-
-def _client_ip(request: Request) -> str | None:
-    """The client's IP from `X-Real-IP` behind the proxy, else the peer; informational only."""
-    for candidate in (request.headers.get("x-real-ip"), request.client.host if request.client else None):
-        if candidate:
-            try:
-                return str(ipaddress.ip_address(candidate.strip()))
-            except ValueError:
-                continue
-    return None
 
 
 def method_proven(method: str, claims: dict[str, Any]) -> bool:
@@ -259,7 +248,7 @@ async def callback(
                 sign_in_method=flow.method,
                 idp_sid=str(claims["sid"]) if claims.get("sid") else None,
                 id_token=id_token,
-                ip_address=_client_ip(request),
+                ip_address=client_ip(request),
                 user_agent=(request.headers.get("user-agent") or "")[:USER_AGENT_MAX] or None,
                 absolute=settings.session_absolute,
                 idle=settings.session_idle,

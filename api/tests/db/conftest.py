@@ -7,6 +7,10 @@ from collections.abc import Callable
 import pytest
 from sqlalchemy import create_engine, make_url, text
 
+# Fixtures shared across modules: the admin tests' people (spec 014) and the login environment
+# with the fake IdP (spec 013), which the admin gate test reuses.
+from admin_support import admin_env  # noqa: F401
+from db.test_auth_flow import env  # noqa: F401
 from tabayyun.db import migrate
 from tabayyun.settings import Settings
 from tenancy import app_url
