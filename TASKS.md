@@ -324,6 +324,20 @@ Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, S
 - [ ] Owner: run `public.py --url https://tabayyun-stg.siralabs.org` on staging (needs
       `TABAYYUN_SESSION`).
 
+## Run report overview (spec 020, 3 Oct 2026, owner request)
+
+- [x] Run report: the data window's span and sampling step ("2.0 years · hourly", or
+      "≈ every 10 minutes" when the series declares none). Below that, a timeline across the
+      window with one lane per check (and per series on a dataset run) and a severity-coloured
+      mark per finding; a mark opens and focuses its row. The series card shows the sampling
+      interval and the `public.py` source, licence, link and notes. Web only, no API change.
+      - Ticks fall on whole local calendar units (years down to 5 minutes), at most 12, so an
+        8-year window reads by year and a 2-year window by quarter.
+      - The row's open state moved up to the findings list, so the timeline can open a row
+        without setting state inside an effect (react-hooks lint).
+      - The value chart (S9-5) still needs the downsampled series endpoint; this view uses
+        only the finding windows the API already returns.
+
 ## Later sprints
 
 - [ ] **Scores that barely move** (26 Sep, owner: backlog for S10-6): on staging, `flow-a` had
