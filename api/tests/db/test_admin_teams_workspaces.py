@@ -66,7 +66,7 @@ async def test_workspace_create_update_and_validation(admin_env):
         assert (ws["name"], ws["timezone"], ws["role"]) == ("Plant North", "Europe/Berlin", "admin")
         dup = await adam.post("/api/admin/workspaces", json={"name": "Plant North"})
         assert (dup.status_code, dup.json()["detail"]) == (409, "name_taken")
-        for tz in ("Mars/Olympus", "../etc/passwd", ""):
+        for tz in ("Mars/Olympus", "../etc/passwd", "", "Europe"):
             bad = await adam.post("/api/admin/workspaces", json={"name": "x", "timezone": tz})
             assert (bad.status_code, bad.json()["detail"]) == (422, "invalid_timezone"), tz
         r = await adam.patch(f"/api/admin/workspaces/{ws['id']}", json={"timezone": "Asia/Riyadh"})

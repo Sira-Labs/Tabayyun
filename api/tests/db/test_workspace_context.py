@@ -172,4 +172,4 @@ async def test_workspaces_lists_the_visible_ones_with_roles(client_for, user, ex
     async with client_for(user) as c:
         body = (await c.get("/api/workspaces")).json()
     assert [(w["name"], w["role"]) for w in body] == expected
-    assert all(set(w) == {"id", "name", "timezone", "role"} for w in body)
+    assert all(set(w) == {"id", "name", "timezone", "created_at", "role"} for w in body)

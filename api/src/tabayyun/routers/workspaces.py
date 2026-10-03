@@ -6,6 +6,7 @@ The chosen workspace travels as `X-Tabayyun-Workspace` on every data request
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -23,6 +24,7 @@ class WorkspaceOut(BaseModel):
     id: str
     name: str
     timezone: str
+    created_at: datetime
     role: WorkspaceRole
 
 
@@ -33,6 +35,6 @@ async def list_workspaces(
 ) -> list[WorkspaceOut]:
     """The workspaces in which the caller holds any role, by name."""
     return [
-        WorkspaceOut(id=str(w.id), name=w.name, timezone=w.timezone, role=role)
+        WorkspaceOut(id=str(w.id), name=w.name, timezone=w.timezone, created_at=w.created_at, role=role)
         for w, role in await workspace_roles(session, principal)
     ]

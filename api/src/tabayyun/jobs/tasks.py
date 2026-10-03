@@ -63,7 +63,11 @@ async def send_invitation_email(context: JobContext, invitation_id: str, org_id:
     settings = get_settings()
     config = SmtpConfig.from_settings(settings)
     if config is None:
+        # The api queued it with its own settings; this worker has none, so it will not go out.
         log.warning("mail.not_configured", invitation_id=invitation_id)
+        await invitations.mark_not_configured(
+            for_org(runtime.session_factory(), uuid.UUID(org_id)), uuid.UUID(invitation_id)
+        )
         return
     await invitations.deliver(
         for_org(runtime.session_factory(), uuid.UUID(org_id)),

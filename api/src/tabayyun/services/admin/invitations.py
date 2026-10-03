@@ -323,6 +323,11 @@ async def _set_status(
         )
 
 
+async def mark_not_configured(factory: async_sessionmaker[AsyncSession], invitation_id: uuid.UUID) -> None:
+    """The worker has no SMTP settings: the email will not go out, and the panel says so."""
+    await _set_status(factory, invitation_id, "not_configured", None)
+
+
 async def deliver(
     factory: async_sessionmaker[AsyncSession],
     config: SmtpConfig,

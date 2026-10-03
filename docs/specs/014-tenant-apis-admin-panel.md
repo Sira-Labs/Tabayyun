@@ -64,7 +64,7 @@ refuses to start. The invitation email links to `TABAYYUN_PUBLIC_URL` + `/login`
 
 ### Workspace context (every data route)
 
-- `GET /api/workspaces` (any member) returns `[{"id", "name", "timezone", "role"}]`. It lists
+- `GET /api/workspaces` (any member) returns `[{"id", "name", "timezone", "created_at", "role"}]`. It lists
   the workspaces from `visible_workspaces()`, sorted by name, with the effective role in each.
 - `X-Tabayyun-Workspace: <uuid>` selects the workspace for the existing data routes (series,
   runs, findings, groups, datasets, sources). `get_workspace_id` reads the header.

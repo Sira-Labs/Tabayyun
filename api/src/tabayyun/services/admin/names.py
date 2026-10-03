@@ -25,6 +25,8 @@ def clean_timezone(tz: str) -> str:
         raise InvalidError("invalid_timezone")
     try:
         ZoneInfo(tz)
-    except (ZoneInfoNotFoundError, ValueError) as exc:
+    # A key naming a directory ("Europe") raises IsADirectoryError or PermissionError on some
+    # Python and tzdata versions instead of ZoneInfoNotFoundError.
+    except (ZoneInfoNotFoundError, ValueError, IsADirectoryError, PermissionError) as exc:
         raise InvalidError("invalid_timezone") from exc
     return tz

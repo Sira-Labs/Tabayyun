@@ -157,6 +157,9 @@ async def test_queued_email_and_worker_delivery(admin_env, smtp):
     admin_env.sql("UPDATE invitations SET revoked_at = now()")
     await invitations.deliver(factory, config, uuid.UUID(created["id"]), public_url=None, final_attempt=True)
     assert smtp.messages == []  # revoked: skipped
+    # A worker without SMTP settings records that the email will not go out.
+    await invitations.mark_not_configured(factory, uuid.UUID(created["id"]))
+    assert admin_env.scalar("SELECT email_status FROM invitations") == "not_configured"
 
 
 # Joining (oidc mode, the fake IdP of spec 013)
