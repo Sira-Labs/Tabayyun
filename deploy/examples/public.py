@@ -43,7 +43,7 @@ from pathlib import Path
 from urllib import error, request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from seed import Api, SeedError, findings_of_run, series_ids, wait_run  # noqa: E402
+from seed import Api, SeedError, findings_of_run, wait_run  # noqa: E402
 
 MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024
 # The api refuses larger uploads (services/runs.py, MAX_UPLOAD_BYTES).
@@ -316,6 +316,7 @@ CATALOGUE: list[Series] = [
 ]  # fmt: skip
 
 ETT_GROUP = ("ETT transformer 1 loads", ["ett-h1-hufl", "ett-h1-mufl", "ett-h1-lufl"])
+ETT_DATASET = "Public examples: ETT"
 FAMILIES = sorted({s.family for s in CATALOGUE})
 
 
@@ -337,13 +338,25 @@ Fetcher = Callable[[str, Path], None]
 """Writes the body at a URL to a path; the default streams over HTTPS."""
 
 
+class _HttpsOnlyRedirects(request.HTTPRedirectHandler):
+    """Follows a redirect only to another HTTPS URL."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        if not newurl.lower().startswith("https://"):
+            raise SeedError(f"refusing a redirect to a non-HTTPS URL: {newurl}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = request.build_opener(_HttpsOnlyRedirects)
+
+
 def http_fetch(url: str, dest: Path) -> None:
     """Stream `url` to `dest`, refusing anything that is not HTTPS or exceeds the cap."""
     if not url.startswith("https://"):
         raise SeedError(f"refusing a non-HTTPS source: {url}")
     size = 0
     try:
-        with request.urlopen(url, timeout=120) as resp, dest.open("wb") as out:
+        with _OPENER.open(url, timeout=120) as resp, dest.open("wb") as out:
             while chunk := resp.read(CHUNK):
                 size += len(chunk)
                 if size > MAX_DOWNLOAD_BYTES:
@@ -483,10 +496,24 @@ def write_out(built: list[Built], out: Path) -> None:
     print(f"  wrote SOURCES.md; upload the files from {out} with the form's defaults")
 
 
+def named(api: Api, path: str, name: str) -> dict | None:
+    """The item called `name` in a paginated list (series groups, datasets), if any."""
+    cursor = ""
+    while True:
+        page = api.get(f"{path}?limit=200" + (f"&cursor={cursor}" if cursor else ""))
+        for item in page["items"]:
+            if item.get("name") == name:
+                return dict(item)
+        cursor = page.get("next_cursor") or ""
+        if not cursor:
+            return None
+
+
 def upload_all(api: Api, built: list[Built], labels: dict[str, list[list[str]]]) -> bool:
     """Upload, describe, group and report; True when every run succeeded."""
     ok = True
     by_series: dict[str, list[dict]] = {}
+    ids: dict[str, str] = {}
     for b in built:
         s = b.series
         fields = {"series_id": s.name}
@@ -501,8 +528,11 @@ def upload_all(api: Api, built: list[Built], labels: dict[str, list[list[str]]])
         print(f"  upload {s.name:25} {b.rows:>7} rows  run {run['id']} {run['status']}")
         ok &= run["status"] == "succeeded"
         by_series[s.name] = findings_of_run(api, run["id"])
+        # The series this upload stored, by id: another source may hold a series of the same
+        # name, so a lookup by name could pick the wrong one.
+        if run["status"] == "succeeded" and run.get("series"):
+            ids[s.name] = run["series"][0]["id"]
 
-    ids = series_ids(api)
     for b in built:
         if b.series.name not in ids:  # its run failed before the series was stored
             continue
@@ -513,7 +543,8 @@ def upload_all(api: Api, built: list[Built], labels: dict[str, list[list[str]]])
     names = {b.series.name: b for b in built}
     group_name, members = ETT_GROUP
     if all(m in names and m in ids for m in members):
-        group = api.post_json(
+        # A second run reuses the group and dataset by name (group names are unique).
+        group = named(api, "/api/series-groups", group_name) or api.post_json(
             "/api/series-groups",
             {"name": group_name, "kind": "related",
              "members": [{"series_id": ids[m], "role": "member"} for m in members]},
@@ -521,9 +552,9 @@ def upload_all(api: Api, built: list[Built], labels: dict[str, list[list[str]]])
         first = min(names[m].first for m in members)
         last = max(names[m].last for m in members)
         end = iso(datetime.fromtimestamp(ns(last) / 1e9, tz=UTC) + timedelta(hours=1))
-        dataset = api.post_json(
+        dataset = named(api, "/api/datasets", ETT_DATASET) or api.post_json(
             "/api/datasets",
-            {"name": "Public examples: ETT", "series_ids": [ids[m] for m in members],
+            {"name": ETT_DATASET, "series_ids": [ids[m] for m in members],
              "window": {"start": first, "end": end}},
         )  # fmt: skip
         created = api.post_json("/api/runs", {"dataset_id": dataset["id"]})

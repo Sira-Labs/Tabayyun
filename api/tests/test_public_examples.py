@@ -202,3 +202,14 @@ def test_zip_without_member_is_refused(tmp_path: Path) -> None:
         z.writestr("other.bin", io.BytesIO(b"x").getvalue())
     with pytest.raises(pub.SeedError, match="no member"):
         list(pub.uci_power(path, OPTS))
+
+
+def test_redirect_to_plain_http_is_refused() -> None:
+    from urllib.request import Request
+
+    handler = pub._HttpsOnlyRedirects()
+    req = Request("https://example.test/a.csv")
+    with pytest.raises(pub.SeedError, match="non-HTTPS"):
+        handler.redirect_request(req, None, 302, "Found", {}, "http://example.test/a.csv")
+    follow = handler.redirect_request(req, None, 302, "Found", {}, "https://mirror.test/a.csv")
+    assert follow is not None and follow.full_url == "https://mirror.test/a.csv"

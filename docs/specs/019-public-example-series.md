@@ -59,7 +59,7 @@ followed by one dataset run.
    required, otherwise exit 2 (argparse).
 2. An unknown `--only` name exits 2 and lists the valid names.
 3. Each needed source is downloaded over HTTPS once, into a temporary file in the cache, with
-   at most 200 MB per file. Its SHA-256 is compared with the pinned value, and the file is
+   at most 200 MB per file. A redirect to a URL that is not HTTPS is refused. Its SHA-256 is compared with the pinned value, and the file is
    moved into place only if it matches. A mismatch, an HTTP error or an oversized file exits 2
    and names the source.
 4. Converters stream the source and yield `(timestamp, value)` rows: ISO 8601 UTC timestamps,
@@ -78,7 +78,8 @@ followed by one dataset run.
 7. `--url` does the following:
    - Uploads each series through `POST /api/runs`, with its unit and physical limits, and waits
      for the run.
-   - Sets the metadata on each series.
+   - Sets the metadata on each series, found by the series id its run returns, never by name.
+   - On a second run, reuses the ETT group and dataset of the same name.
    - Creates the ETT group and dataset and runs the dataset when every ETT series is selected.
    - Prints the findings per series by check.
    - Prints, for each NAB series, the number of labelled windows that some finding overlaps,
