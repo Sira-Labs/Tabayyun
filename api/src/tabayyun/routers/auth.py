@@ -7,7 +7,6 @@ mode there is no login: `/me` describes the bootstrap user and the login routes 
 from __future__ import annotations
 
 import html
-import ipaddress
 import uuid
 from datetime import datetime
 from typing import Annotated, Any
@@ -22,6 +21,7 @@ from tabayyun.auth import store
 from tabayyun.auth.deps import (
     LOGIN_COOKIE,
     SESSION_COOKIE,
+    client_ip,
     current_session,
     factory_of,
     passkey_is_fresh,
@@ -125,17 +125,6 @@ def _failure(status: int, code: str) -> HTMLResponse:
     response = HTMLResponse(body, status_code=status, headers={"Cache-Control": "no-store"})
     _clear_cookie(response, LOGIN_COOKIE)
     return response
-
-
-def _client_ip(request: Request) -> str | None:
-    """The client's IP from `X-Real-IP` behind the proxy, else the peer; informational only."""
-    for candidate in (request.headers.get("x-real-ip"), request.client.host if request.client else None):
-        if candidate:
-            try:
-                return str(ipaddress.ip_address(candidate.strip()))
-            except ValueError:
-                continue
-    return None
 
 
 def method_proven(method: str, claims: dict[str, Any]) -> bool:
@@ -259,7 +248,7 @@ async def callback(
                 sign_in_method=flow.method,
                 idp_sid=str(claims["sid"]) if claims.get("sid") else None,
                 id_token=id_token,
-                ip_address=_client_ip(request),
+                ip_address=client_ip(request),
                 user_agent=(request.headers.get("user-agent") or "")[:USER_AGENT_MAX] or None,
                 absolute=settings.session_absolute,
                 idle=settings.session_idle,
@@ -308,7 +297,7 @@ async def me(request: Request) -> Any:
     """The signed-in user, their org and role, the sign-in method and passkey freshness.
 
     401 without a session; 403 `no_access` (with the email, for the "No access yet" page) for a
-    user without a membership.
+    user without a membership. A session without access first accepts open invitations.
     """
     settings = settings_of(request)
     session: CurrentSession | None = None
@@ -318,6 +307,10 @@ async def me(request: Request) -> Any:
     else:
         session = await require_session(request)
         user_id, org_id, method = session.user_id, session.org_id, session.sign_in_method
+        if org_id is None:
+            # Invited after signing in (spec 014): join now, so "Check again" needs no new sign-in.
+            async with factory_of(request)() as db, db.begin():
+                org_id = await store.join_invited_org(db, session.id, user_id)
     described = await _describe(request, user_id, org_id) if org_id is not None else None
     if described is None:
         return JSONResponse(

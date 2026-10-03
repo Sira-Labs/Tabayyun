@@ -1,9 +1,9 @@
 """FastAPI dependencies: who the request acts for, its tenant session, and its scope.
 
 With the OIDC login (spec 013) the principal is the session's user in the org it signed in to;
-in `dev` mode every request acts as the bootstrap user, owner of the default org. Until the
-workspace picker exists (spec 014, S8-5) the workspace is the default one. Tests override
-`get_principal` and `get_workspace_id`.
+in `dev` mode every request acts as the bootstrap user, owner of the default org. The workspace
+is the one the client names in `X-Tabayyun-Workspace` (spec 014), else a visible default. Tests
+override `get_principal` and `get_workspace_id`.
 """
 
 from __future__ import annotations
@@ -13,16 +13,18 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tabayyun.auth.deps import require_session, settings_of
-from tabayyun.authz.policy import ForbiddenError, NotVisibleError, authorize
+from tabayyun.authz.policy import ForbiddenError, NotVisibleError, authorize, visible_workspaces
 from tabayyun.authz.roles import Action
 from tabayyun.authz.scope import Principal, Scope
 from tabayyun.db import open_session
-from tabayyun.db.models import BOOTSTRAP_USER_ID, DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID
+from tabayyun.db.models import BOOTSTRAP_USER_ID, DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Workspace
 
 BOOTSTRAP_PRINCIPAL = Principal(user_id=BOOTSTRAP_USER_ID, org_id=DEFAULT_ORG_ID)
+WORKSPACE_HEADER = "X-Tabayyun-Workspace"
 
 
 async def get_principal(request: Request) -> Principal:
@@ -36,17 +38,38 @@ async def get_principal(request: Request) -> Principal:
     return Principal(user_id=session.user_id, org_id=session.org_id)
 
 
-async def get_workspace_id() -> uuid.UUID:
-    """The workspace the request acts in; the default one until spec 014 lets clients choose."""
-    return DEFAULT_WORKSPACE_ID
-
-
 async def get_session(
     request: Request, principal: Annotated[Principal, Depends(get_principal)]
 ) -> AsyncIterator[AsyncSession]:
     """One transaction per request in the principal's org, committed on success."""
     async for session in open_session(request, principal.org_id):
         yield session
+
+
+async def get_workspace_id(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    principal: Annotated[Principal, Depends(get_principal)],
+) -> uuid.UUID:
+    """The workspace the request acts in: the `X-Tabayyun-Workspace` header (400
+    `invalid_workspace` when malformed), else the default workspace when visible, else the
+    oldest visible one. Visibility of a named workspace is `require()`'s job (404)."""
+    named = request.headers.get(WORKSPACE_HEADER)
+    if named is not None:
+        try:
+            return uuid.UUID(named.strip())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid_workspace") from exc
+    fallback = await session.scalar(
+        select(Workspace.id)
+        .where(Workspace.id.in_(visible_workspaces(principal)))
+        .order_by(
+            case((Workspace.id == DEFAULT_WORKSPACE_ID, 0), else_=1), Workspace.created_at, Workspace.id
+        )
+        .limit(1)
+    )
+    # Nothing visible: the default id, which `require()` then answers with 404 as before.
+    return fallback or DEFAULT_WORKSPACE_ID
 
 
 def require(action: Action) -> Callable[..., Awaitable[Scope]]:

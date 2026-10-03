@@ -270,7 +270,24 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
       realm's identity providers, set `TABAYYUN_PUBLIC_URL`, `TABAYYUN_OIDC_ISSUER`,
       `TABAYYUN_OIDC_CLIENT_SECRET` and `TABAYYUN_ADMIN_EMAIL` on `tabayyun-api`, then merge
       the PR and sign in with Google, GitHub and a passkey.
-- [ ] 014 Tenant APIs and admin panel v1
+- [x] **014 Tenant APIs, invitations, audit log and admin panel v1** —
+      `docs/specs/014-tenant-apis-admin-panel.md` (3 Oct; owner decisions: join at sign-in,
+      SMTP email, one org per install, "view as user" later). Every criterion but the staging
+      check is met.
+      - `tabayyun_accept_invitations()` returns the orgs joined, so `/api/auth/me` moves a
+        session without access into the org: "Check again" needs no new sign-in.
+      - Workspace admins may read the member and team lists (to grant access to their
+        workspace); changing them stays with org admins (spec edited).
+      - Without `X-Tabayyun-Workspace` a request acts in the default workspace when visible,
+        else the oldest visible one, so `seed.py` and `public.py` work unchanged.
+      - Checked in Chromium against the API with an aiosmtpd sink: workspace, team, access,
+        invitation, the email (marked sent), four audit events and the picker switch. It found
+        two controls named "Workspace" and a Delete offered for the default workspace (fixed).
+- [ ] Owner: set `TABAYYUN_SMTP_HOST=smtp-relay.gmail.com` and `TABAYYUN_SMTP_FROM` on
+      `tabayyun-api` and `tabayyun-worker` (`deploy/caprover.md`, section 2), then the
+      spec 014 staging check: signed in with a passkey, invite a second Google account as
+      viewer of a new workspace; it signs in and sees only that workspace; Admin → Audit log
+      shows both steps.
 - [ ] 015 Security baseline pass 1
 
 Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, SMTP):

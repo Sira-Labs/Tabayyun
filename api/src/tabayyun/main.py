@@ -1,9 +1,9 @@
 """FastAPI application factory.
 
 Exposes health, version, the login (spec 013), stateless check execution, runs, findings and
-series results, and owns the process-wide database engine (spec 001). Every other `/api` router
-requires a principal; routers for workspaces and corrections are added per
-`docs/architecture/03-system-architecture.md`.
+series results, the caller's workspaces and the admin API (spec 014), and owns the
+process-wide database engine (spec 001). Every other `/api` router requires a principal;
+routers for corrections are added per `docs/architecture/03-system-architecture.md`.
 """
 
 from collections.abc import AsyncIterator
@@ -21,8 +21,21 @@ from tabayyun.authz import get_principal
 from tabayyun.db import DB_OK, check_db, guard_schema, make_engine, make_session_factory, worker_commits
 from tabayyun.db.roles import check_login, is_rls_violation
 from tabayyun.jobs.names import WORKER_APPLICATION_NAME
-from tabayyun.routers import auth, checks, datasets, findings, groups, runs, series, sources
+from tabayyun.routers import (
+    admin,
+    auth,
+    checks,
+    datasets,
+    findings,
+    groups,
+    invitations,
+    runs,
+    series,
+    sources,
+    workspaces,
+)
 from tabayyun.services import runs as runs_service
+from tabayyun.services.admin.errors import AdminError
 from tabayyun.services.cache import RunCache
 from tabayyun.settings import Settings, get_settings
 
@@ -77,8 +90,16 @@ def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = No
     # Everything else needs a principal (spec 013), also routers that do not authorize() a
     # workspace, such as the stateless check run. FastAPI resolves it once per request.
     signed_in = [Depends(get_principal)]
-    for router in (checks, runs, findings, series, sources, groups, datasets):
+    for router in (checks, runs, findings, series, sources, groups, datasets, workspaces):
         app.include_router(router.router, dependencies=signed_in)
+    # The admin router orders its own gate: session, then passkey freshness (spec 014).
+    app.include_router(admin.router)
+    app.include_router(invitations.router)
+
+    @app.exception_handler(AdminError)
+    async def admin_refused(request: Request, exc: AdminError) -> JSONResponse:
+        """A refused admin request answers its status with its code; the transaction rolled back."""
+        return JSONResponse(status_code=exc.status, content={"detail": exc.code})
 
     @app.exception_handler(DBAPIError)
     async def rls_violation(request: Request, exc: DBAPIError) -> JSONResponse:

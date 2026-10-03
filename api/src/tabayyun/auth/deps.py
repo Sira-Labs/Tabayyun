@@ -6,6 +6,7 @@ without a tenant context, and kept on `request.state`.
 
 from __future__ import annotations
 
+import ipaddress
 from datetime import UTC, datetime
 
 import structlog
@@ -22,6 +23,17 @@ log = structlog.get_logger()
 SESSION_COOKIE = "__Host-tby_session"
 LOGIN_COOKIE = "__Host-tby_login"
 _STATE_KEY = "tabayyun_auth_session"
+
+
+def client_ip(request: Request) -> str | None:
+    """The client's IP from `X-Real-IP` behind the proxy, else the peer; informational only."""
+    for candidate in (request.headers.get("x-real-ip"), request.client.host if request.client else None):
+        if candidate:
+            try:
+                return str(ipaddress.ip_address(candidate.strip()))
+            except ValueError:
+                continue
+    return None
 
 
 def settings_of(request: Request) -> Settings:

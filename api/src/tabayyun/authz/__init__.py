@@ -3,6 +3,7 @@ request dependencies that give every route a tenant session and an authorized sc
 
 from tabayyun.authz.deps import (
     BOOTSTRAP_PRINCIPAL,
+    WORKSPACE_HEADER,
     ManageScope,
     ReadScope,
     WriteScope,
@@ -17,12 +18,14 @@ from tabayyun.authz.policy import (
     authorize,
     visible_workspaces,
     workspace_role,
+    workspace_roles,
 )
 from tabayyun.authz.roles import Action, OrgRole, WorkspaceRole, allows, effective_role
 from tabayyun.authz.scope import Principal, Scope
 
 __all__ = [
     "BOOTSTRAP_PRINCIPAL",
+    "WORKSPACE_HEADER",
     "Action",
     "ForbiddenError",
     "ManageScope",
@@ -42,4 +45,5 @@ __all__ = [
     "require",
     "visible_workspaces",
     "workspace_role",
+    "workspace_roles",
 ]

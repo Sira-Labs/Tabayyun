@@ -39,6 +39,11 @@ All notable changes to this project are documented here. The format follows
 - Seasonality in the baseline profile (`dominant_period_ns`, `seasonal_strength`) and
   `tby.seasonality_break`: a daily, weekly or yearly rhythm that weakens or changes period
   (spec 012, catalogue 21).
+- Organisation admin (spec 014): invitations by email that join at sign-in (with SMTP email
+  through the worker), member roles with a last-owner guard, teams, workspaces with access for
+  people and teams, and an append-only audit log, under `/api/admin` behind a passkey sign-in
+  from the last 12 hours; `GET /api/workspaces` and `X-Tabayyun-Workspace` choose the
+  workspace of every data request; the web app's workspace picker and Admin pages.
 - Release pipeline publishing `tabayyun-api` and `tabayyun-web` images to GHCR with SBOM and
   provenance; production compose bundle with Caddy.
 - Apache-2.0 licence (ADR-0012), contribution guide, security policy, code of conduct, issue

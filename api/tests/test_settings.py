@@ -179,3 +179,23 @@ def test_sign_in_methods_and_durations(monkeypatch):
         7,
         30,
     )
+
+
+def test_prod_mail_settings():
+    """Email off needs nothing; with a host, a real sender and no placeholder password (spec 014)."""
+    _prod().require_secrets_in_prod()
+    _prod(smtp_host="smtp-relay.gmail.com", smtp_from="Tabayyun <t@example.com>").require_secrets_in_prod()
+    for bad in (
+        {"smtp_from": None},
+        {"smtp_from": "tabayyun"},
+        {"smtp_from": "change-me@example.com"},
+        {"smtp_from": "t@example.com", "smtp_password": "change-me"},
+    ):
+        with pytest.raises(RuntimeError, match="TABAYYUN_SMTP"):
+            _prod(smtp_host="smtp-relay.gmail.com", **bad).require_secrets_in_prod()
+
+
+def test_invitation_ttl_accepts_days(monkeypatch):
+    monkeypatch.setenv("TABAYYUN_INVITATION_TTL", "7d")
+    assert Settings().invitation_ttl.days == 7
+    assert Settings(smtp_host=" ").mail_enabled is False

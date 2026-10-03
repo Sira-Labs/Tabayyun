@@ -35,6 +35,7 @@ TEAM_EDITOR = uuid.UUID("00000000-0000-0000-0000-0000000000a5")  # editor throug
 BYSTANDER = uuid.UUID("00000000-0000-0000-0000-0000000000a6")  # org member, no workspace grant
 DISABLED = uuid.UUID("00000000-0000-0000-0000-0000000000a7")  # org admin, but disabled
 TEAM_A = uuid.UUID("00000000-0000-0000-0000-0000000000a8")
+INVITATION_A = uuid.UUID("00000000-0000-0000-0000-0000000000a9")
 HOUR0 = datetime(2026, 1, 1, tzinfo=UTC)
 # `sessions` has `org_id` but no row-level security: it is looked up before any org is known
 # (spec 013), and only by the HMAC of the cookie's token.
@@ -44,6 +45,8 @@ TENANT_TABLES = sorted(
     key=str,
 )
 INSUFFICIENT_PRIVILEGE = "42501"
+# Statements the app login has no privilege for at all (spec 014): refused before any policy.
+NO_PRIVILEGE = {"invitations": {"DELETE"}, "audit_events": {"UPDATE", "DELETE"}}
 UNIQUE_VIOLATION = "23505"
 
 
@@ -147,6 +150,26 @@ def _seed_memberships(owner: Engine) -> None:
         ws=DEFAULT_WORKSPACE_ID,
         user=VIEWER,
     )
+    # Spec 014: an invitation and an audit event per org.
+    for org, inviter, invitation in (
+        (DEFAULT_ORG_ID, BOOTSTRAP_USER_ID, INVITATION_A),
+        (ORG_B, USER_B, uuid.uuid4()),
+    ):
+        _owner_sql(
+            owner,
+            "INSERT INTO invitations (id, org_id, email, org_role, invited_by, expires_at) "
+            "VALUES (:id, :org, 'invitee@example.test', 'member', :by, now() + interval '1 day')",
+            id=invitation,
+            org=org,
+            by=inviter,
+        )
+        _owner_sql(
+            owner,
+            "INSERT INTO audit_events (id, org_id, actor_user_id, action, target_type, target_id) "
+            "VALUES (gen_random_uuid(), :org, :by, 'org.renamed', 'org', :org)",
+            org=org,
+            by=inviter,
+        )
     _owner_sql(
         owner, "INSERT INTO teams (id, org_id, name) VALUES (:id, :org, 'ops')", id=TEAM_A, org=DEFAULT_ORG_ID
     )
@@ -290,8 +313,16 @@ def test_policy_other_org_cannot_see_insert_update_or_delete(seed, table):
     a = str(DEFAULT_ORG_ID)
     assert _as_app(seed, ORG_B, f"SELECT count(*) FROM {table} WHERE {where}", a=a) == 0  # noqa: S608
     assert _insert_error(seed, ORG_B, table, row) == INSUFFICIENT_PRIVILEGE
-    assert _as_app(seed, ORG_B, f"UPDATE {table} SET {key} = {key} WHERE {where}", a=a) == 0  # noqa: S608
-    assert _as_app(seed, ORG_B, f"DELETE FROM {table} WHERE {where}", a=a) == 0  # noqa: S608
+    for verb, sql in (
+        ("UPDATE", f"UPDATE {table} SET {key} = {key} WHERE {where}"),  # noqa: S608
+        ("DELETE", f"DELETE FROM {table} WHERE {where}"),  # noqa: S608
+    ):
+        if verb in NO_PRIVILEGE.get(table, set()):
+            with pytest.raises(DBAPIError) as err:
+                _as_app(seed, ORG_B, sql, a=a)
+            assert _sqlstate(err.value) == INSUFFICIENT_PRIVILEGE, (table, verb)
+        else:
+            assert _as_app(seed, ORG_B, sql, a=a) == 0, (table, verb)
 
 
 @pytest.mark.parametrize("table", TENANT_TABLES)
@@ -353,6 +384,31 @@ READ_BACK = {
 # Scoped to the signed-in user, not to a tenant: `test_auth_flow.py` checks that another user's
 # session gives 404 (spec 013).
 USER_SCOPED_ROUTES = {("DELETE", "/api/auth/sessions/{session_id}")}
+# Admin routes (spec 014) with ids of org A: placeholders are filled by name, and org B's owner
+# (an org admin of B) must get 404 from each, leaving org A unchanged.
+ADMIN_ROUTES = [
+    ("PATCH", "/api/admin/members/{user_id}", {"role": "admin"}),
+    ("DELETE", "/api/admin/members/{user_id}", None),
+    ("PATCH", "/api/admin/teams/{team_id}", {"name": "renamed"}),
+    ("DELETE", "/api/admin/teams/{team_id}", None),
+    ("PUT", "/api/admin/teams/{team_id}/members/{user_id}", None),
+    ("DELETE", "/api/admin/teams/{team_id}/members/{user_id}", None),
+    ("PATCH", "/api/admin/workspaces/{workspace_id}", {"name": "renamed"}),
+    ("DELETE", "/api/admin/workspaces/{workspace_id}", None),
+    ("GET", "/api/admin/workspaces/{workspace_id}/access", None),
+    ("PUT", "/api/admin/workspaces/{workspace_id}/members/{user_id}", {"role": "viewer"}),
+    ("DELETE", "/api/admin/workspaces/{workspace_id}/members/{user_id}", None),
+    ("PUT", "/api/admin/workspaces/{workspace_id}/teams/{team_id}", {"role": "viewer"}),
+    ("DELETE", "/api/admin/workspaces/{workspace_id}/teams/{team_id}", None),
+    ("POST", "/api/admin/invitations/{invitation_id}/resend", None),
+    ("DELETE", "/api/admin/invitations/{invitation_id}", None),
+]
+ADMIN_IDS = {
+    "user_id": VIEWER,
+    "team_id": TEAM_A,
+    "workspace_id": DEFAULT_WORKSPACE_ID,
+    "invitation_id": INVITATION_A,
+}
 LISTS = ["/api/runs", "/api/findings", "/api/series", "/api/sources", "/api/series-groups", "/api/datasets"]
 
 
@@ -391,7 +447,8 @@ def test_every_route_with_a_path_id_is_covered():
         if "{" in path
         for method in operations
     }
-    assert found - USER_SCOPED_ROUTES == {(m, p) for m, p, _, _ in ROUTES}
+    covered = {(m, p) for m, p, _, _ in ROUTES} | {(m, p) for m, p, _ in ADMIN_ROUTES}
+    assert found - USER_SCOPED_ROUTES == covered
 
 
 @pytest.mark.parametrize(("method", "template", "kind", "body"), ROUTES)
@@ -402,6 +459,34 @@ async def test_other_org_gets_404_for_every_route(seed, app_for, method, templat
     assert r.status_code == 404, (method, template, r.text)
     owner_a = app_for(BOOTSTRAP_USER_ID)
     assert (await _call(owner_a, "GET", READ_BACK[kind].format(seed.a[kind]))).status_code == 200
+
+
+@pytest.mark.parametrize(("method", "template", "body"), ADMIN_ROUTES)
+async def test_other_org_gets_404_for_every_admin_route(seed, app_for, method, template, body):
+    """Org B's owner cannot read or change org A's members, teams or workspaces by id."""
+    b = app_for(USER_B, ORG_B, WORKSPACE_B)
+    r = await _call(b, method, template.format(**ADMIN_IDS), body)
+    assert r.status_code == 404, (method, template, r.text)
+    owner = create_engine(seed.owner_url)
+    try:
+        with owner.connect() as conn:
+            assert (
+                conn.execute(
+                    text("SELECT role FROM org_memberships WHERE user_id = :u"), {"u": VIEWER}
+                ).scalar()
+                == "member"
+            )
+            assert conn.execute(text("SELECT name FROM teams WHERE id = :t"), {"t": TEAM_A}).scalar() == "ops"
+            open_a = "SELECT revoked_at IS NULL FROM invitations WHERE id = :i"
+            assert conn.execute(text(open_a), {"i": INVITATION_A}).scalar() is True
+            assert (
+                conn.execute(
+                    text("SELECT count(*) FROM audit_events WHERE org_id = :o"), {"o": ORG_B}
+                ).scalar()
+                == 1
+            )
+    finally:
+        owner.dispose()
 
 
 @pytest.mark.parametrize("path", LISTS)

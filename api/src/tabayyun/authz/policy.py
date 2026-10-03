@@ -86,6 +86,50 @@ async def authorize(
     return role
 
 
+async def workspace_roles(
+    session: AsyncSession, principal: Principal
+) -> list[tuple[Workspace, WorkspaceRole]]:
+    """Every workspace of the principal's org in which they hold a role, with that role, by name.
+
+    Three queries whatever the number of workspaces; `effective_role` combines them as
+    `workspace_role` does for one workspace.
+    """
+    org_role = await session.scalar(_active_member(principal))
+    if org_role is None:
+        return []
+    direct = dict(
+        (
+            await session.execute(
+                select(WorkspaceMembership.workspace_id, WorkspaceMembership.role).where(
+                    WorkspaceMembership.user_id == principal.user_id
+                )
+            )
+        )
+        .tuples()
+        .all()
+    )
+    via_team: dict[uuid.UUID, list[WorkspaceRole]] = {}
+    team_rows = await session.execute(
+        select(WorkspaceTeamRole.workspace_id, WorkspaceTeamRole.role)
+        .join(TeamMember, TeamMember.team_id == WorkspaceTeamRole.team_id)
+        .where(TeamMember.user_id == principal.user_id)
+    )
+    for workspace_id, team_role in team_rows.tuples():
+        via_team.setdefault(workspace_id, []).append(WorkspaceRole(team_role))
+    workspaces = await session.scalars(
+        select(Workspace).where(Workspace.org_id == principal.org_id).order_by(Workspace.name, Workspace.id)
+    )
+    result = []
+    for workspace in workspaces:
+        own = direct.get(workspace.id)
+        effective = effective_role(
+            OrgRole(org_role), None if own is None else WorkspaceRole(own), via_team.get(workspace.id, [])
+        )
+        if effective is not None:
+            result.append((workspace, effective))
+    return result
+
+
 def visible_workspaces(principal: Principal) -> Select[tuple[uuid.UUID]]:
     """Ids of the workspaces in which the principal has any role (the `visible_ids()` of ADR-0007)."""
     member = _active_member(principal).exists()

@@ -90,6 +90,11 @@ Rules:
     | `TABAYYUN_OIDC_CLIENT_SECRET` | secret of the realm's `tabayyun-api` client (section 4a) |
     | `TABAYYUN_ADMIN_EMAIL` | the owner's email; becomes owner at its first verified sign-in |
     | `TABAYYUN_SIGN_IN_METHODS` | optional; default `google,github,passkey` |
+    | `TABAYYUN_SMTP_HOST` | optional; `smtp-relay.gmail.com` sends invitation emails (spec 014); unset, invitations still work and the admin tells the person |
+    | `TABAYYUN_SMTP_FROM` | with a host: the sender, e.g. `Tabayyun <tabayyun@data-and-ai-dude.com>` (a domain the relay may send for) |
+    | `TABAYYUN_SMTP_PORT`, `TABAYYUN_SMTP_STARTTLS` | optional; defaults `587` and `true` |
+    | `TABAYYUN_SMTP_USERNAME`, `TABAYYUN_SMTP_PASSWORD` | optional; the Google Workspace relay admits the server by IP and needs neither |
+    | `TABAYYUN_INVITATION_TTL` | optional; how long an invitation stays open, default `14d` |
 
     With `TABAYYUN_ENV=prod` the api refuses to start without the four sign-in settings
     (spec 013); staging runs `prod` too, so set up the realm (section 4a) first.
@@ -114,7 +119,7 @@ which the live system uses.
 | Name | Value |
 |---|---|
 | `TABAYYUN_ROLE` | `worker` |
-| the api variables | identical to the api app (`TABAYYUN_ENV`, `TABAYYUN_DATABASE_URL` with the app login, `TABAYYUN_SESSION_SECRET`); the worker never needs `TABAYYUN_MIGRATION_DATABASE_URL` |
+| the api variables | identical to the api app (`TABAYYUN_ENV`, `TABAYYUN_DATABASE_URL` with the app login, `TABAYYUN_SESSION_SECRET`, `TABAYYUN_PUBLIC_URL` and the `TABAYYUN_SMTP_*` rows, since the worker sends the invitation emails); the worker never needs `TABAYYUN_MIGRATION_DATABASE_URL` |
 | `TABAYYUN_CACHE_URL` and `TABAYYUN_S3_*` | see section 3a; without them the cache is `/data/cache` inside the container (tick persistent data with that path to keep it) |
 | `TABAYYUN_WORKER_CONCURRENCY` | optional, default `2` |
 
@@ -252,7 +257,7 @@ sequenceDiagram
      verified email).
 5. **API settings.** Set the sign-in rows of section 2 on the api app, then Save & Update.
    `TABAYYUN_ADMIN_EMAIL` is the one person who becomes owner of the default org at their
-   first sign-in; everyone else sees "No access yet" until spec 014 brings invitations.
+   first sign-in; everyone else sees "No access yet" until an admin invites them (step 8).
 6. **Check.** Open `<public>`: the sign-in page shows the three buttons. Sign in with Google
    as the admin email; the header shows your name, Settings → Account lists the device.
    `curl -s -o /dev/null -w '%{http_code}' https://<public>/api/series` answers `401`.
@@ -260,6 +265,15 @@ sequenceDiagram
    console → *Signing in* → Passkey → Set up. After that, "Sign in with a passkey" works on
    that device. A first sign-in always goes through Google or GitHub. Passkeys belong to the
    Keycloak host: a new Keycloak host (production) needs new passkeys.
+
+8. **Invitations (spec 014).** Set the `TABAYYUN_SMTP_*` rows of section 2 on the api and
+   the worker. Signed in with a passkey, open **Admin** → Members → Invite someone: an email,
+   a role, and optionally a workspace and its role. The invitee signs in with Google, GitHub
+   or a passkey under that address and is a member at once; someone already signed in
+   presses "Check again" on "No access yet". Admin actions need a passkey sign-in from the
+   last 12 hours; with Google or GitHub the panel asks for one. **Admin** → Audit log shows
+   each step. An invitation whose email failed shows `email failed` with the server's reply;
+   the API log has `mail.failed`.
 
 **Recovering an admin who lost every passkey** (operator step, spec 013): confirm the
 person's identity out of band (a call on a known number, not the email that asked). Then in

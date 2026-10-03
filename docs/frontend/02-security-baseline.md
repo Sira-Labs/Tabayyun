@@ -6,8 +6,8 @@ review item, or an ops runbook entry.
 ## Authentication and sessions
 - [x] OIDC Authorization Code + PKCE only; `state` and `nonce` verified; ID token signature and `aud` validated. (Spec 013: `tabayyun.auth.oidc`.)
 - [x] Session: server-side store, opaque ID, `__Host-tby_session`, `HttpOnly; Secure; SameSite=Lax; Path=/`. (Spec 013: Postgres `sessions`, HMAC of the token at rest.)
-- [x] Rotate session on login and privilege change; idle timeout 12 h, absolute 30 d (org-configurable); server-side revocation; IdP back-channel logout handled. (Spec 013; the timeouts are per install. Role changes arrive with spec 014, which revokes the member's sessions.)
-- [ ] MFA and passkeys enforced per organisation via the IdP. (Spec 013 offers passkeys and `require_recent_passkey()`; spec 014 applies it to admins; per-organisation enforcement later.)
+- [x] Rotate session on login and privilege change; idle timeout 12 h, absolute 30 d (org-configurable); server-side revocation; IdP back-channel logout handled. (Spec 013; the timeouts are per install. Spec 014: roles are read on every request, so a role change applies at once, and removing a member revokes their sessions in the org.)
+- [ ] MFA and passkeys enforced per organisation via the IdP. (Spec 013 offers passkeys and `require_recent_passkey()`; spec 014 requires a passkey sign-in from the last 12 h on every `/api/admin` route; per-organisation enforcement for all users later.)
 - [ ] API tokens (for integrations) are random, hashed at rest, scoped to a workspace and role, expiring, revocable.
 
 ## Authorization
@@ -49,7 +49,7 @@ review item, or an ops runbook entry.
 - [ ] Data retention configurable per workspace (findings, metrics, cache, audit).
 
 ## Logging, audit, monitoring
-- [ ] Append-only `audit_events` for auth, authz, share, credential and threshold changes, and link views; export to SIEM via webhook/syslog.
+- [ ] Append-only `audit_events` for auth, authz, share, credential and threshold changes, and link views; export to SIEM via webhook/syslog. (Spec 014: the table, append-only for the app login, with every membership, role, team, workspace and invitation change; auth events, shares, credentials, thresholds and the SIEM export later.)
 - [ ] Structured logs without PII or secrets; request IDs propagated; OpenTelemetry traces.
 - [ ] Alerts on auth failures spike, RLS policy errors, job failures.
 

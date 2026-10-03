@@ -2,7 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { browser } from "../auth";
-import { json, renderApp, stubFetch } from "./helpers";
+import { ME, json, renderApp, stubFetch } from "./helpers";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -26,5 +26,18 @@ describe("NoAccess", () => {
     await waitFor(() => expect(assign).toHaveBeenCalledWith("https://idp.example/logout?x=1"));
     const logout = fetch.mock.calls.find(([url]) => url === "/api/auth/logout");
     expect((logout?.[1]?.headers as Record<string, string>)["X-Tabayyun-Request"]).toBe("1");
+  });
+
+  it("checks again and enters once an invitation has been accepted", async () => {
+    let invited = false;
+    stubFetch(() => ({ items: [], next_cursor: null }), {
+      me: () => (invited ? ME : json({ detail: "no_access", email: "bo@example.org" }, 403)),
+    });
+    renderApp("/runs");
+    await screen.findByRole("heading", { name: "No access yet" });
+
+    invited = true;
+    await userEvent.setup().click(screen.getByRole("button", { name: "Check again" }));
+    expect(await screen.findByRole("heading", { name: "Runs" })).toBeTruthy();
   });
 });

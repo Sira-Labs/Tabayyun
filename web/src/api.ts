@@ -1,6 +1,7 @@
 // Thin fetch wrapper. Session cookie auth; every request carries the CSRF header
 // (docs/frontend/02-security-baseline.md). Replaced by the generated OpenAPI client later.
 import type { Finding, Page, Run, RunCreated, ScoreRow, Series } from "./types";
+import { WORKSPACE_HEADER, currentWorkspaceId, type Workspace } from "./workspace";
 
 const HEADERS = { Accept: "application/json", "X-Tabayyun-Request": "1" };
 
@@ -58,10 +59,16 @@ export function errorMessage(body: string, fallback: string): string {
   }
 }
 
-/** Fetch JSON with the CSRF header; throws ApiError with the server's detail. A 401 also
- * triggers the unauthorized handler; 204 resolves to undefined. */
+/** The headers every request carries: CSRF, and the chosen workspace when there is one. */
+function baseHeaders(): Record<string, string> {
+  const workspace = currentWorkspaceId();
+  return workspace ? { ...HEADERS, [WORKSPACE_HEADER]: workspace } : HEADERS;
+}
+
+/** Fetch JSON with the CSRF and workspace headers; throws ApiError with the server's detail. A
+ * 401 also triggers the unauthorized handler; 204 resolves to undefined. */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(path, { credentials: "same-origin", ...init, headers: { ...HEADERS, ...init.headers } });
+  const res = await fetch(path, { credentials: "same-origin", ...init, headers: { ...baseHeaders(), ...init.headers } });
   if (!res.ok) {
     const body = await res.text();
     if (res.status === 401) onUnauthorized?.();
@@ -116,6 +123,7 @@ export const api = {
   listRunFindings: (runId: string) =>
     allPages<Finding>((cursor) => `/api/findings${query({ run_id: runId, status: "all", limit: 500, cursor })}`),
   getSeries: (id: string) => apiGet<Series>(`/api/series/${encodeURIComponent(id)}`),
+  listWorkspaces: () => apiGet<Workspace[]>("/api/workspaces"),
   runScores: (seriesId: string, runId: string) =>
     apiGet<Page<ScoreRow>>(`/api/series/${encodeURIComponent(seriesId)}/scores${query({ run_id: runId, limit: 10 })}`),
 };
