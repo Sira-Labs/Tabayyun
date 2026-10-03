@@ -267,3 +267,23 @@ def test_matching_group_and_dataset_are_reused() -> None:
     api = FakeApi({"/api/series-groups": [group], "/api/datasets": [dataset]})
     assert pub.upload_all(api, _ett_built(), {}) is True
     assert api.posted == ["/api/runs"]  # nothing created again, only the dataset run
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "abc.def",
+        " abc.def\n",
+        "'abc.def'",
+        '"abc.def"',
+        "__Host-tby_session=abc.def",
+        "__Host-tby_session=abc.def; Path=/",
+    ],
+)
+def test_session_value_is_cleaned(raw: str) -> None:
+    assert sys.modules["seed"].clean_session(raw) == "abc.def"
+
+
+def test_empty_session_is_none() -> None:
+    assert sys.modules["seed"].clean_session("  ") is None
+    assert sys.modules["seed"].clean_session(None) is None
