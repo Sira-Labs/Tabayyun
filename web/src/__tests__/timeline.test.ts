@@ -108,4 +108,9 @@ describe("lanes", () => {
     const out = lanes([f("a", "tby.corr", "high", "s1"), f("b", "tby.corr", "high", "s2")], { s1: "hufl", s2: "lufl" });
     expect(out.map((l) => l.label)).toEqual(["tby.corr · hufl", "tby.corr · lufl"]);
   });
+
+  it("names the series on a multi-series run even when all findings fall on one", () => {
+    const out = lanes([f("a", "tby.corr", "high", "s1")], { s1: "hufl" }, true);
+    expect(out.map((l) => [l.label, l.series])).toEqual([["tby.corr · hufl", "hufl"]]);
+  });
 });

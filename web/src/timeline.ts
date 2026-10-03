@@ -145,9 +145,13 @@ export function axisTicks(startNs: number, endNs: number): Tick[] {
 
 export type Lane = { key: string; label: string; check: string; series: string | null; findings: Finding[]; worst: number };
 
-/** Findings grouped by check (and by series on a dataset run), most severe lane first. */
-export function lanes(findings: Finding[], seriesNames?: Record<string, string>): Lane[] {
-  const multi = new Set(findings.map((f) => f.series_id)).size > 1;
+/**
+ * Findings grouped by check, and also by series when the run covers several series (pass
+ * `multiSeries`: a dataset run whose findings all fall on one series still names it), most
+ * severe lane first.
+ */
+export function lanes(findings: Finding[], seriesNames?: Record<string, string>, multiSeries?: boolean): Lane[] {
+  const multi = multiSeries ?? new Set(findings.map((f) => f.series_id)).size > 1;
   const byKey = new Map<string, Lane>();
   for (const f of findings) {
     const key = multi ? `${f.check_id}|${f.series_id}` : f.check_id;

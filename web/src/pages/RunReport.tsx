@@ -98,6 +98,7 @@ function FindingsOverview({ run }: { run: Run }) {
           findings={items}
           window={run.window}
           seriesNames={seriesNames}
+          multiSeries={run.series.length > 1}
           onSelect={(id) => {
             setOpened((prev) => new Set(prev).add(id));
             setFocus((prev) => ({ id, n: (prev?.n ?? 0) + 1 }));

@@ -11,6 +11,8 @@ type Props = {
   window: NsWindow;
   /** series id → external id, for lane labels on a dataset run. */
   seriesNames?: Record<string, string>;
+  /** The run covers several series (a dataset run): lanes split and name the series. */
+  multiSeries?: boolean;
   onSelect: (findingId: string) => void;
 };
 
@@ -19,11 +21,11 @@ type Props = {
  * coloured by severity, on a calendar axis. The findings table stays the complete text view; a
  * mark only adds the position in time and opens its row.
  */
-export function FindingsTimeline({ findings, window, seriesNames, onSelect }: Props) {
+export function FindingsTimeline({ findings, window, seriesNames, multiSeries, onSelect }: Props) {
   const [showAll, setShowAll] = useState(false);
   const span = window.end - window.start;
   if (!(span > 0) || findings.length === 0) return null;
-  const all = lanes(findings, seriesNames);
+  const all = lanes(findings, seriesNames, multiSeries);
   const shown = showAll ? all : all.slice(0, VISIBLE_LANES);
   const ticks = axisTicks(window.start, window.end);
   const pos = (ns: number) => Math.min(1, Math.max(0, (ns - window.start) / span));
