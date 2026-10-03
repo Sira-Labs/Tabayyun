@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tabayyun.db.models import AuthSession, LoginFlow, User, UserIdentity
+from tabayyun.db.models import DEFAULT_ORG_ID, AuthSession, LoginFlow, User, UserIdentity
 
 FLOW_TTL = timedelta(minutes=10)
 # `last_seen_at` is written at most this often per session.
@@ -117,6 +117,25 @@ async def login(
         )
     ).one()
     return LoginResult(user_id=row.user_id, org_id=row.org_id, role=row.role, disabled=bool(row.disabled))
+
+
+async def join_invited_org(db: AsyncSession, session_id: uuid.UUID, user_id: uuid.UUID) -> uuid.UUID | None:
+    """Accept the user's open invitations (spec 014) and move a session without access into the
+    org joined, the default org first; None when there was nothing to accept."""
+    joined = set(
+        (
+            await db.execute(text("SELECT * FROM tabayyun_accept_invitations(:user)"), {"user": user_id})
+        ).scalars()
+    )
+    if not joined:
+        return None
+    org_id = DEFAULT_ORG_ID if DEFAULT_ORG_ID in joined else min(joined)
+    await db.execute(
+        update(AuthSession)
+        .where(AuthSession.id == session_id, AuthSession.org_id.is_(None))
+        .values(org_id=org_id)
+    )
+    return org_id
 
 
 async def create_session(

@@ -35,6 +35,7 @@ TEAM_EDITOR = uuid.UUID("00000000-0000-0000-0000-0000000000a5")  # editor throug
 BYSTANDER = uuid.UUID("00000000-0000-0000-0000-0000000000a6")  # org member, no workspace grant
 DISABLED = uuid.UUID("00000000-0000-0000-0000-0000000000a7")  # org admin, but disabled
 TEAM_A = uuid.UUID("00000000-0000-0000-0000-0000000000a8")
+INVITATION_A = uuid.UUID("00000000-0000-0000-0000-0000000000a9")
 HOUR0 = datetime(2026, 1, 1, tzinfo=UTC)
 # `sessions` has `org_id` but no row-level security: it is looked up before any org is known
 # (spec 013), and only by the HMAC of the cookie's token.
@@ -150,12 +151,15 @@ def _seed_memberships(owner: Engine) -> None:
         user=VIEWER,
     )
     # Spec 014: an invitation and an audit event per org.
-    for org, inviter in ((DEFAULT_ORG_ID, BOOTSTRAP_USER_ID), (ORG_B, USER_B)):
+    for org, inviter, invitation in (
+        (DEFAULT_ORG_ID, BOOTSTRAP_USER_ID, INVITATION_A),
+        (ORG_B, USER_B, uuid.uuid4()),
+    ):
         _owner_sql(
             owner,
             "INSERT INTO invitations (id, org_id, email, org_role, invited_by, expires_at) "
-            "VALUES (gen_random_uuid(), :org, 'invitee@example.test', 'member', :by, "
-            "now() + interval '1 day')",
+            "VALUES (:id, :org, 'invitee@example.test', 'member', :by, now() + interval '1 day')",
+            id=invitation,
             org=org,
             by=inviter,
         )
@@ -396,8 +400,15 @@ ADMIN_ROUTES = [
     ("DELETE", "/api/admin/workspaces/{workspace_id}/members/{user_id}", None),
     ("PUT", "/api/admin/workspaces/{workspace_id}/teams/{team_id}", {"role": "viewer"}),
     ("DELETE", "/api/admin/workspaces/{workspace_id}/teams/{team_id}", None),
+    ("POST", "/api/admin/invitations/{invitation_id}/resend", None),
+    ("DELETE", "/api/admin/invitations/{invitation_id}", None),
 ]
-ADMIN_IDS = {"user_id": VIEWER, "team_id": TEAM_A, "workspace_id": DEFAULT_WORKSPACE_ID}
+ADMIN_IDS = {
+    "user_id": VIEWER,
+    "team_id": TEAM_A,
+    "workspace_id": DEFAULT_WORKSPACE_ID,
+    "invitation_id": INVITATION_A,
+}
 LISTS = ["/api/runs", "/api/findings", "/api/series", "/api/sources", "/api/series-groups", "/api/datasets"]
 
 
@@ -466,6 +477,8 @@ async def test_other_org_gets_404_for_every_admin_route(seed, app_for, method, t
                 == "member"
             )
             assert conn.execute(text("SELECT name FROM teams WHERE id = :t"), {"t": TEAM_A}).scalar() == "ops"
+            open_a = "SELECT revoked_at IS NULL FROM invitations WHERE id = :i"
+            assert conn.execute(text(open_a), {"i": INVITATION_A}).scalar() is True
             assert (
                 conn.execute(
                     text("SELECT count(*) FROM audit_events WHERE org_id = :o"), {"o": ORG_B}

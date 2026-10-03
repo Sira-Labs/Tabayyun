@@ -43,6 +43,7 @@ class Env:
 
     owner: Connection
     client: Callable[..., AsyncClient]
+    apps: list[Any]
 
     def sql(self, statement: str, **params: Any) -> Any:
         result = self.owner.execute(text(statement), params)
@@ -101,8 +102,10 @@ async def admin_env(db_url, fresh_schema) -> AsyncIterator[Env]:
         *,
         org: uuid.UUID = DEFAULT_ORG_ID,
         headers: dict[str, str] | None = None,
+        **settings: Any,
     ) -> AsyncClient:
-        app = create_app(app_settings(db_url, inline_jobs=True))
+        """A client acting as `user`; `settings` override the app's (e.g. SMTP, inline jobs)."""
+        app = create_app(app_settings(db_url, **({"inline_jobs": True} | settings)))
         principal = BOOTSTRAP_PRINCIPAL if user is None else Principal(user_id=user, org_id=org)
         app.dependency_overrides[get_principal] = lambda: principal
         apps.append(app)
@@ -110,7 +113,7 @@ async def admin_env(db_url, fresh_schema) -> AsyncIterator[Env]:
             transport=ASGITransport(app=app), base_url="http://test", headers=CSRF | (headers or {})
         )
 
-    yield Env(owner=owner, client=client)
+    yield Env(owner=owner, client=client, apps=apps)
     for app in apps:
         await app.state.engine.dispose()
     owner.close()

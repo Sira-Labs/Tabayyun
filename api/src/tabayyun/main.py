@@ -28,6 +28,7 @@ from tabayyun.routers import (
     datasets,
     findings,
     groups,
+    invitations,
     runs,
     series,
     sources,
@@ -93,6 +94,7 @@ def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = No
         app.include_router(router.router, dependencies=signed_in)
     # The admin router orders its own gate: session, then passkey freshness (spec 014).
     app.include_router(admin.router)
+    app.include_router(invitations.router)
 
     @app.exception_handler(AdminError)
     async def admin_refused(request: Request, exc: AdminError) -> JSONResponse:

@@ -93,8 +93,18 @@ class Settings(BaseSettings):
     passkey_fresh: timedelta = Field(
         default=timedelta(hours=12), description="How recent a passkey sign-in must be for admin actions."
     )
+    # Invitation email (spec 014). No host: email is off and invitations still work.
+    smtp_host: str | None = Field(default=None, description="SMTP relay host; unset turns email off.")
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_starttls: bool = Field(default=True, description="Require STARTTLS on the connection.")
+    smtp_username: str | None = Field(default=None, description="Optional; the Workspace relay admits by IP.")
+    smtp_password: SecretStr | None = Field(default=None)
+    smtp_from: str | None = Field(default=None, description="Sender, e.g. `Tabayyun <tabayyun@example.com>`.")
+    invitation_ttl: timedelta = Field(
+        default=timedelta(days=14), description="How long an invitation stays open."
+    )
 
-    @field_validator("session_idle", "session_absolute", "passkey_fresh", mode="before")
+    @field_validator("session_idle", "session_absolute", "passkey_fresh", "invitation_ttl", mode="before")
     @classmethod
     def _duration(cls, value: object) -> object:
         """Accept `30s`, `15m`, `12h` and `30d` besides pydantic's own duration forms."""
@@ -124,6 +134,11 @@ class Settings(BaseSettings):
     def enabled_sign_in_methods(self) -> tuple[str, ...]:
         """The sign-in methods the login page offers, in the configured order."""
         return tuple(self.sign_in_methods.split(","))
+
+    @property
+    def mail_enabled(self) -> bool:
+        """Whether invitation emails are sent (an SMTP host is set)."""
+        return bool((self.smtp_host or "").strip())
 
     @property
     def migration_url(self) -> str:
@@ -158,6 +173,7 @@ class Settings(BaseSettings):
             problems.append("TABAYYUN_S3_SECRET_ACCESS_KEY")
         if self.cache_url.startswith("s3://") and not (self.s3_access_key_id and self.s3_secret_access_key):
             problems.append("TABAYYUN_S3_ACCESS_KEY_ID/TABAYYUN_S3_SECRET_ACCESS_KEY")
+        problems += self._mail_problems()
         if problems:
             raise RuntimeError(f"refusing to start in prod: missing or placeholder settings {problems}")
 
@@ -174,6 +190,18 @@ class Settings(BaseSettings):
         if not (self.admin_email or "").strip():
             # Without it no login could become owner: the bootstrap owner has no login.
             problems.append("TABAYYUN_ADMIN_EMAIL")
+        return problems
+
+    def _mail_problems(self) -> list[str]:
+        """With email on, a real sender and no placeholder password (spec 014)."""
+        if not self.mail_enabled:
+            return []
+        problems: list[str] = []
+        sender = (self.smtp_from or "").lower()
+        if "@" not in sender or any(word in sender for word in ("change-me", "changeme", "placeholder")):
+            problems.append("TABAYYUN_SMTP_FROM")
+        if self.smtp_password and _is_placeholder(self.smtp_password.get_secret_value()):
+            problems.append("TABAYYUN_SMTP_PASSWORD")
         return problems
 
 

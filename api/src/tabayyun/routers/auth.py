@@ -297,7 +297,7 @@ async def me(request: Request) -> Any:
     """The signed-in user, their org and role, the sign-in method and passkey freshness.
 
     401 without a session; 403 `no_access` (with the email, for the "No access yet" page) for a
-    user without a membership.
+    user without a membership. A session without access first accepts open invitations.
     """
     settings = settings_of(request)
     session: CurrentSession | None = None
@@ -307,6 +307,10 @@ async def me(request: Request) -> Any:
     else:
         session = await require_session(request)
         user_id, org_id, method = session.user_id, session.org_id, session.sign_in_method
+        if org_id is None:
+            # Invited after signing in (spec 014): join now, so "Check again" needs no new sign-in.
+            async with factory_of(request)() as db, db.begin():
+                org_id = await store.join_invited_org(db, session.id, user_id)
     described = await _describe(request, user_id, org_id) if org_id is not None else None
     if described is None:
         return JSONResponse(

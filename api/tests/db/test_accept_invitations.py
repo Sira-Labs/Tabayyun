@@ -140,7 +140,10 @@ def test_a_higher_existing_role_is_kept_and_a_lower_one_raised(conns):
         {"org": DEFAULT_ORG_ID, "ws": DEFAULT_WORKSPACE_ID, "u": user_id},
     )
     invite(owner, "ada@example.org", workspace_id=DEFAULT_WORKSPACE_ID, workspace_role="editor")
-    assert app.execute(text("SELECT tabayyun_accept_invitations(:u)"), {"u": user_id}).scalar_one() == 1
+    joined = (
+        app.execute(text("SELECT * FROM tabayyun_accept_invitations(:u)"), {"u": user_id}).scalars().all()
+    )
+    assert joined == [DEFAULT_ORG_ID]
     assert roles(owner, user_id) == ("admin", "editor")
 
 
@@ -150,7 +153,7 @@ def test_disabled_user_accepts_nothing(conns):
     user_id = login(app, "sub-ada", "ada@example.org")[0]
     owner.execute(text("UPDATE users SET disabled_at = now() WHERE id = :u"), {"u": user_id})
     invite(owner, "ada@example.org")
-    assert app.execute(text("SELECT tabayyun_accept_invitations(:u)"), {"u": user_id}).scalar_one() == 0
+    assert app.execute(text("SELECT * FROM tabayyun_accept_invitations(:u)"), {"u": user_id}).all() == []
     assert owner.execute(text("SELECT count(*) FROM invitations WHERE accepted_at IS NULL")).scalar_one() == 1
 
 

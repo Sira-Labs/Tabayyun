@@ -5,7 +5,8 @@
 - `audit_events`: append-only. RLS by `org_id`; `tabayyun_app` may only SELECT and INSERT.
 - `tabayyun_accept_invitations(user)`: SECURITY DEFINER, run as the owner because a user
   without a membership has no org context yet. It grants the invited roles (keeping a higher
-  existing one), marks the invitations accepted and writes a `member.joined` event each.
+  existing one), marks the invitations accepted, writes a `member.joined` event each, and
+  returns the orgs joined (`/api/auth/me` moves a session without access into one).
 - `tabayyun_login(...)`: unchanged signature and result; it now accepts invitations before
   picking the org it returns.
 
@@ -34,16 +35,15 @@ LOGIN_SIGNATURE = "tabayyun_login(text, text, text, boolean, text, text)"
 
 # Only module constants are interpolated.
 ACCEPT_FUNCTION = f"""
-CREATE FUNCTION tabayyun_accept_invitations(p_user uuid) RETURNS integer
+CREATE FUNCTION tabayyun_accept_invitations(p_user uuid) RETURNS SETOF uuid
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
     v_email text;
-    v_count integer := 0;
     r record;
 BEGIN
     SELECT u.email INTO v_email FROM users u WHERE u.id = p_user AND u.disabled_at IS NULL;
     IF v_email IS NULL THEN
-        RETURN 0;
+        RETURN;
     END IF;
     FOR r IN
         SELECT i.id, i.org_id, i.org_role, i.workspace_id, i.workspace_role, i.invited_by
@@ -73,9 +73,8 @@ BEGIN
                 p_user::text, jsonb_build_object(
                     'email', v_email, 'invitation_id', r.id, 'invited_by', r.invited_by,
                     'org_role', r.org_role, 'workspace_role', r.workspace_role));
-        v_count := v_count + 1;
+        RETURN NEXT r.org_id;
     END LOOP;
-    RETURN v_count;
 END
 $$;
 REVOKE ALL ON FUNCTION tabayyun_accept_invitations(uuid) FROM PUBLIC;
@@ -95,7 +94,7 @@ def _login_function_0006() -> str:
     body = _login_function_0005()
     if body.count(marker) != 1:
         raise RuntimeError("tabayyun_login of 0005 changed shape; update migration 0006")
-    return body.replace(marker, "    PERFORM tabayyun_accept_invitations(v_user);\n\n" + marker)
+    return body.replace(marker, "    PERFORM * FROM tabayyun_accept_invitations(v_user);\n\n" + marker)
 
 
 def _replace_login_function(sql: str) -> None:
