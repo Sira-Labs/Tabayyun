@@ -608,6 +608,8 @@ def main(argv: list[str] | None = None, fetch: Fetcher = http_fetch) -> int:
         # Before the downloads, so a wrong URL or session fails fast.
         version = api.get("/api/version")
         print(f"install {args.url}: commit {(version.get('commit') or '?')[:7]}")
+        me = api.get("/api/auth/me")  # 401 here, not after the downloads, without a session
+        print(f"signed in as {me['user']['email']} in {me['org']['name']} ({me['role']})")
 
     print(f"sources (cache {args.cache})")
     paths = {key: ensure(SOURCES[key], args.cache, fetch) for key in dict.fromkeys(s.source for s in chosen)}

@@ -14,10 +14,15 @@ another set of groups and a dataset), and never against production, whose data b
 real people.
 
 An install with sign-in (spec 013) needs a session: sign in with the browser as a member of
-the org, copy the value of the `__Host-tby_session` cookie (developer tools → Application →
-Cookies) and pass it in the environment, not on the command line:
+the org, copy the value of the `__Host-tby_session` cookie (developer tools → Application, or
+Storage in Firefox → Cookies → the install's URL; the cookie is HttpOnly, so `document.cookie`
+does not show it) and pass it in the environment, not on the command line:
 
-    TABAYYUN_SESSION='<cookie value>' python3 deploy/examples/seed.py --url https://...
+    export TABAYYUN_SESSION='<cookie value>'
+    python3 deploy/examples/seed.py --url https://...
+
+The value may be pasted with or without the `__Host-tby_session=` prefix. The session is
+checked before anything else, so a missing or stale one fails at once.
 
 | Series | Planted fault | Expected check |
 |---|---|---|
@@ -63,12 +68,24 @@ class SeedError(RuntimeError):
     """The install answered in a way the seed cannot continue from."""
 
 
+SESSION_COOKIE = "__Host-tby_session"
+
+
+def clean_session(raw: str | None) -> str | None:
+    """The cookie value as pasted: without quotes, spaces or a leading `__Host-tby_session=`."""
+    value = (raw or "").strip().strip("'\"").strip()
+    if value.startswith(f"{SESSION_COOKIE}="):
+        value = value.removeprefix(f"{SESSION_COOKIE}=").split(";", 1)[0].strip()
+    return value or None
+
+
 class Api:
     """Minimal JSON and multipart client for the Tabayyun API."""
 
     def __init__(self, base_url: str, session: str | None = None) -> None:
         self.base = base_url.rstrip("/")
-        self.session = session
+        self.session = clean_session(session)
+        session = self.session
         if session and urlsplit(self.base).scheme.lower() != "https":
             # The session is the operator's credential: never over plain HTTP.
             raise SeedError("TABAYYUN_SESSION needs an https:// --url")
@@ -88,7 +105,12 @@ class Api:
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:500]
             if exc.code in (401, 403) and any(c in detail for c in ("not_authenticated", "no_access")):
-                detail += " (sign in and set TABAYYUN_SESSION, see the docstring)"
+                if "no_access" in detail:
+                    detail += " (signed in, but this account is not a member of the org yet)"
+                elif not self.session:
+                    detail += " (TABAYYUN_SESSION is not set: sign in and export it, see the docstring)"
+                else:
+                    detail += " (TABAYYUN_SESSION was sent but not accepted: copy a fresh cookie value)"
             raise SeedError(f"{method} {path}: HTTP {exc.code}: {detail}") from exc
         return json.loads(raw) if raw else {}
 
@@ -315,8 +337,10 @@ def main(argv: list[str] | None = None) -> int:
 
     api = Api(args.url, os.environ.get("TABAYYUN_SESSION") or None)
     version = api.get("/api/version")
-    commit, schema = version.get("commit", "?")[:7], version.get("schema_revision")
+    commit, schema = (version.get("commit") or "?")[:7], version.get("schema_revision")
     print(f"install {args.url}: commit {commit}, schema {schema}")
+    me = api.get("/api/auth/me")  # a missing or stale session fails here, before any upload
+    print(f"signed in as {me['user']['email']} in {me['org']['name']} ({me['role']})")
 
     rng = random.Random(args.seed)
     end = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
