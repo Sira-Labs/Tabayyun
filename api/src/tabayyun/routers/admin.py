@@ -83,6 +83,17 @@ async def org_owner(caller: Annotated[Admin, Depends(admin)]) -> Admin:
     return caller
 
 
+async def any_admin(caller: Annotated[Admin, Depends(admin)]) -> Admin:
+    """An org admin, or the admin of at least one workspace (who picks members and teams for
+    its access list), else 403 `forbidden`."""
+    if caller.is_org_admin:
+        return caller
+    roles = await workspace_roles(caller.session, caller.principal)
+    if not any(role is WorkspaceRole.ADMIN for _, role in roles):
+        raise admin_errors.ForbiddenError
+    return caller
+
+
 async def workspace_admin(workspace_id: uuid.UUID, caller: Annotated[Admin, Depends(admin)]) -> Admin:
     """Effective `admin` in the path's workspace: 404 without any role in it, 403 below admin."""
     try:
@@ -97,6 +108,7 @@ async def workspace_admin(workspace_id: uuid.UUID, caller: Annotated[Admin, Depe
 OrgAdmin = Annotated[Admin, Depends(org_admin)]
 OrgOwner = Annotated[Admin, Depends(org_owner)]
 WorkspaceAdmin = Annotated[Admin, Depends(workspace_admin)]
+SomeAdmin = Annotated[Admin, Depends(any_admin)]
 AnyAdmin = Annotated[Admin, Depends(admin)]
 
 # The passkey gate runs right after the session check, before any role check (spec 014).
@@ -271,12 +283,12 @@ async def rename_org(body: OrgIn, caller: OrgOwner) -> OrgOut:
 
 @router.get("/members", response_model=MemberPage)
 async def list_members(
-    caller: OrgAdmin,
+    caller: SomeAdmin,
     q: Annotated[str | None, Query(max_length=200)] = None,
     cursor: Annotated[str | None, Query(max_length=1000)] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE)] = 50,
 ) -> MemberPage:
-    """Members by email, searchable by email or name."""
+    """Members by email, searchable by email or name; workspace admins read it to grant access."""
     after = None if cursor is None else members.decode_cursor(cursor)
     page, nxt = await members.list_members(
         caller.session, caller.principal.org_id, q=q, after=after, limit=limit
@@ -305,8 +317,8 @@ async def remove_member(user_id: uuid.UUID, caller: OrgAdmin) -> Response:
 
 
 @router.get("/teams", response_model=list[TeamOut])
-async def list_teams(caller: OrgAdmin) -> list[TeamOut]:
-    """Every team with its members and workspace roles."""
+async def list_teams(caller: SomeAdmin) -> list[TeamOut]:
+    """Every team with its members and workspace roles; workspace admins read it to grant access."""
     return [_team_out(t) for t in await teams.list_teams(caller.session, caller.principal.org_id)]
 
 

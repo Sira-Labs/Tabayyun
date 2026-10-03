@@ -42,10 +42,16 @@ async def test_members_list_search_and_paging(admin_env):
         assert (await c.get("/api/admin/members", params={"limit": 201})).status_code == 422
 
 
-async def test_members_need_an_org_admin(admin_env):
-    async with admin_env.client(MIA) as mia:
-        r = await mia.get("/api/admin/members")
-    assert (r.status_code, r.json()["detail"]) == (403, "forbidden")
+async def test_members_need_an_admin(admin_env):
+    """Org admins and workspace admins read the list; a member without an admin role cannot,
+    and only org admins change it."""
+    admin_env.sql("UPDATE workspace_memberships SET role = 'admin' WHERE user_id = :u", u=MIA)
+    async with admin_env.client(NED) as ned, admin_env.client(MIA) as mia:
+        r = await ned.get("/api/admin/members")
+        assert (r.status_code, r.json()["detail"]) == (403, "forbidden")
+        assert len((await mia.get("/api/admin/members")).json()["items"]) == 4
+        assert (await mia.get("/api/admin/teams")).status_code == 200
+        assert (await mia.patch(f"/api/admin/members/{NED}", json={"role": "admin"})).status_code == 403
 
 
 async def test_role_changes_follow_the_owner_rules(admin_env):

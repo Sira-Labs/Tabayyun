@@ -85,14 +85,14 @@ workspaces the caller cannot see, give 404.
 |---|---|---|
 | `GET /api/admin/org` | org admin | `{"id", "name", "created_at", "role"}` |
 | `PATCH /api/admin/org` | owner | `{"name"}` → the org |
-| `GET /api/admin/members?q=&cursor=&limit=50` | org admin | `{"items": [{"user_id", "email", "display_name", "role", "joined_at", "disabled"}], "next": cursor or null}`. Sorted by email; `q` matches email or name (case-insensitive substring); `limit` ≤ 200 |
+| `GET /api/admin/members?q=&cursor=&limit=50` | org admin; ws admin of any (read) | `{"items": [{"user_id", "email", "display_name", "role", "joined_at", "disabled"}], "next": cursor or null}`. Sorted by email; `q` matches email or name (case-insensitive substring); `limit` ≤ 200 |
 | `PATCH /api/admin/members/{user_id}` | org admin | `{"role": "owner" \| "admin" \| "member"}` → the member |
 | `DELETE /api/admin/members/{user_id}` | org admin | 204 |
 | `GET /api/admin/invitations?status=pending` | org admin | `[Invitation]`, newest first. `status` ∈ `pending`, `all` |
 | `POST /api/admin/invitations` | org admin | `{"email", "org_role", "workspace_id"?, "workspace_role"?}` → 201 `Invitation` |
 | `POST /api/admin/invitations/{id}/resend` | org admin | 200 `Invitation`: a new expiry, and the email is queued again |
 | `DELETE /api/admin/invitations/{id}` | org admin | 204 (revoked) |
-| `GET /api/admin/teams` | org admin | `[{"id", "name", "members": [{"user_id", "email", "display_name"}], "workspaces": [{"workspace_id", "name", "role"}]}]` |
+| `GET /api/admin/teams` | org admin; ws admin of any (read) | `[{"id", "name", "members": [{"user_id", "email", "display_name"}], "workspaces": [{"workspace_id", "name", "role"}]}]` |
 | `POST /api/admin/teams` | org admin | `{"name"}` → 201 team |
 | `PATCH /api/admin/teams/{id}` | org admin | `{"name"}` → team |
 | `DELETE /api/admin/teams/{id}` | org admin | 204; its workspace roles go with it |
