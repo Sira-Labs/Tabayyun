@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ApiError, api } from "../api";
 import { ScoreTile, SeverityBadge, StatusBadge } from "../components/Badges";
 import { Evidence } from "../components/Evidence";
+import { FindingsTimeline } from "../components/FindingsTimeline";
 import { useRunPolling } from "../hooks/useRunPolling";
 import { formatDuration, formatLocalTime, formatNumber, severityRank } from "../format";
+import { formatSpan, formatStep } from "../timeline";
 import type { Finding, Run } from "../types";
 
 const PROGRESS_TEXT: Record<string, string> = {
@@ -18,17 +20,29 @@ function byImportance(a: Finding, b: Finding): number {
   return (severityRank[a.severity] ?? 9) - (severityRank[b.severity] ?? 9) || a.window.start - b.window.start;
 }
 
+/** A request from the timeline to open and show one finding; `n` repeats a request. */
+type Focus = { id: string; n: number } | null;
+
+type RowProps = { finding: Finding; open: boolean; onToggle: () => void; focus: Focus };
+
 /** One finding: a button row that expands its evidence panel. */
-function FindingRow({ finding }: { finding: Finding }) {
-  const [open, setOpen] = useState(false);
+function FindingRow({ finding, open, onToggle, focus }: RowProps) {
   const panelId = useId();
+  const button = useRef<HTMLButtonElement>(null);
+  // Scroll to and focus the row the timeline asked for; the parent has already opened it.
+  useEffect(() => {
+    if (focus?.id !== finding.id) return;
+    button.current?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    button.current?.focus({ preventScroll: true });
+  }, [focus, finding.id]);
   return (
     <li className="border-t border-slate-200 first:border-t-0 dark:border-slate-800">
       <button
+        ref={button}
         type="button"
         aria-expanded={open}
         aria-controls={panelId}
-        onClick={() => setOpen((v) => !v)}
+        onClick={onToggle}
         className="grid w-full gap-1 p-3 text-left text-sm hover:bg-slate-50 sm:grid-cols-[6rem_11rem_12rem_1fr_4rem] sm:gap-3 dark:hover:bg-slate-800/60"
       >
         <span>
@@ -62,12 +76,43 @@ function FindingRow({ finding }: { finding: Finding }) {
   );
 }
 
-/** The run's findings, sorted, each expandable. */
-function Findings({ run }: { run: Run }) {
+/** The run's findings: where they lie in time, then the sorted, expandable table. */
+function FindingsOverview({ run }: { run: Run }) {
   const findings = useQuery({ queryKey: ["run-findings", run.id], queryFn: () => api.listRunFindings(run.id) });
+  const [focus, setFocus] = useState<Focus>(null);
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (id: string) =>
+    setOpened((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
   if (findings.isPending) return <p>Loading findings…</p>;
   if (findings.isError) return <p role="alert">Could not load findings: {findings.error.message}</p>;
   const items = [...findings.data.items].sort(byImportance);
+  const seriesNames = Object.fromEntries(run.series.map((s) => [s.id, s.external_id]));
+  return (
+    <>
+      {run.window && (
+        <FindingsTimeline
+          findings={items}
+          window={run.window}
+          seriesNames={seriesNames}
+          onSelect={(id) => {
+            setOpened((prev) => new Set(prev).add(id));
+            setFocus((prev) => ({ id, n: (prev?.n ?? 0) + 1 }));
+          }}
+        />
+      )}
+      <Findings items={items} focus={focus} opened={opened} onToggle={toggle} />
+    </>
+  );
+}
+
+type FindingsProps = { items: Finding[]; focus: Focus; opened: ReadonlySet<string>; onToggle: (id: string) => void };
+
+/** The findings table, sorted, each row expandable. */
+function Findings({ items, focus, opened, onToggle }: FindingsProps) {
   return (
     <section aria-labelledby="findings-heading" className="space-y-2">
       <h2 id="findings-heading" className="text-base font-semibold">
@@ -88,7 +133,7 @@ function Findings({ run }: { run: Run }) {
           </div>
           <ul>
             {items.map((f) => (
-              <FindingRow key={f.id} finding={f} />
+              <FindingRow key={f.id} finding={f} open={opened.has(f.id)} onToggle={() => onToggle(f.id)} focus={focus} />
             ))}
           </ul>
         </div>
@@ -137,11 +182,17 @@ function Scores({ run }: { run: Run }) {
   );
 }
 
-/** The series' stored metadata (unit, limits, counts). */
+/** Only http(s) links from stored metadata become clickable. */
+function safeUrl(url: string | undefined): boolean {
+  return typeof url === "string" && /^https?:\/\//i.test(url);
+}
+
+/** The series' stored metadata (unit, limits, sampling, source, counts). */
 function SeriesPanel({ seriesId }: { seriesId: string }) {
   const series = useQuery({ queryKey: ["series", seriesId], queryFn: () => api.getSeries(seriesId) });
   if (!series.data) return null;
   const s = series.data;
+  const example = s.metadata?.example;
   const limits =
     s.physical_min === null && s.physical_max === null
       ? "not set"
@@ -158,6 +209,34 @@ function SeriesPanel({ seriesId }: { seriesId: string }) {
         <dd>{s.unit ?? "not set"}</dd>
         <dt className="text-slate-600 dark:text-slate-400">Physical limits</dt>
         <dd>{limits}</dd>
+        <dt className="text-slate-600 dark:text-slate-400">Sampling</dt>
+        <dd>{s.expected_interval_ns ? formatStep(s.expected_interval_ns) : "not set"}</dd>
+        {example?.source && (
+          <>
+            <dt className="text-slate-600 dark:text-slate-400">Source</dt>
+            <dd>
+              {safeUrl(example.url) ? (
+                <a href={example.url} target="_blank" rel="noreferrer" className="text-sky-800 underline underline-offset-2 dark:text-sky-300">
+                  {example.source}
+                </a>
+              ) : (
+                example.source
+              )}
+            </dd>
+          </>
+        )}
+        {example?.licence && (
+          <>
+            <dt className="text-slate-600 dark:text-slate-400">Licence</dt>
+            <dd>{example.licence}</dd>
+          </>
+        )}
+        {example?.notes && (
+          <>
+            <dt className="text-slate-600 dark:text-slate-400">Notes</dt>
+            <dd>{example.notes}</dd>
+          </>
+        )}
         <dt className="text-slate-600 dark:text-slate-400">Open findings</dt>
         <dd>{s.open_findings}</dd>
         <dt className="text-slate-600 dark:text-slate-400">Runs</dt>
@@ -167,9 +246,28 @@ function SeriesPanel({ seriesId }: { seriesId: string }) {
   );
 }
 
+/** "2.0 years · hourly": the window's span and the sampling step (the count has its own row). */
+function windowSummary(run: Run, declaredStepNs: number | null | undefined): string | null {
+  if (!run.window) return null;
+  const span = run.window.end - run.window.start;
+  const n = run.stats.n_samples;
+  const parts = [formatSpan(span)];
+  const single = run.series.length <= 1;
+  if (single && declaredStepNs) parts.push(formatStep(declaredStepNs));
+  else if (single && n !== undefined && n >= 2 && span > 0) parts.push(`≈ ${formatStep(span / (n - 1))}`);
+  return parts.join(" · ");
+}
+
 /** Run title, status and timing, window, samples and finding counts. */
 function Header({ run }: { run: Run }) {
   const stats = run.stats;
+  const seriesId = run.series.length === 1 ? run.series[0]!.id : undefined;
+  const series = useQuery({
+    queryKey: ["series", seriesId],
+    queryFn: () => api.getSeries(seriesId!),
+    enabled: Boolean(seriesId),
+  });
+  const summary = windowSummary(run, series.data?.expected_interval_ns);
   return (
     <header className="space-y-2">
       <div className="flex flex-wrap items-center gap-3">
@@ -186,6 +284,7 @@ function Header({ run }: { run: Run }) {
             <dt className="text-slate-600 dark:text-slate-400">Data window</dt>
             <dd>
               {formatLocalTime(run.window.start)} → {formatLocalTime(run.window.end)}
+              {summary && <span className="block text-slate-600 dark:text-slate-400">{summary}</span>}
             </dd>
           </>
         )}
@@ -258,7 +357,7 @@ export function RunReport() {
       {data.status === "succeeded" && (
         <>
           <Scores run={data} />
-          <Findings run={data} />
+          <FindingsOverview run={data} />
           {skipped.length > 0 && (
             <section aria-labelledby="skipped-heading" className="space-y-2">
               <h2 id="skipped-heading" className="text-base font-semibold">

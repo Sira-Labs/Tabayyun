@@ -59,6 +59,9 @@ export type Finding = {
   updated_at: string;
 };
 
+/** Where a public example series comes from (spec 019). */
+export type ExampleSource = { source?: string; url?: string; licence?: string; notes?: string };
+
 export type Series = {
   id: string;
   source_id: string;
@@ -70,6 +73,10 @@ export type Series = {
   physical_max: number | null;
   operational_min: number | null;
   operational_max: number | null;
+  /** Declared sampling step in ns; only the detail route returns it. */
+  expected_interval_ns?: number | null;
+  /** Free-form metadata; `example` is set by `deploy/examples/public.py` (spec 019). */
+  metadata?: { example?: ExampleSource } & Record<string, unknown>;
   latest_score: { overall: number; computed_at: string } | null;
   open_findings: number;
   n_runs: number;
