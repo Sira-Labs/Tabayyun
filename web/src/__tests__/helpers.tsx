@@ -24,7 +24,7 @@ export const ME: Me = {
 };
 
 /** The one workspace most tests run in, where the signed-in owner is admin. */
-export const WORKSPACE: Workspace = { id: "w1", name: "default", timezone: "UTC", role: "admin" };
+export const WORKSPACE: Workspace = { id: "w1", name: "default", timezone: "UTC", created_at: "2026-10-01T00:00:00Z", role: "admin" };
 
 /** Stub `fetch` with a router function; a returned Response is passed through, anything else is JSON.
  * `/api/auth/me` answers `me` (the signed-in `ME` unless given), `/api/workspaces` the given

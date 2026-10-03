@@ -47,7 +47,7 @@ describe("Admin: workspaces", () => {
   });
 
   it("gives workspace admins only their workspaces and the log", async () => {
-    stubFetch(adminRoute(adminState()), { me: { ...ME, role: "member" }, workspaces: [{ id: "w1", name: "default", timezone: "UTC", role: "admin" }] });
+    stubFetch(adminRoute(adminState()), { me: { ...ME, role: "member" }, workspaces: [{ id: "w1", name: "default", timezone: "UTC", created_at: "2026-10-01T00:00:00Z", role: "admin" }] });
     renderApp("/admin");
     const nav = await screen.findByRole("navigation", { name: "Admin sections" });
     expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual(["Workspaces", "Audit log"]);

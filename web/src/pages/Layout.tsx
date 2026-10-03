@@ -1,10 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useState } from "react";
 import { ORG_ADMIN_ROLES } from "../admin";
 import { ApiError, api, apiGet } from "../api";
 import { authApi, signOut } from "../auth";
-import { Brand } from "../components/Brand";
+import { Brand, buttonClass } from "../components/Brand";
 import { WorkspacePicker } from "../components/WorkspacePicker";
 import { currentWorkspaceId, resolveWorkspace, setWorkspaceId } from "../workspace";
 import { NoAccess } from "./NoAccess";
@@ -122,6 +122,7 @@ export function Layout() {
 /** A member of the org without a role in any workspace yet. Org admins still reach the admin
  * panel to create one. */
 function NoWorkspace({ isAdmin }: { isAdmin: boolean }) {
+  const client = useQueryClient();
   return (
     <section aria-labelledby="no-workspace-heading" className="space-y-2">
       <h1 id="no-workspace-heading" className="text-lg font-semibold">
@@ -129,8 +130,11 @@ function NoWorkspace({ isAdmin }: { isAdmin: boolean }) {
       </h1>
       <p>
         You are a member of the organisation, but no workspace has been shared with you yet. Ask an admin to give you
-        access to one.
+        access to one, then check again.
       </p>
+      <button type="button" className={buttonClass} onClick={() => void client.invalidateQueries({ queryKey: ["workspaces"] })}>
+        Check again
+      </button>
       {isAdmin && (
         <p>
           <Link to="/admin" search={{ tab: "workspaces" }} className="underline">

@@ -1,7 +1,7 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WORKSPACE_KEY, setWorkspaceId, type Workspace } from "../workspace";
+import { DEFAULT_WORKSPACE_ID, WORKSPACE_KEY, resolveWorkspace, setWorkspaceId, type Workspace } from "../workspace";
 import { ME, renderApp, stubFetch } from "./helpers";
 
 afterEach(() => {
@@ -9,8 +9,8 @@ afterEach(() => {
   localStorage.clear();
 });
 
-const NORTH: Workspace = { id: "w-north", name: "Plant North", timezone: "UTC", role: "editor" };
-const SOUTH: Workspace = { id: "w-south", name: "Plant South", timezone: "UTC", role: "viewer" };
+const NORTH: Workspace = { id: "w-north", name: "Plant North", timezone: "UTC", created_at: "2026-10-01T00:00:00Z", role: "editor" };
+const SOUTH: Workspace = { id: "w-south", name: "Plant South", timezone: "UTC", created_at: "2026-10-02T00:00:00Z", role: "viewer" };
 const EMPTY = { items: [], next_cursor: null };
 
 /** The workspace header of each `/api/runs` request, in order. */
@@ -67,5 +67,29 @@ describe("Workspace picker", () => {
     stubFetch(() => EMPTY, { me: { ...ME, role: "member" }, workspaces: [{ ...NORTH, role: "admin" }] });
     renderApp("/runs");
     expect(await screen.findByRole("link", { name: "Admin" })).toBeTruthy();
+  });
+
+  it("lets a member without a workspace check again", async () => {
+    let granted: Workspace[] = [];
+    stubFetch(() => EMPTY, { me: { ...ME, role: "member" }, workspaces: () => granted });
+    renderApp("/runs");
+    await screen.findByRole("heading", { name: "No workspace yet" });
+    granted = [NORTH];
+    await userEvent.setup().click(screen.getByRole("button", { name: "Check again" }));
+    expect(await screen.findByRole("heading", { name: "Runs" })).toBeTruthy();
+  });
+});
+
+describe("resolveWorkspace", () => {
+  const DEFAULT: Workspace = { ...SOUTH, id: DEFAULT_WORKSPACE_ID, name: "default", created_at: "2026-10-05T00:00:00Z" };
+
+  it("keeps a visible stored choice", () => {
+    expect(resolveWorkspace([NORTH, SOUTH, DEFAULT], "w-south")?.id).toBe("w-south");
+  });
+
+  it("otherwise picks what the server picks: the default workspace, else the oldest", () => {
+    expect(resolveWorkspace([NORTH, SOUTH, DEFAULT], null)?.id).toBe(DEFAULT_WORKSPACE_ID);
+    expect(resolveWorkspace([SOUTH, NORTH], "w-gone")?.id).toBe("w-north");
+    expect(resolveWorkspace([], null)).toBeNull();
   });
 });

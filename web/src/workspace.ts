@@ -3,10 +3,12 @@
 // header is missing. Storage can be unavailable (private mode, blocked site data), so every
 // access is guarded and the in-memory value is what requests read.
 export type WorkspaceRole = "admin" | "editor" | "viewer";
-export type Workspace = { id: string; name: string; timezone: string; role: WorkspaceRole };
+export type Workspace = { id: string; name: string; timezone: string; created_at: string; role: WorkspaceRole };
 
 export const WORKSPACE_KEY = "tby.workspace";
 export const WORKSPACE_HEADER = "X-Tabayyun-Workspace";
+/** The workspace every install starts with (spec 001). */
+export const DEFAULT_WORKSPACE_ID = "00000000-0000-0000-0000-000000000002";
 
 let current: string | null = readStored();
 
@@ -34,7 +36,11 @@ export function setWorkspaceId(id: string | null): void {
   }
 }
 
-/** The workspace to use from the visible ones: the stored choice while it is visible, else the first. */
+/** The workspace to use from the visible ones: the stored choice while it is visible, else what
+ * the server picks without a header (`get_workspace_id`): the default workspace, else the oldest. */
 export function resolveWorkspace(workspaces: Workspace[], stored: string | null): Workspace | null {
-  return workspaces.find((w) => w.id === stored) ?? workspaces[0] ?? null;
+  const chosen = workspaces.find((w) => w.id === stored) ?? workspaces.find((w) => w.id === DEFAULT_WORKSPACE_ID);
+  if (chosen) return chosen;
+  const byAge = [...workspaces].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+  return byAge[0] ?? null;
 }

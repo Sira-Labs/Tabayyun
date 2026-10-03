@@ -63,7 +63,7 @@ export const ORG_ROLES: OrgRole[] = ["owner", "admin", "member"];
 export const WORKSPACE_ROLES: WorkspaceRole[] = ["admin", "editor", "viewer"];
 export const ORG_ADMIN_ROLES = new Set<string>(["owner", "admin"]);
 /** The workspace every install starts with (spec 001); it cannot be deleted. */
-export const DEFAULT_WORKSPACE_ID = "00000000-0000-0000-0000-000000000002";
+export { DEFAULT_WORKSPACE_ID } from "./workspace";
 
 /** Whether the server asked for a fresh passkey sign-in (403 `second-factor-required`). */
 export function isPasskeyRequired(error: unknown): boolean {
