@@ -33,7 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/Sira-Labs/Tabayyun/main/deploy/.env
 # `openssl rand -base64 36`), TABAYYUN_APP_DB_PASSWORD (`openssl rand -hex 24`),
 # TABAYYUN_DOMAIN for automatic TLS, and the sign-in settings (TABAYYUN_PUBLIC_URL,
 # TABAYYUN_OIDC_ISSUER, TABAYYUN_OIDC_CLIENT_SECRET, TABAYYUN_ADMIN_EMAIL; the realm setup
-# is in caprover.md, "Sign-in")
+# is in caprover.md, "Sign-in"), and TABAYYUN_SMTP_HOST/TABAYYUN_SMTP_FROM for invitation emails
 docker compose up -d
 ```
 

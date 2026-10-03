@@ -38,13 +38,13 @@ can read who granted that access and when.
 New SECURITY DEFINER functions (owner-run, fixed `search_path`, EXECUTE granted to
 `tabayyun_app` only):
 
-- `tabayyun_accept_invitations(p_user uuid) RETURNS integer` accepts every pending, unexpired
+- `tabayyun_accept_invitations(p_user uuid) RETURNS SETOF uuid` accepts every pending, unexpired
   invitation whose email equals the user's verified email. For each one it:
   - adds the org membership, and keeps an existing higher role;
   - adds the workspace grant when there is one, and keeps an existing higher role;
   - marks the invitation accepted;
   - writes an audit event `member.joined`.
-  It returns the number accepted. A disabled user accepts nothing.
+  It returns the orgs joined, one per accepted invitation. A disabled user accepts nothing.
 - `tabayyun_login(...)`: same signature and result as spec 013. It now calls
   `tabayyun_accept_invitations` after it resolves the user and before it picks the org.
 
@@ -228,30 +228,32 @@ gives the sign-in link and the expiry date. After the last attempt the invitatio
 
 ## Acceptance criteria
 
-- [ ] Migration 0006 upgrades and downgrades cleanly. `audit_events` refuses UPDATE and
+- [x] Migration 0006 upgrades and downgrades cleanly. `audit_events` refuses UPDATE and
       DELETE for the app login. The new tables pass the RLS policy test.
-- [ ] `X-Tabayyun-Workspace` selects the workspace for data routes, with the fallback and the
+- [x] `X-Tabayyun-Workspace` selects the workspace for data routes, with the fallback and the
       400 and 404 paths; `GET /api/workspaces` lists visible workspaces with roles.
-- [ ] Every admin route enforces session, passkey freshness and role in that order. A
+- [x] Every admin route enforces session, passkey freshness and role in that order. A
       parametrised test runs each route with no session, a stale passkey, a Google session, a
       member and a workspace admin.
-- [ ] Owner rules and the last-owner guard hold for role changes and removals. Removing a
+- [x] Owner rules and the last-owner guard hold for role changes and removals. Removing a
       member revokes their sessions in the org.
-- [ ] An invitation is created, emailed (fake SMTP), resent and revoked with the stated status
+- [x] An invitation is created, emailed (fake SMTP), resent and revoked with the stated status
       codes. A sign-in with the invited verified email joins with the invited org and
       workspace roles. A signed-in user without access joins on the next `/me`.
-- [ ] Teams and workspace grants change the effective role exactly as `authorize()` computes it
+- [x] Teams and workspace grants change the effective role exactly as `authorize()` computes it
       (the invitee in the user story sees Plant North and gets 404 for Plant South).
-- [ ] Every mutation writes exactly one audit event with actor, IP and details. A failed
+- [x] Every mutation writes exactly one audit event with actor, IP and details. A failed
       mutation writes none. The audit route filters and paginates.
-- [ ] `prod` refuses an SMTP host without a sender, or with a placeholder password.
-- [ ] The web app switches workspaces and every page reads the chosen one. All admin actions
+- [x] `prod` refuses an SMTP host without a sender, or with a placeholder password.
+- [x] The web app switches workspaces and every page reads the chosen one. All admin actions
       are possible from `/admin`. The passkey gate shows its explanation and button.
 - [ ] Staging: the owner invites a second Google account as viewer of a new workspace. The
       email arrives; the invitee signs in and sees only that workspace. The audit log shows
       both steps.
-- [ ] `02-security-baseline.md`: the passkey-for-admins item is ticked, and the audit item is
-      ticked for authz changes (auth events stay in the logs, see "Out of scope").
+- [x] `02-security-baseline.md` records the passkey gate on every admin route and the audit
+      log of authz changes. Both items stay open, because they also cover per-organisation MFA
+      and auth events, shares and the SIEM export (spec edited: the baseline has no separate
+      "passkeys for admins" item).
 
 ## Test cases
 
@@ -285,6 +287,24 @@ gives the sign-in link and the expiry date. After the last attempt the invitatio
 - `AdminWorkspaces.test.tsx`: create, the access list, and adding a team role.
 - `AdminTeams.test.tsx` and `AdminAudit.test.tsx`: the main flows; filters and "Load more".
 - `PasskeyGate.test.tsx`: a `second-factor-required` answer shows the gate.
+
+## Implementation notes
+
+Recorded while implementing (3 Oct 2026); the spec above is corrected accordingly.
+
+- **The accept function returns the orgs joined** (`SETOF uuid`), not a count: `/api/auth/me`
+  needs the org to move a session without access into it.
+- **Workspace admins read the member and team lists.** A workspace admin who is not an org
+  admin has to pick org members and teams when granting access to their workspace. Changing
+  either list stays with org admins.
+- **Error codes.** A workspace role without a workspace, or the reverse, answers
+  `invalid_workspace_grant`; an owner or unknown role answers `invalid_role`.
+- **Invitation routes** live in `routers/invitations.py` under the same prefix and gate as
+  `routers/admin.py`. Inline jobs send the email after the response (the worker's last
+  attempt, without retries).
+- **Web.** The default workspace offers no Delete, since the API always refuses it. The header
+  picker and the invite form's workspace menu carry distinct accessible names. Both were found
+  driving the panel in Chromium against the API with an aiosmtpd sink.
 
 ## Decisions (owner, 3 Oct 2026)
 
