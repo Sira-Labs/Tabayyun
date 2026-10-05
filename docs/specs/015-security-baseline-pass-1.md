@@ -111,7 +111,8 @@ hint stay as they are. In `dev` and `test` it remains a warning.
 ### Web
 
 - The admin panel's error texts gain `rate_limited`: "Too many changes in a short time. Wait
-  a minute and try again."
+  a little and try again; invitations allow 50 an hour." (Edited in review: the invitation
+  window is an hour, so "a minute" was wrong for it.)
 
 ## Behaviour
 
@@ -203,7 +204,14 @@ hint stay as they are. In `dev` and `test` it remains a warning.
   address with every request and never met a per-IP limit. The edge now sets it from
   `{client_ip}`, trusting `X-Forwarded-For` only from private-range proxies (CapRover's nginx)
   and reading it from the right (`trusted_proxies_strict`); `test_edge_headers.py` keeps it.
-  Checked with Caddy 2.11 against an echo upstream.
+  Checked with Caddy 2.11 against an echo upstream. In review, the trust became
+  `TABAYYUN_TRUSTED_PROXIES`: `private_ranges` in the image (CapRover's nginx), loopback only
+  in `compose.yaml`, where Caddy is the edge and a private-range client could otherwise name
+  any address.
+- Starlette sends the 500 for an unhandled error from outside every middleware, so an
+  exception handler gives it the API headers itself.
+- `admin.invite` runs after the org-admin check: otherwise a member, refused anyway, could use
+  up the org's hour of invitations.
 - Through Caddy, API responses carry the edge's `Referrer-Policy:
   strict-origin-when-cross-origin`: Caddy's `header` replaces the api's `no-referrer`. Both
   keep the path and query from other origins; the api's own value matters for direct calls.

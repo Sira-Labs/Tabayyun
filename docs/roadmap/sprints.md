@@ -42,8 +42,8 @@ with the sprint that needs them.
 
 ## Actuals and forecast
 
-Actual dates are UTC merge dates. Sprints 1–7 took about a day each. Sprints 6–8 took 15
-days together (22 Sep – 5 Oct), about **5 days per sprint**. That includes a stop from 27 Sep
+Actual dates are UTC merge dates. Sprints 1–7 took about a day each. Sprints 6–8 took 14
+calendar days together (22 Sep – 5 Oct inclusive), about **5 days per sprint** (4.7). That includes a stop from 27 Sep
 to 1 Oct with no merges, release automation (ADR-0017), and two stories outside the plan
 (specs 019 and 020). The forecast (5 Oct) puts each sprint between **3.5 days** (two per
 week, the earlier plan's slow end: the early end of each window) and **5 days** (the measured

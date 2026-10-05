@@ -68,14 +68,15 @@ Sprint 8: sign-in, tenants and the first security baseline pass.
 - Checks are Rust kernels without Polars in the core (ADR-0015 supersedes ADR-0002).
 
 ### Security
-- Rate limits on sign-in (per client IP), device and sign-out routes (per user), admin changes
-  (per user) and invitations (per organisation), counted in Postgres so api replicas share
+- Rate limits on sign-in and back-channel logout (per client IP), device and sign-out routes
+  (per user, else per IP), admin changes (per user) and invitations (per organisation), counted in Postgres so api replicas share
   them; over the limit a request gets 429 with `Retry-After`. `TABAYYUN_RATE_LIMITS=false`
   turns them off for load tests (spec 015).
 - The web edge sends HSTS, `Permissions-Policy`, CORP and `X-Frame-Options`, and its CSP no
   longer allows inline styles. API responses carry `nosniff`, `Cache-Control: no-store` and
   `Referrer-Policy: no-referrer` themselves, and the sign-in failure pages a strict CSP.
-- The edge sets `X-Real-IP` from the client's address instead of passing on a client's own.
+- The edge sets `X-Real-IP` from the client's address instead of passing on a client's own;
+  only the proxies in `TABAYYUN_TRUSTED_PROXIES` may name it (none in the compose bundle).
 - In `prod` the api and the worker exit with code 4 on a database login that bypasses
   row-level security (spec 007 warned).
 - CI fails on a known advisory from `cargo audit`, `pip-audit` or `pnpm audit` (high and
