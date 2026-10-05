@@ -1,6 +1,16 @@
 # Production edge for the compose bundle. TLS is terminated here when TABAYYUN_DOMAIN is set
 # (Caddy obtains certificates automatically); otherwise it serves plain HTTP on :80 behind
 # your own load balancer.
+{
+	servers {
+		# A proxy in front (CapRover's nginx, a load balancer) on a private network may tell Caddy the
+		# client's address in X-Forwarded-For; strict takes the rightmost address it did not add
+		# itself, which a client cannot forge. Anything else is the peer address.
+		trusted_proxies static private_ranges
+		trusted_proxies_strict
+	}
+}
+
 {$TABAYYUN_DOMAIN::80} {
 	encode zstd gzip
 
@@ -24,7 +34,11 @@
 
 	@api path /api/* /healthz
 	handle @api {
-		reverse_proxy {$TABAYYUN_API_UPSTREAM:api:8000}
+		reverse_proxy {$TABAYYUN_API_UPSTREAM:api:8000} {
+			# The api keys sessions and per-IP rate limits (spec 015) on X-Real-IP; set it here so
+			# a client cannot send its own.
+			header_up X-Real-IP {client_ip}
+		}
 	}
 
 	handle {

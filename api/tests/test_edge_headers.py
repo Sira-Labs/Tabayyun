@@ -55,3 +55,12 @@ def test_permissions_policy_denies_device_access():
 
 def test_server_header_is_removed():
     assert re.search(r"^\s+-Server\s*$", CADDYFILE.read_text(), flags=re.MULTILINE)
+
+
+def test_the_edge_sets_the_client_ip():
+    """Per-IP rate limits key on `X-Real-IP`: the edge must overwrite a client's own value, and
+    trust `X-Forwarded-For` only from private proxies, reading it from the right."""
+    text = CADDYFILE.read_text()
+    assert re.search(r"^\s+header_up X-Real-IP \{client_ip\}\s*$", text, flags=re.MULTILINE)
+    assert re.search(r"^\s+trusted_proxies static private_ranges\s*$", text, flags=re.MULTILINE)
+    assert re.search(r"^\s+trusted_proxies_strict\s*$", text, flags=re.MULTILINE)

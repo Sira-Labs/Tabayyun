@@ -26,7 +26,10 @@ _STATE_KEY = "tabayyun_auth_session"
 
 
 def client_ip(request: Request) -> str | None:
-    """The client's IP from `X-Real-IP` behind the proxy, else the peer; informational only."""
+    """The client's IP from `X-Real-IP`, which the edge sets (Caddyfile), else the peer.
+
+    It keys per-IP rate limits (spec 015), so the api must sit behind that edge in production.
+    """
     for candidate in (request.headers.get("x-real-ip"), request.client.host if request.client else None):
         if candidate:
             try:
