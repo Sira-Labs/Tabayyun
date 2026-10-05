@@ -3,10 +3,11 @@
 # your own load balancer.
 {
 	servers {
-		# A proxy in front (CapRover's nginx, a load balancer) on a private network may tell Caddy the
-		# client's address in X-Forwarded-For; strict takes the rightmost address it did not add
-		# itself, which a client cannot forge. Anything else is the peer address.
-		trusted_proxies static private_ranges
+		# Only the proxies in front of Caddy may tell it the client's address (X-Forwarded-For); strict
+		# takes the rightmost address the proxy did not add itself, which a client cannot forge.
+		# The image trusts private ranges, where CapRover's nginx sits (narrow it to the overlay
+		# network's subnet); compose.yaml, where Caddy is the edge, trusts loopback only.
+		trusted_proxies static {$TABAYYUN_TRUSTED_PROXIES:private_ranges}
 		trusted_proxies_strict
 	}
 }

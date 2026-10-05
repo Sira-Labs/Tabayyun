@@ -59,8 +59,16 @@ def test_server_header_is_removed():
 
 def test_the_edge_sets_the_client_ip():
     """Per-IP rate limits key on `X-Real-IP`: the edge must overwrite a client's own value, and
-    trust `X-Forwarded-For` only from private proxies, reading it from the right."""
+    trust `X-Forwarded-For` only from the proxies named, reading it from the right."""
     text = CADDYFILE.read_text()
+    trust = r"^\s+trusted_proxies static \{\$TABAYYUN_TRUSTED_PROXIES:private_ranges\}\s*$"
     assert re.search(r"^\s+header_up X-Real-IP \{client_ip\}\s*$", text, flags=re.MULTILINE)
-    assert re.search(r"^\s+trusted_proxies static private_ranges\s*$", text, flags=re.MULTILINE)
+    assert re.search(trust, text, flags=re.MULTILINE)
     assert re.search(r"^\s+trusted_proxies_strict\s*$", text, flags=re.MULTILINE)
+
+
+def test_compose_trusts_no_proxy_by_default():
+    """In the compose bundle Caddy faces the clients itself: a private-range client must not be able
+    to name another address."""
+    compose = (CADDYFILE.parents[1] / "compose.yaml").read_text()
+    assert "TABAYYUN_TRUSTED_PROXIES: ${TABAYYUN_TRUSTED_PROXIES:-127.0.0.1/32}" in compose

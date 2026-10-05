@@ -200,6 +200,9 @@ Since spec 015 (v0.2.0), `prod` refuses to serve on a login that bypasses RLS: b
 - App Configs → Environment variables: `TABAYYUN_API_UPSTREAM=srv-captain--tabayyun-api:8000`
   (Caddy inside the image proxies `/api` and `/healthz` there; `TABAYYUN_DOMAIN` stays
   unset so Caddy serves plain HTTP on :80 behind CapRover).
+  - Optional `TABAYYUN_TRUSTED_PROXIES`: the addresses Caddy takes `X-Forwarded-For` from,
+    default `private_ranges` (CapRover's nginx is on the overlay network). To narrow it, set
+    the subnet `docker network inspect captain-overlay-network` shows, e.g. `10.0.1.0/24`.
 - Container HTTP port: `80`.
 - HTTP Settings: connect your domain (e.g. `tabayyun.example.com`), Enable HTTPS, Force HTTPS.
 - Deployment tab → **Enable App Token**, copy it. First deploy via ImageName:
