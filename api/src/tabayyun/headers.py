@@ -11,6 +11,8 @@ A pure ASGI middleware, so streamed bodies pass through untouched.
 from __future__ import annotations
 
 from starlette.datastructures import MutableHeaders
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 API_HEADERS = {
@@ -52,3 +54,9 @@ class SecurityHeadersMiddleware:
             await send(message)
 
         await self.app(scope, receive, with_headers)
+
+
+async def server_error(request: Request, exc: Exception) -> Response:
+    """The 500 for an unhandled error. Starlette sends it from outside every middleware, so it
+    carries the API headers itself; the exception is still raised on for the server's log."""
+    return PlainTextResponse("Internal Server Error", status_code=500, headers=API_HEADERS)

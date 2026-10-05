@@ -20,7 +20,7 @@ from tabayyun.auth import CsrfMiddleware, OidcClient, build_oidc
 from tabayyun.authz import get_principal
 from tabayyun.db import DB_OK, check_db, guard_schema, make_engine, make_session_factory, worker_commits
 from tabayyun.db.roles import check_login, is_rls_violation
-from tabayyun.headers import SecurityHeadersMiddleware
+from tabayyun.headers import SecurityHeadersMiddleware, server_error
 from tabayyun.jobs.names import WORKER_APPLICATION_NAME
 from tabayyun.limits import RateLimitedError
 from tabayyun.limits import response_for as rate_limited_response
@@ -102,6 +102,8 @@ def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = No
     # The admin router orders its own gate: session, then passkey freshness (spec 014).
     app.include_router(admin.router)
     app.include_router(invitations.router)
+
+    app.add_exception_handler(Exception, server_error)
 
     @app.exception_handler(RateLimitedError)
     async def rate_limited(request: Request, exc: RateLimitedError) -> Response:

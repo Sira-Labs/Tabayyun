@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 
 from db.test_auth_flow import browser
 from tabayyun.headers import API_HEADERS, HTML_HEADERS
@@ -59,3 +60,18 @@ async def test_headers_are_never_duplicated(env):
     assert r.status_code == 302
     assert r.headers["cache-control"] == "no-store"
     assert r.headers.get_list("cache-control") == ["no-store"]
+
+
+async def test_an_unhandled_error_has_them(env):
+    """Starlette answers an unhandled exception from outside the middleware stack."""
+    app = env.make()
+
+    @app.get("/api/boom")
+    async def boom() -> None:
+        raise RuntimeError("boom")
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="https://tabayyun.test") as c:
+        r = await c.get("/api/boom")
+    assert r.status_code == 500
+    assert_api_headers(r)
