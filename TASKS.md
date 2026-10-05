@@ -288,7 +288,23 @@ Rust kernels, no Polars in the core (ADR-0015 supersedes ADR-0002).
       spec 014 staging check: signed in with a passkey, invite a second Google account as
       viewer of a new workspace; it signs in and sees only that workspace; Admin → Audit log
       shows both steps.
-- [ ] 015 Security baseline pass 1
+- [x] **015 Security baseline pass 1** — `docs/specs/015-security-baseline-pass-1.md`
+      (5 Oct; closes sprint 8, released as v0.2.0). Every criterion but the staging check is
+      met.
+      - Rate limits count in Postgres (`rate_limits`, fixed windows, pruned after a day) and
+        fail open, so api replicas share them and a counter outage never locks out sign-in.
+      - The edge sets `X-Real-IP` from `{client_ip}` (trusting `X-Forwarded-For` only from
+        private proxies, read from the right): Caddy used to pass a client's own value on,
+        which would have dodged every per-IP limit.
+      - CSP enforced with `style-src 'self'`, no hashes: the SPA has no inline code. HSTS
+        without `preload`, which belongs to the registered domain's owner.
+      - pip-audit has no ignore file: an accepted advisory is an `--ignore-vuln` flag with a
+        reason next to the step (spec edited).
+      - Checked in Chromium through Caddy: runs, a run report, the admin tabs and the account
+        page without a CSP violation.
+- [ ] Owner: spec 015 staging check after v0.2.0 deploys: `curl -sI
+      https://tabayyun-stg.siralabs.org/` shows `Strict-Transport-Security` and the CSP; sign
+      in with Google and with a passkey; Admin opens without CSP errors in the console.
 
 Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, SMTP):
 `docs/roadmap/sprints.md`, "Owner and external dependencies".
@@ -318,8 +334,9 @@ Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, S
       the first version needed `AUTOMATION_TOKEN`); the images get the version tag in GHCR.
 - [ ] Owner: activate `protect-main` (with `CodeRabbit`); optionally `AUTOMATION_TOKEN` for
       Dependabot's pull requests (`deploy/caprover.md`, section 5).
-- [ ] v0.2.0 (`[minor]`) when sprint 8 is live (specs 014 and 015), with the first release
-      presentation; patch releases from v0.1.1 until then.
+- [x] v0.2.0 (`[minor]`) when sprint 8 is live (specs 014 and 015), with the first release
+      presentation; patch releases from v0.1.1 until then. (The spec 015 PR carries the
+      marker.)
 
 ## Public example series (spec 019, 3 Oct 2026, owner request)
 

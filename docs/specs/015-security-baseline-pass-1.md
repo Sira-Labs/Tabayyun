@@ -99,8 +99,10 @@ hint stay as they are. In `dev` and `test` it remains a warning.
 - `ci.yml` makes the audits blocking:
   - `pip-audit --skip-editable` and `pnpm audit --audit-level high` lose `|| true`;
     `cargo audit` already blocks.
-  - An accepted advisory goes into `api/audit-ignore.toml` or `pnpm.auditConfig.ignoreCves`
-    with a reason and a review date, never silently.
+  - An accepted advisory goes into the workflow as `--ignore-vuln <ID>` (pip-audit), into
+    `pnpm.auditConfig.ignoreCves` (pnpm) or `core/.cargo/audit.toml` (cargo), with a reason
+    and a review date, never silently. (Edited during implementation: pip-audit has no
+    ignore file, so the flag next to the step is the one place to look.)
 - The Rust steps run with `--locked`, as `uv sync --locked` and `pnpm install
   --frozen-lockfile` already do.
 - A new `audit.yml` runs the three audits every Monday at 05:00 UTC and on demand.
@@ -137,23 +139,23 @@ hint stay as they are. In `dev` and `test` it remains a warning.
 
 ## Acceptance criteria
 
-- [ ] The Caddyfile carries the headers in the table; a test parses it and fails when one is
+- [x] The Caddyfile carries the headers in the table; a test parses it and fails when one is
       missing or `'unsafe-inline'` comes back into `script-src` or `style-src`.
-- [ ] Every API response, including 401, 404, 422 and 429, has `nosniff`, `no-store` and
+- [x] Every API response, including 401, 404, 422 and 429, has `nosniff`, `no-store` and
       `no-referrer`. The sign-in failure pages also have their CSP and `X-Frame-Options`.
-- [ ] Each bucket answers 429 with `Retry-After` on the request after its limit. The window
+- [x] Each bucket answers 429 with `Retry-After` on the request after its limit. The window
       resets, other keys stay unaffected, and an unavailable counter lets requests through.
-- [ ] `TABAYYUN_RATE_LIMITS=false` disables every limit; prod warns.
-- [ ] Migration 0007 upgrades and downgrades; the prune job deletes only windows older than a
+- [x] `TABAYYUN_RATE_LIMITS=false` disables every limit; prod warns.
+- [x] Migration 0007 upgrades and downgrades; the prune job deletes only windows older than a
       day.
-- [ ] In `prod`, an owner or superuser login makes the api lifespan and the worker exit with
+- [x] In `prod`, an owner or superuser login makes the api lifespan and the worker exit with
       code 4. The app login starts; `dev` keeps warning.
-- [ ] CI fails on a known advisory in any of the three ecosystems. `audit.yml` runs weekly.
+- [x] CI fails on a known advisory in any of the three ecosystems. `audit.yml` runs weekly.
       Rust builds use `--locked`. ESLint rejects `dangerouslySetInnerHTML`.
 - [ ] Staging: `curl -sI https://tabayyun-stg.siralabs.org/` shows HSTS and the CSP, sign-in
       with Google and with a passkey still works, and the admin panel loads without CSP
       errors in the console.
-- [ ] `02-security-baseline.md`: the transport and header, CORS, inline-script and lockfile
+- [x] `02-security-baseline.md`: the transport and header, CORS, inline-script and lockfile
       items are ticked. The audit and rate-limit items are annotated with what is left.
 
 ## Test cases
@@ -194,6 +196,26 @@ hint stay as they are. In `dev` and `test` it remains a warning.
 4. **CSP enforced, not report-only.** The policy has been enforced since the compose bundle
    existed and the SPA has no inline code. Only `style-src` tightens, and the staging check
    covers it.
+
+## Implementation notes
+
+- Caddy passed a client's own `X-Real-IP` on to the api, so a script could have sent a new
+  address with every request and never met a per-IP limit. The edge now sets it from
+  `{client_ip}`, trusting `X-Forwarded-For` only from private-range proxies (CapRover's nginx)
+  and reading it from the right (`trusted_proxies_strict`); `test_edge_headers.py` keeps it.
+  Checked with Caddy 2.11 against an echo upstream.
+- Through Caddy, API responses carry the edge's `Referrer-Policy:
+  strict-origin-when-cross-origin`: Caddy's `header` replaces the api's `no-referrer`. Both
+  keep the path and query from other origins; the api's own value matters for direct calls.
+- The api's security headers are a pure ASGI middleware outside the CSRF one, so the CSRF
+  refusal and unhandled errors get them too. They use `setdefault`: a route's own value wins.
+- `admin.write` is counted after the session check (the router's dependency order), so an
+  anonymous flood is refused with 401 without writing counters; `admin.invite` counts on top
+  of it for the two invitation routes.
+- The exit-4 test runs the api's lifespan directly instead of through `LifespanManager`,
+  whose task would swallow the `SystemExit` into the event loop.
+- Checked in Chromium through Caddy with the strict CSP: runs list, a run report with its
+  timeline, the four admin tabs and the account page, with no violation in the console.
 
 ## Out of scope
 
