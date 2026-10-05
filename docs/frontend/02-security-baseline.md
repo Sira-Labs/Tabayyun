@@ -23,14 +23,14 @@ review item, or an ops runbook entry.
 - [ ] File uploads: type sniffing, size cap, stored outside web root, never executed.
 
 ## Transport and headers
-- [ ] TLS 1.2+ at the edge; HSTS with preload; HTTP → HTTPS redirect.
-- [ ] CSP: `default-src 'self'; script-src 'self' 'sha256-…' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'` (share embeds get their own policy); report-only first, then enforce.
-- [ ] `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` minimal, COOP `same-origin`.
-- [ ] CORS disabled (same origin) except documented API-token clients.
+- [ ] TLS 1.2+ at the edge; HSTS with preload; HTTP → HTTPS redirect. (Spec 015: Caddy sends `Strict-Transport-Security: max-age=31536000; includeSubDomains`; CapRover terminates TLS and redirects. `preload` waits for the production domain, whose owner submits it.)
+- [x] CSP: `default-src 'self'; script-src 'self' 'sha256-…' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'` (share embeds get their own policy); report-only first, then enforce. (Spec 015: enforced at the edge with `script-src 'self'` and `style-src 'self'`, no `'unsafe-inline'`, since the SPA has no inline code, so neither hashes nor `'strict-dynamic'` are needed; `test_edge_headers.py` keeps it so. The API's HTML pages carry `default-src 'none'`. Share embeds get theirs with sharing.)
+- [x] `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` minimal, COOP `same-origin`. (Spec 015: at the edge, with CORP `same-origin` and `X-Frame-Options: DENY`; API responses also carry `nosniff`, `Cache-Control: no-store` and `Referrer-Policy: no-referrer` themselves.)
+- [x] CORS disabled (same origin) except documented API-token clients. (The api has no CORS middleware, so browsers refuse cross-origin reads; API-token clients come with API tokens.)
 
 ## CSRF and XSS
 - [x] Unsafe methods require the `X-Tabayyun-Request` header; `Origin` checked when present. (Spec 013: `CsrfMiddleware`. The item first also asked for a JSON content type; uploads are multipart, so the header, which a cross-site form cannot send, is the guard.)
-- [ ] No inline scripts; no `dangerouslySetInnerHTML`; DOMPurify for markdown.
+- [x] No inline scripts; no `dangerouslySetInnerHTML`; DOMPurify for markdown. (Spec 015: the CSP refuses inline scripts and styles, and ESLint rejects `dangerouslySetInnerHTML`. Nothing renders markdown yet; DOMPurify comes with the first renderer.)
 
 ## Secrets and configuration
 - [ ] No secrets in code, images or config files; environment variables or mounted secret files only; startup refuses placeholder secrets.
@@ -38,13 +38,13 @@ review item, or an ops runbook entry.
 - [ ] Licence keys are Ed25519-signed; the public key is embedded; private key never leaves the vendor.
 
 ## Supply chain and build
-- [ ] Lockfiles committed; `pnpm install --frozen-lockfile`, `uv sync --locked`, `cargo` with `Cargo.lock`.
-- [ ] `cargo audit` + `cargo deny` (licences, advisories), `pip-audit`, `npm audit`/Socket in CI; Renovate with cooldown.
+- [x] Lockfiles committed; `pnpm install --frozen-lockfile`, `uv sync --locked`, `cargo` with `Cargo.lock`. (Spec 015: the Rust and maturin steps run with `--locked`.)
+- [ ] `cargo audit` + `cargo deny` (licences, advisories), `pip-audit`, `npm audit`/Socket in CI; Renovate with cooldown. (Spec 015: `cargo audit`, `pip-audit` and `pnpm audit --audit-level high` block CI, and `audit.yml` runs them every Monday; `cargo deny` and a cooldown come in S13-4.)
 - [ ] SBOM (CycloneDX) for each image; images signed with cosign; Trivy scan gate.
 - [ ] Reproducible builds for the Rust wheel; wheels built on manylinux with pinned toolchain.
 
 ## Multi-tenancy and data
-- [ ] `org_id` on every tenant table and every cache path prefix; per-tenant rate limits; tenant-scoped job context.
+- [ ] `org_id` on every tenant table and every cache path prefix; per-tenant rate limits; tenant-scoped job context. (Spec 015: sign-in routes are limited per client IP, admin writes per user and invitations per org, counted in Postgres; data routes get theirs with suites in sprint 10.)
 - [ ] Backups: nightly Postgres dump + cache snapshot; restore drill documented and tested.
 - [ ] Data retention configurable per workspace (findings, metrics, cache, audit).
 

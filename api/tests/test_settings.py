@@ -199,3 +199,9 @@ def test_invitation_ttl_accepts_days(monkeypatch):
     monkeypatch.setenv("TABAYYUN_INVITATION_TTL", "7d")
     assert Settings().invitation_ttl.days == 7
     assert Settings(smtp_host=" ").mail_enabled is False
+
+
+def test_rate_limits_setting(monkeypatch):
+    assert Settings().rate_limits is True
+    monkeypatch.setenv("TABAYYUN_RATE_LIMITS", "false")
+    assert Settings().rate_limits is False

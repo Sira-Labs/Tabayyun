@@ -29,11 +29,11 @@ for user-facing stories, a screenshot or curl transcript in the PR.
 
 ## Milestones
 
-| Milestone | Sprints | Original plan | Forecast (2026-09-23) | Exit criteria |
+| Milestone | Sprints | Original plan | Forecast (2026-10-05) | Exit criteria |
 |---|---|---|---|---|
-| **R1 core, release 0.1** | 5–13 | 21 Nov 2026 | feature-complete 10–18 Oct; release when the pilot install is validated | 30 checks; persisted runs, findings, scores; PI Web API and OPC UA connectors; Google login, workspace RBAC; overview, series detail, findings inbox; alerts; corrections with lineage and a corrected layer; share links; pilot install on Hetzner; ≥95 % of injected faults detected at ≤2 % false positives per check |
-| **R2 domain depth** | 14–18 | 26 Dec 2026 | 22 Oct – 5 Nov | metering, PV, wind, grid, oil and gas packs; RepairFlows with regulatory estimation; write-back; public benchmark corpus |
-| **R3 platform, release 1.0** | 19–22 | 23 Jan 2027 | 31 Oct – 19 Nov | enterprise SSO and SCIM, API tokens, embeds, fleet baselines, multi-node workers, more connectors, SOC 2 pack, licensing |
+| **R1 core, release 0.1** | 5–13 | 21 Nov 2026 | feature-complete 22–30 Oct; release when the pilot install is validated | 30 checks; persisted runs, findings, scores; PI Web API and OPC UA connectors; Google login, workspace RBAC; overview, series detail, findings inbox; alerts; corrections with lineage and a corrected layer; share links; pilot install on Hetzner; ≥95 % of injected faults detected at ≤2 % false positives per check |
+| **R2 domain depth** | 14–18 | 26 Dec 2026 | 9–24 Nov | metering, PV, wind, grid, oil and gas packs; RepairFlows with regulatory estimation; write-back; public benchmark corpus |
+| **R3 platform, release 1.0** | 19–22 | 23 Jan 2027 | 23 Nov – 14 Dec | enterprise SSO and SCIM, API tokens, embeds, fleet baselines, multi-node workers, more connectors, SOC 2 pack, licensing |
 
 A forecast window is software scope only. Items that wait on people or third parties (the
 pilot site, an external pen test, test tenants, store accounts) do not compress with it;
@@ -42,17 +42,19 @@ with the sprint that needs them.
 
 ## Actuals and forecast
 
-Actual dates are UTC merge dates. Measured pace so far: about one sprint per working day.
-The forecast deliberately plans at **2–3 sprints per week** (3.5 to 2.3 days each), a third
-to a half of the measured pace, because sprints 7–13 carry more research, third-party
-software (Keycloak, PI Web API, OPC UA) and performance work than sprints 1–6, and because
-budget stops and review rounds are part of the calendar. Late December runs at half
+Actual dates are UTC merge dates. Sprints 1–7 took about a day each. Sprints 6–8 took 14
+calendar days together (22 Sep – 5 Oct inclusive), about **5 days per sprint** (4.7). That includes a stop from 27 Sep
+to 1 Oct with no merges, release automation (ADR-0017), and two stories outside the plan
+(specs 019 and 020). The forecast (5 Oct) puts each sprint between **3.5 days** (two per
+week, the earlier plan's slow end: the early end of each window) and **5 days** (the measured
+pace with its stops: the late end). Sprints 9–13 carry third-party software (PI Web API, OPC
+UA) and performance work, so the late end is the likelier one there. Late December runs at half
 capacity whichever sprint falls there. At the end of each sprint: fill in its row, recompute
 the forecast from the last three sprints, and update the milestones table.
 
 ```mermaid
 gantt
-    title Sprints: actuals and forecast (bars end at the early end of each window, 2026-09-23)
+    title Sprints: actuals and forecast (bars end at the early end of each window, 2026-10-05)
     dateFormat YYYY-MM-DD
     axisFormat %d %b
     todayMarker off
@@ -61,31 +63,31 @@ gantt
     S1–S4 core, checks, wheel, deploy        :done, s4, 2026-09-21, 1d
     S5 landing and planning                  :done, s5, 2026-09-21, 2026-09-22
     S6 persistence and jobs                  :done, s6, 2026-09-22, 2026-09-23
+    S7 cache and cross-series checks         :done, s7, 2026-09-23, 2026-09-24
+    S8 login, tenants, RBAC                  :done, s8, 2026-09-25, 2026-10-05
 
     section R1 core, release 0.1
-    S7 cache and cross-series checks         :active, s7, 2026-09-23, 2026-09-26
-    S8 login, tenants, RBAC                  :s8, 2026-09-26, 2026-09-29
-    S9 connectors, series screen             :s9, 2026-09-29, 2026-10-01
-    S10 suites, triage, alerts, overview     :s10, 2026-10-01, 2026-10-03
-    S11 corrections v1                       :s11, 2026-10-03, 2026-10-06
-    S12 sharing, energy pack                 :s12, 2026-10-06, 2026-10-08
-    S13 hardening, release 0.1               :s13, 2026-10-08, 2026-10-10
-    R1 feature-complete                      :milestone, r1, 2026-10-10, 0d
+    S9 connectors, series screen             :active, s9, 2026-10-05, 2026-10-08
+    S10 suites, triage, alerts, overview     :s10, 2026-10-08, 2026-10-12
+    S11 corrections v1                       :s11, 2026-10-12, 2026-10-15
+    S12 sharing, energy pack                 :s12, 2026-10-15, 2026-10-19
+    S13 hardening, release 0.1               :s13, 2026-10-19, 2026-10-22
+    R1 feature-complete                      :milestone, r1, 2026-10-22, 0d
 
     section R2 domain depth
-    S14 metering pack, RepairFlows           :s14, 2026-10-10, 2026-10-13
-    S15 PV and wind packs                    :s15, 2026-10-13, 2026-10-15
-    S16 oil and gas pack 1                   :s16, 2026-10-15, 2026-10-17
-    S17 oil and gas pack 2                   :s17, 2026-10-17, 2026-10-20
-    S18 grid pack, write-back, corpus        :s18, 2026-10-20, 2026-10-22
-    R2 domain depth                          :milestone, r2, 2026-10-22, 0d
+    S14 metering pack, RepairFlows           :s14, 2026-10-22, 2026-10-26
+    S15 PV and wind packs                    :s15, 2026-10-26, 2026-10-29
+    S16 oil and gas pack 1                   :s16, 2026-10-29, 2026-11-02
+    S17 oil and gas pack 2                   :s17, 2026-11-02, 2026-11-05
+    S18 grid pack, write-back, corpus        :s18, 2026-11-05, 2026-11-09
+    R2 domain depth                          :milestone, r2, 2026-11-09, 0d
 
     section R3 platform, release 1.0
-    S19 enterprise identity                  :s19, 2026-10-22, 2026-10-24
-    S20 fleet baselines, scale               :s20, 2026-10-24, 2026-10-27
-    S21 connectors, mobile                   :s21, 2026-10-27, 2026-10-29
-    S22 compliance, release 1.0              :s22, 2026-10-29, 2026-10-31
-    R3 release 1.0                           :milestone, r3, 2026-10-31, 0d
+    S19 enterprise identity                  :s19, 2026-11-09, 2026-11-12
+    S20 fleet baselines, scale               :s20, 2026-11-12, 2026-11-16
+    S21 connectors, mobile                   :s21, 2026-11-16, 2026-11-19
+    S22 compliance, release 1.0              :s22, 2026-11-19, 2026-11-23
+    R3 release 1.0                           :milestone, r3, 2026-11-23, 0d
 ```
 
 The chart is the table below drawn on a calendar; when a sprint ends, update both.
@@ -98,22 +100,22 @@ The chart is the table below drawn on a calendar; when a sprint ends, update bot
 | 4 | CapRover deploy, research 05, historian timestamps | before the plan | done 21 Sep | #6 |
 | 5 | landing and planning | 20–26 Sep | done 22 Sep (S5-3 with the owner) | #5, #7, #15, #16, #22–#24 |
 | 6 | persistence and jobs | 27 Sep – 3 Oct | done 23 Sep | #25–#29 |
-| 7 | Parquet cache and cross-series checks | 4–10 Oct | 26–28 Sep | |
-| 8 | login, tenants and RBAC | 11–17 Oct | 29 Sep – 1 Oct | |
-| 9 | connectors and the series screen | 18–24 Oct | 1–4 Oct | |
-| 10 | suites, triage, alerts, overview | 25–31 Oct | 3–8 Oct | |
-| 11 | corrections v1 | 1–7 Nov | 6–12 Oct | |
-| 12 | sharing and the energy pack | 8–14 Nov | 8–15 Oct | |
-| 13 | hardening and release 0.1 | 15–21 Nov | 10–18 Oct | |
-| 14 | metering pack and RepairFlows | 22–28 Nov | 13–22 Oct | |
-| 15 | PV and wind packs | 29 Nov – 5 Dec | 15–26 Oct | |
-| 16 | oil and gas pack 1 | 6–12 Dec | 17–29 Oct | |
-| 17 | oil and gas pack 2 | 13–19 Dec | 20 Oct – 1 Nov | |
-| 18 | grid pack, write-back, benchmark corpus | 20–26 Dec | 22 Oct – 5 Nov | |
-| 19 | enterprise identity | 27 Dec – 2 Jan | 24 Oct – 9 Nov | |
-| 20 | fleet baselines and scale | 3–9 Jan | 27 Oct – 12 Nov | |
-| 21 | connectors and mobile | 10–16 Jan | 29 Oct – 15 Nov | |
-| 22 | compliance and release 1.0 | 17–23 Jan | 31 Oct – 19 Nov | |
+| 7 | Parquet cache and cross-series checks | 4–10 Oct | done 24 Sep | #31–#34, #36–#38, #40, #41, #43–#45 |
+| 8 | login, tenants and RBAC | 11–17 Oct | done 5 Oct (owner steps on staging open) | #60, #65–#67, #80, #81 |
+| 9 | connectors and the series screen | 18–24 Oct | 8–10 Oct | |
+| 10 | suites, triage, alerts, overview | 25–31 Oct | 12–15 Oct | |
+| 11 | corrections v1 | 1–7 Nov | 15–20 Oct | |
+| 12 | sharing and the energy pack | 8–14 Nov | 19–25 Oct | |
+| 13 | hardening and release 0.1 | 15–21 Nov | 22–30 Oct | |
+| 14 | metering pack and RepairFlows | 22–28 Nov | 26 Oct – 4 Nov | |
+| 15 | PV and wind packs | 29 Nov – 5 Dec | 29 Oct – 9 Nov | |
+| 16 | oil and gas pack 1 | 6–12 Dec | 2–14 Nov | |
+| 17 | oil and gas pack 2 | 13–19 Dec | 5–19 Nov | |
+| 18 | grid pack, write-back, benchmark corpus | 20–26 Dec | 9–24 Nov | |
+| 19 | enterprise identity | 27 Dec – 2 Jan | 12–29 Nov | |
+| 20 | fleet baselines and scale | 3–9 Jan | 16 Nov – 4 Dec | |
+| 21 | connectors and mobile | 10–16 Jan | 19 Nov – 9 Dec | |
+| 22 | compliance and release 1.0 | 17–23 Jan | 23 Nov – 14 Dec | |
 
 ## Owner and external dependencies
 

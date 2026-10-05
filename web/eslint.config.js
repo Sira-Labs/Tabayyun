@@ -9,6 +9,16 @@ export default tseslint.config(
   {
     files: ["**/*.{ts,tsx}"],
     plugins: { "react-hooks": reactHooks },
-    rules: { ...reactHooks.configs.recommended.rules },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      // No raw HTML from React (docs/frontend/02-security-baseline.md, spec 015).
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+          message: "Raw HTML is not allowed; render text, or sanitise markdown with DOMPurify first.",
+        },
+      ],
+    },
   },
 );

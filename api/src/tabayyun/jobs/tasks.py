@@ -14,13 +14,14 @@ from tabayyun.jobs import app, runtime
 from tabayyun.jobs.names import (
     MAIL_QUEUE,
     MAINTENANCE_QUEUE,
+    PRUNE_RATE_LIMITS_TASK,
     REAP_STALE_RUNS_TASK,
     RUN_CHECKS_TASK,
     RUNS_QUEUE,
     SEND_INVITATION_TASK,
 )
 from tabayyun.mail import MailError, SmtpConfig
-from tabayyun.services import execution
+from tabayyun.services import execution, rate_limits
 from tabayyun.services import runs as runs_service
 from tabayyun.services.admin import invitations
 from tabayyun.settings import get_settings
@@ -47,6 +48,15 @@ async def reap_stale_runs(timestamp: int) -> None:
     reaped = await runs_service.reap_stale_runs(runtime.session_factory())
     if reaped:
         log.warning("runs.reaped", count=reaped, tick=timestamp)
+
+
+@app.periodic(cron="*/10 * * * *")
+@app.task(queue=MAINTENANCE_QUEUE, name=PRUNE_RATE_LIMITS_TASK, retry=False)
+async def prune_rate_limits(timestamp: int) -> None:
+    """Every 10 minutes: drop rate-limit windows older than a day (spec 015)."""
+    pruned = await rate_limits.prune(runtime.session_factory())
+    if pruned:
+        log.info("rate.pruned", count=pruned, tick=timestamp)
 
 
 MAIL_ATTEMPTS = 3

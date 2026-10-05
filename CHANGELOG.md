@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-05
+
+Sprint 8: sign-in, tenants and the first security baseline pass.
+
 ### Added
 - Rust core with checks 1–20 of the catalogue, baseline profile, scoring v2, M4
   downsampling, synthetic fault generator and the `tabayyun` CLI (CSV/Parquet in, JSON out).
@@ -63,6 +67,22 @@ All notable changes to this project are documented here. The format follows
 - `TABAYYUN_CACHE_DIR` is now `TABAYYUN_CACHE_URL` (the old name is still accepted).
 - Checks are Rust kernels without Polars in the core (ADR-0015 supersedes ADR-0002).
 
+### Security
+- Rate limits on sign-in and back-channel logout (per client IP), device and sign-out routes
+  (per user, else per IP), admin changes (per user) and invitations (per organisation), counted in Postgres so api replicas share
+  them; over the limit a request gets 429 with `Retry-After`. `TABAYYUN_RATE_LIMITS=false`
+  turns them off for load tests (spec 015).
+- The web edge sends HSTS, `Permissions-Policy`, CORP and `X-Frame-Options`, and its CSP no
+  longer allows inline styles. API responses carry `nosniff`, `Cache-Control: no-store` and
+  `Referrer-Policy: no-referrer` themselves, and the sign-in failure pages a strict CSP.
+- The edge sets `X-Real-IP` from the client's address instead of passing on a client's own;
+  only the proxies in `TABAYYUN_TRUSTED_PROXIES` may name it (none in the compose bundle).
+- In `prod` the api and the worker exit with code 4 on a database login that bypasses
+  row-level security (spec 007 warned).
+- CI fails on a known advisory from `cargo audit`, `pip-audit` or `pnpm audit` (high and
+  above), and runs them weekly; Rust builds use `--locked`; ESLint rejects
+  `dangerouslySetInnerHTML`.
+
 ### Fixed
 - Timestamps near the `i64` limits no longer overflow in the checks, the profile, the scorer,
   M4 or the cross checks; writing a sample at `i64::MAX` to the cache no longer hangs, and a
@@ -75,4 +95,5 @@ All notable changes to this project are documented here. The format follows
 - A dataset window lying wholly outside 1677–2262, fixed or resolved at a run's `now`, is a
   422 instead of a run that fails in the worker.
 
-[Unreleased]: https://github.com/Sira-Labs/Tabayyun/commits/main
+[Unreleased]: https://github.com/Sira-Labs/Tabayyun/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Sira-Labs/Tabayyun/releases/tag/v0.2.0

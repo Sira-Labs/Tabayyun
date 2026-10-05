@@ -33,6 +33,7 @@ from tabayyun.authz import (
 )
 from tabayyun.authz.roles import ORG_ADMINS
 from tabayyun.db.models import User
+from tabayyun.limits import UNSAFE_METHODS, limit
 from tabayyun.services.admin import audit, members, org, teams, workspaces
 from tabayyun.services.admin import errors as admin_errors
 from tabayyun.services.pagination import decode_keyset, encode_keyset
@@ -111,11 +112,15 @@ WorkspaceAdmin = Annotated[Admin, Depends(workspace_admin)]
 SomeAdmin = Annotated[Admin, Depends(any_admin)]
 AnyAdmin = Annotated[Admin, Depends(admin)]
 
+# Changes per signed-in user (spec 015); counted after the session check, so an anonymous flood
+# is refused with 401 without counting.
+ADMIN_WRITE_LIMIT = Depends(limit("admin.write", "user", methods=UNSAFE_METHODS))
+
 # The passkey gate runs right after the session check, before any role check (spec 014).
 router = APIRouter(
     prefix="/api/admin",
     tags=["admin"],
-    dependencies=[Depends(get_principal), Depends(require_recent_passkey)],
+    dependencies=[Depends(get_principal), ADMIN_WRITE_LIMIT, Depends(require_recent_passkey)],
 )
 
 

@@ -1,0 +1,56 @@
+name: audit
+
+# Known-vulnerability audits of the three lockfiles, weekly and on demand (spec 015), so an
+# advisory published between pull requests is noticed: a failed run emails the watchers. CI
+# runs the same audits on every pull request.
+
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Actions are pinned to commits (Dependabot keeps them current) and checkouts keep no token: this
+# workflow runs unattended on a schedule. The other workflows follow in the supply-chain pass
+# (S13-4).
+
+jobs:
+  rust:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: core }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { persist-credentials: false }
+      - uses: taiki-e/install-action@2f205a16b33670c6744bb9451ca070d71ad155fa # cargo-audit
+      - run: cargo audit
+
+  python:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: api }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { persist-credentials: false }
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      # Audits the locked versions without building the Rust wheel (a local package, not on PyPI).
+      - run: uv export --locked --extra dev --no-emit-project --no-emit-package tabayyun-core --no-hashes -o requirements.txt
+      - run: uvx pip-audit -r requirements.txt
+
+  web:
+    name: pnpm audit
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: web }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { persist-credentials: false }
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with: { package_json_file: web/package.json }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with: { node-version: 22 }
+      - run: pnpm audit --audit-level high

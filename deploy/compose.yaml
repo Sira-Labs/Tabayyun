@@ -13,6 +13,9 @@ services:
       - "443:443"
     environment:
       TABAYYUN_DOMAIN: ${TABAYYUN_DOMAIN:-}
+      # Caddy is the edge here, so no proxy may name the client (spec 015). Behind your own load
+      # balancer, set its address or subnet, e.g. 10.0.0.5/32.
+      TABAYYUN_TRUSTED_PROXIES: ${TABAYYUN_TRUSTED_PROXIES:-127.0.0.1/32}
     volumes:
       - caddy_data:/data
     depends_on:

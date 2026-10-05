@@ -104,8 +104,10 @@ Rules:
     and `GET /api/version` reports it as `schema_revision`.
   - Persistent directory: `/data/cache`, label `tabayyun-cache`
   - Container HTTP port: `8000`
-- HTTP Settings: no public domain needed (the web app proxies to it). If you want the API
-  reachable directly, enable HTTPS on its default domain.
+- HTTP Settings: no public domain needed (the web app proxies to it), and keep it so: the
+  web app's Caddy sets `X-Real-IP`, on which sign-in rate limits are counted (spec 015). A
+  direct route is safe only through a proxy that overwrites `X-Real-IP` with the client's
+  address.
 - Deployment tab → **Enable App Token**, copy it (used by CI below). For the first deploy,
   *Deploy via ImageName*: `ghcr.io/sira-labs/tabayyun-api:latest`.
 
@@ -189,7 +191,8 @@ same app password, and `tabayyun-db` is not touched:
    `SELECT usename FROM pg_stat_activity WHERE datname = 'tabayyun'` in the db app's
    terminal shows `tabayyun_app` for both.
 
-Until the switch, both apps keep serving and log `db.rls_bypassed` as an error on start.
+Since spec 015 (v0.2.0), `prod` refuses to serve on a login that bypasses RLS: both apps log
+`db.rls_bypassed` and exit with code 4, so make the switch before deploying v0.2.0.
 
 ## 4. Web app: `tabayyun-web`
 
@@ -197,6 +200,9 @@ Until the switch, both apps keep serving and log `db.rls_bypassed` as an error o
 - App Configs → Environment variables: `TABAYYUN_API_UPSTREAM=srv-captain--tabayyun-api:8000`
   (Caddy inside the image proxies `/api` and `/healthz` there; `TABAYYUN_DOMAIN` stays
   unset so Caddy serves plain HTTP on :80 behind CapRover).
+  - Optional `TABAYYUN_TRUSTED_PROXIES`: the addresses Caddy takes `X-Forwarded-For` from,
+    default `private_ranges` (CapRover's nginx is on the overlay network). To narrow it, set
+    the subnet `docker network inspect captain-overlay-network` shows, e.g. `10.0.1.0/24`.
 - Container HTTP port: `80`.
 - HTTP Settings: connect your domain (e.g. `tabayyun.example.com`), Enable HTTPS, Force HTTPS.
 - Deployment tab → **Enable App Token**, copy it. First deploy via ImageName:
@@ -458,6 +464,9 @@ Staging needs none of it: its data can be rebuilt.
 | An AWS-SDK tool (pyarrow, boto3, `aws s3`) uploading to an old MinIO fails with `411 MissingContentLength` | pre-2025 MinIO rejects the streamed checksums that newer AWS SDKs send | Tabayyun is unaffected; for the tool set `AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED` and `AWS_RESPONSE_CHECKSUM_VALIDATION=WHEN_REQUIRED`, or move to RustFS |
 | API log: `refusing to start in prod` naming `TABAYYUN_PUBLIC_URL`, `TABAYYUN_OIDC_ISSUER`, `TABAYYUN_OIDC_CLIENT_SECRET` or `TABAYYUN_ADMIN_EMAIL` | a sign-in setting missing (spec 013), or `TABAYYUN_AUTH_MODE=dev` | Set it (section 4a); `dev` mode is never allowed in prod |
 | Sign-in button answers `503` / log `auth.idp_unavailable` | the api cannot fetch `<issuer>/.well-known/openid-configuration` | Check `TABAYYUN_OIDC_ISSUER` (no trailing path beyond the realm) and that the api container reaches Keycloak |
+| API or worker log: `db.rls_bypassed` and the container exits with code 4 | `TABAYYUN_DATABASE_URL` uses the owner (or a superuser) instead of the app login; prod refuses it (spec 015) | Switch to `tabayyun_app` as in section 3 |
+| Many `429` answers with `{"detail": "rate_limited"}` or a "Too many sign-in attempts" page; log `rate.limited` | a client went over a limit (spec 015: 20 sign-ins per minute per IP, 60 admin changes per minute per user, 50 invitations per hour) | Wait for `Retry-After`. If every user is refused together, the limits see one address: a proxy in front of the web app must be on a private network and send `X-Forwarded-For`. `TABAYYUN_RATE_LIMITS=false` is for load tests only |
+| API log: `rate.unavailable` | the api could not count a limited request (database trouble); it let the request through | Look at the database; limits resume by themselves |
 | Keycloak shows `Invalid parameter: redirect_uri` | the realm was rendered for another address than `TABAYYUN_PUBLIC_URL` | Clients → `tabayyun-api` → Settings: valid redirect URI `<public>/api/auth/callback`, or re-render and re-import |
 | After Google or GitHub: "Sign-in failed (invalid_token)" | the provider's email is unverified, or the realm lacks the `identity provider` mapper | Verify the email at the provider; re-import the realm |
 | Sign-in page says "runs without sign-in (dev mode)" | `TABAYYUN_AUTH_MODE=dev` on a non-prod install | Unset it (oidc is the default in prod) |

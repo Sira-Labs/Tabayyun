@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, Form, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -34,11 +34,14 @@ from tabayyun.auth.store import CurrentSession, Flow
 from tabayyun.auth.tokens import new_token, safe_next, token_hash
 from tabayyun.db import for_org
 from tabayyun.db.models import BOOTSTRAP_USER_ID, DEFAULT_ORG_ID, SIGN_IN_METHODS, Org, OrgMembership, User
+from tabayyun.limits import limit
 from tabayyun.settings import Settings
 
 log = structlog.get_logger()
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+# Signing devices out (spec 015): per signed-in user, else per IP.
+SESSIONS_LIMIT = Depends(limit("auth.sessions", "user_or_ip"))
 
 CALLBACK_PATH = "/api/auth/callback"
 BACKCHANNEL_PATH = "/api/auth/backchannel-logout"
@@ -148,7 +151,7 @@ async def sign_in_options(request: Request) -> dict[str, bool]:
     return {method: method in enabled for method in SIGN_IN_METHODS}
 
 
-@router.get("/login")
+@router.get("/login", dependencies=[Depends(limit("auth.login", "ip", html=True))])
 async def login(
     request: Request, method: Annotated[str, Query()], next: Annotated[str | None, Query()] = None
 ) -> Response:
@@ -182,7 +185,7 @@ async def login(
     return response
 
 
-@router.get("/callback")
+@router.get("/callback", dependencies=[Depends(limit("auth.callback", "ip", html=True))])
 async def callback(
     request: Request,
     state: Annotated[str | None, Query()] = None,
@@ -349,7 +352,7 @@ async def list_devices(request: Request) -> list[DeviceOut]:
     ]
 
 
-@router.delete("/sessions/{session_id}", status_code=204)
+@router.delete("/sessions/{session_id}", status_code=204, dependencies=[SESSIONS_LIMIT])
 async def revoke_device(request: Request, session_id: uuid.UUID) -> Response:
     """Sign out one of the user's browsers; the current one clears its cookie too."""
     current = await require_session(request)
@@ -369,7 +372,7 @@ async def revoke_device(request: Request, session_id: uuid.UUID) -> Response:
     return response
 
 
-@router.post("/sessions/revoke-others", status_code=204)
+@router.post("/sessions/revoke-others", status_code=204, dependencies=[SESSIONS_LIMIT])
 async def revoke_other_devices(request: Request) -> Response:
     """Sign out every other browser of the user."""
     current = await require_session(request)
@@ -379,7 +382,7 @@ async def revoke_other_devices(request: Request) -> Response:
     return Response(status_code=204)
 
 
-@router.post("/logout", response_model=LogoutOut)
+@router.post("/logout", response_model=LogoutOut, dependencies=[SESSIONS_LIMIT])
 async def logout(request: Request) -> Any:
     """Revoke the session, clear the cookie and return the IdP's end-session URL."""
     oidc: OidcClient | None = request.app.state.oidc
@@ -406,7 +409,7 @@ async def logout(request: Request) -> Any:
     return response
 
 
-@router.post("/backchannel-logout")
+@router.post("/backchannel-logout", dependencies=[Depends(limit("auth.backchannel", "ip"))])
 async def backchannel_logout(request: Request, logout_token: Annotated[str, Form()]) -> Response:
     """OIDC back-channel logout from the IdP: revoke the sessions of its `sid` (or `sub`)."""
     oidc = _oidc(request)

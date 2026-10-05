@@ -100,6 +100,10 @@ class Settings(BaseSettings):
     smtp_username: str | None = Field(default=None, description="Optional; the Workspace relay admits by IP.")
     smtp_password: SecretStr | None = Field(default=None)
     smtp_from: str | None = Field(default=None, description="Sender, e.g. `Tabayyun <tabayyun@example.com>`.")
+    rate_limits: bool = Field(
+        default=True,
+        description="Rate limits on sign-in and admin routes (spec 015); off for load tests only.",
+    )
     invitation_ttl: timedelta = Field(
         default=timedelta(days=14), description="How long an invitation stays open."
     )
