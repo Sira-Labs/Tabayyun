@@ -24,6 +24,8 @@ APP_ROLE = "tabayyun_app"
 OWNED_TABLE = "runs"
 
 INSUFFICIENT_PRIVILEGE = "42501"
+# Exit code when prod runs on a login that bypasses RLS (spec 015); 3 is a schema mismatch.
+RLS_BYPASS_EXIT_CODE = 4
 
 LOGIN_FACTS = text(
     "SELECT r.rolsuper, r.rolbypassrls, "
@@ -53,10 +55,10 @@ async def login_problems(engine: AsyncEngine) -> list[str] | None:
 
 
 async def check_login(engine: AsyncEngine, env: str) -> list[str] | None:
-    """Log `db.rls_bypassed` (error in prod, warning elsewhere) when the login bypasses RLS.
+    """Log `db.rls_bypassed` when the login bypasses RLS; in prod, then exit with code 4.
 
-    Spec 015 turns the prod error into a refusal to start; until then the process keeps
-    serving so a release merged before the operator switched logins causes no outage.
+    Elsewhere it stays a warning, so a developer's single owner login keeps working. An
+    unreachable database returns None and decides nothing: the schema guard handles that.
     """
     problems = await login_problems(engine)
     if problems:
@@ -67,6 +69,8 @@ async def check_login(engine: AsyncEngine, env: str) -> list[str] | None:
             hint="set TABAYYUN_DATABASE_URL to a login in tabayyun_app and "
             "TABAYYUN_MIGRATION_DATABASE_URL to the owner (deploy/README.md)",
         )
+        if env == "prod":
+            raise SystemExit(RLS_BYPASS_EXIT_CODE)
     return problems
 
 

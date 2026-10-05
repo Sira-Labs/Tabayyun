@@ -8,7 +8,7 @@ from sqlalchemy.engine import make_url
 from structlog.testing import capture_logs
 
 from tabayyun.db import make_engine
-from tabayyun.db.roles import check_login, ensure_app_login, login_problems
+from tabayyun.db.roles import RLS_BYPASS_EXIT_CODE, check_login, ensure_app_login, login_problems
 from tabayyun.settings import Settings
 from tenancy import APP_LOGIN, app_settings, app_url
 
@@ -33,20 +33,52 @@ async def test_app_login_has_no_problems(db_url, fresh_schema):
         await engine.dispose()
 
 
-@pytest.mark.parametrize(("env", "level"), [("prod", "error"), ("dev", "warning")])
-async def test_check_login_logs_by_environment(db_url, fresh_schema, env, level):
-    """A login that bypasses RLS logs `db.rls_bypassed`: an error in prod, a warning elsewhere;
-    the process keeps running (spec 015 makes prod refuse)."""
+async def test_check_login_warns_outside_prod(db_url, fresh_schema):
+    """A login that bypasses RLS logs `db.rls_bypassed` as a warning in dev; the process runs on."""
     fresh_schema("auto")
     engine = make_engine(Settings(env="test", database_url=db_url))
     try:
         with capture_logs() as logs:
-            problems = await check_login(engine, env)
+            problems = await check_login(engine, "dev")
     finally:
         await engine.dispose()
     assert problems
     events = [e for e in logs if e["event"] == "db.rls_bypassed"]
-    assert len(events) == 1 and events[0]["log_level"] == level
+    assert len(events) == 1 and events[0]["log_level"] == "warning"
+
+
+async def test_check_login_exits_4_in_prod(db_url, fresh_schema):
+    """Spec 015: in prod the same login logs an error, then stops the process with code 4."""
+    fresh_schema("auto")
+    engine = make_engine(Settings(env="test", database_url=db_url))
+    try:
+        with capture_logs() as logs, pytest.raises(SystemExit) as stopped:
+            await check_login(engine, "prod")
+    finally:
+        await engine.dispose()
+    assert stopped.value.code == RLS_BYPASS_EXIT_CODE == 4
+    assert [e["log_level"] for e in logs if e["event"] == "db.rls_bypassed"] == ["error"]
+
+
+async def test_api_and_worker_refuse_an_owner_login_in_prod(db_url, fresh_schema, monkeypatch):
+    """The api lifespan and the worker entry both stop with code 4 on the owner login in prod."""
+    fresh_schema("auto")
+    from tabayyun.jobs import __main__ as worker
+    from tabayyun.main import create_app
+
+    monkeypatch.setattr(Settings, "require_secrets_in_prod", lambda self: None)
+    settings = Settings(env="prod", database_url=db_url, auth_mode="dev")
+    app = create_app(settings)
+    # The lifespan itself, in this task: a SystemExit from a helper's task escapes the loop.
+    with pytest.raises(SystemExit) as stopped:
+        async with app.router.lifespan_context(app):
+            pass
+    await app.state.engine.dispose()
+    assert stopped.value.code == 4
+    monkeypatch.setattr(worker, "get_settings", lambda: settings)
+    with pytest.raises(SystemExit) as stopped:
+        await worker.main()
+    assert stopped.value.code == 4
 
 
 async def test_check_login_is_quiet_for_the_app_login(db_url, fresh_schema):
