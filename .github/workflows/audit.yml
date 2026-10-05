@@ -1,0 +1,49 @@
+name: audit
+
+# Known-vulnerability audits of the three lockfiles, weekly and on demand (spec 015), so an
+# advisory published between pull requests is noticed: a failed run emails the watchers. CI
+# runs the same audits on every pull request.
+
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: core }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@cargo-audit
+      - run: cargo audit
+
+  python:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: api }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      # Audits the locked versions without building the Rust wheel (a local package, not on PyPI).
+      - run: uv export --locked --extra dev --no-emit-project --no-emit-package tabayyun-core --no-hashes -o requirements.txt
+      - run: uvx pip-audit -r requirements.txt
+
+  web:
+    name: pnpm audit
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: web }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with: { package_json_file: web/package.json }
+      - uses: actions/setup-node@v7
+        with: { node-version: 22 }
+      - run: pnpm audit --audit-level high
