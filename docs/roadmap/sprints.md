@@ -101,7 +101,7 @@ The chart is the table below drawn on a calendar; when a sprint ends, update bot
 | 5 | landing and planning | 20–26 Sep | done 22 Sep (S5-3 with the owner) | #5, #7, #15, #16, #22–#24 |
 | 6 | persistence and jobs | 27 Sep – 3 Oct | done 23 Sep | #25–#29 |
 | 7 | Parquet cache and cross-series checks | 4–10 Oct | done 24 Sep | #31–#34, #36–#38, #40, #41, #43–#45 |
-| 8 | login, tenants and RBAC | 11–17 Oct | done 5 Oct (owner steps on staging open) | #60, #65–#67, #80, this PR |
+| 8 | login, tenants and RBAC | 11–17 Oct | done 5 Oct (owner steps on staging open) | #60, #65–#67, #80, #81 |
 | 9 | connectors and the series screen | 18–24 Oct | 8–10 Oct | |
 | 10 | suites, triage, alerts, overview | 25–31 Oct | 12–15 Oct | |
 | 11 | corrections v1 | 1–7 Nov | 15–20 Oct | |
