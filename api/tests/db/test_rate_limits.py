@@ -141,6 +141,19 @@ async def test_invitations_are_limited_per_org(admin_env):
     assert admin_env.scalar("SELECT count(*) FROM invitations") == 50
 
 
+async def test_a_member_cannot_use_up_the_invitation_bucket(admin_env):
+    """Refused by role before counting: Mia's attempts leave the org's hour to its admins."""
+    async with admin_env.client(MIA) as mia, admin_env.client(ALICE) as alice:
+        for app in admin_env.apps:
+            clocked(app)
+        for _ in range(55):
+            refused = await mia.post("/api/admin/invitations", json={"email": "x@example.org"})
+            assert refused.status_code == 403
+        invited = await alice.post("/api/admin/invitations", json={"email": "ada@example.org"})
+        assert invited.status_code == 201
+    assert admin_env.scalar("SELECT count(*) FROM rate_limits WHERE bucket = 'admin.invite'") == 1
+
+
 # Pruning and the migration
 
 

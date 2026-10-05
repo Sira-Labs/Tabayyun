@@ -17,7 +17,7 @@ from tabayyun.authz import WorkspaceRole, get_principal
 from tabayyun.db import for_org
 from tabayyun.limits import limit
 from tabayyun.mail import SmtpConfig
-from tabayyun.routers.admin import ADMIN_WRITE_LIMIT, OrgAdmin, Person
+from tabayyun.routers.admin import ADMIN_WRITE_LIMIT, OrgAdmin, Person, org_admin
 from tabayyun.services.admin import invitations
 from tabayyun.settings import Settings
 
@@ -27,7 +27,8 @@ router = APIRouter(
     dependencies=[Depends(get_principal), ADMIN_WRITE_LIMIT, Depends(require_recent_passkey)],
 )
 # Invitation emails per org (spec 015): a guard against using the panel to send mail in bulk.
-INVITE_LIMIT = Depends(limit("admin.invite", "org"))
+# The role is checked first, so a member who is refused cannot use up the org's hour.
+INVITE_LIMIT = [Depends(org_admin), Depends(limit("admin.invite", "org"))]
 
 
 class InvitationIn(BaseModel):
@@ -110,7 +111,7 @@ async def list_invitations(
     return [InvitationOut.of(v) for v in found]
 
 
-@router.post("", response_model=InvitationOut, status_code=201, dependencies=[INVITE_LIMIT])
+@router.post("", response_model=InvitationOut, status_code=201, dependencies=INVITE_LIMIT)
 async def create_invitation(
     body: InvitationIn, request: Request, background: BackgroundTasks, caller: OrgAdmin
 ) -> InvitationOut:
@@ -133,7 +134,7 @@ async def create_invitation(
     return InvitationOut.of(view)
 
 
-@router.post("/{invitation_id}/resend", response_model=InvitationOut, dependencies=[INVITE_LIMIT])
+@router.post("/{invitation_id}/resend", response_model=InvitationOut, dependencies=INVITE_LIMIT)
 async def resend_invitation(
     invitation_id: uuid.UUID, request: Request, background: BackgroundTasks, caller: OrgAdmin
 ) -> InvitationOut:
