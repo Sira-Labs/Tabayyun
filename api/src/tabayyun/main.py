@@ -20,6 +20,7 @@ from tabayyun.auth import CsrfMiddleware, OidcClient, build_oidc
 from tabayyun.authz import get_principal
 from tabayyun.db import DB_OK, check_db, guard_schema, make_engine, make_session_factory, worker_commits
 from tabayyun.db.roles import check_login, is_rls_violation
+from tabayyun.headers import SecurityHeadersMiddleware
 from tabayyun.jobs.names import WORKER_APPLICATION_NAME
 from tabayyun.limits import RateLimitedError
 from tabayyun.limits import response_for as rate_limited_response
@@ -90,6 +91,8 @@ def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = No
     app.add_middleware(
         CsrfMiddleware, public_url=settings.public_url, exempt_paths=frozenset({auth.BACKCHANNEL_PATH})
     )
+    # Added last, so it is outermost and also covers the CSRF guard's refusals (spec 015).
+    app.add_middleware(SecurityHeadersMiddleware)
     app.include_router(auth.router)
     # Everything else needs a principal (spec 013), also routers that do not authorize() a
     # workspace, such as the stateless check run. FastAPI resolves it once per request.
