@@ -12,7 +12,7 @@ from typing import Any
 
 import structlog
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.exc import DBAPIError
 
 from tabayyun import __version__
@@ -21,6 +21,8 @@ from tabayyun.authz import get_principal
 from tabayyun.db import DB_OK, check_db, guard_schema, make_engine, make_session_factory, worker_commits
 from tabayyun.db.roles import check_login, is_rls_violation
 from tabayyun.jobs.names import WORKER_APPLICATION_NAME
+from tabayyun.limits import RateLimitedError
+from tabayyun.limits import response_for as rate_limited_response
 from tabayyun.routers import (
     admin,
     auth,
@@ -60,6 +62,8 @@ def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = No
         # Exits with code 3 on a schema mismatch; an unreachable database only degrades /healthz.
         app.state.schema_revision = await guard_schema(engine)
         await check_login(engine, settings.env)
+        if settings.env == "prod" and not settings.rate_limits:
+            log.warning("rate.disabled", hint="TABAYYUN_RATE_LIMITS=false is for load tests only")
         yield
         log.info("api.stop")
         if oidc is not None:
@@ -95,6 +99,11 @@ def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = No
     # The admin router orders its own gate: session, then passkey freshness (spec 014).
     app.include_router(admin.router)
     app.include_router(invitations.router)
+
+    @app.exception_handler(RateLimitedError)
+    async def rate_limited(request: Request, exc: RateLimitedError) -> Response:
+        """Over a bucket's limit (spec 015): 429 with `Retry-After`."""
+        return rate_limited_response(exc)
 
     @app.exception_handler(AdminError)
     async def admin_refused(request: Request, exc: AdminError) -> JSONResponse:

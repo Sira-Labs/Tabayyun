@@ -78,4 +78,19 @@ describe("Admin: members and invitations", () => {
     await user.selectOptions(await screen.findByRole("combobox", { name: "Role of ana@example.org" }), "member");
     expect((await screen.findByRole("alert")).textContent).toContain("needs at least one owner");
   });
+
+  it("explains a rate limit", async () => {
+    const state = adminState();
+    const route = adminRoute(state);
+    stubFetch((url, init) =>
+      url === "/api/admin/teams" && init?.method === "POST"
+        ? new Response(JSON.stringify({ detail: "rate_limited" }), { status: 429, headers: { "Retry-After": "30" } })
+        : route(url, init),
+    );
+    const user = userEvent.setup();
+    renderApp("/admin?tab=teams");
+    await user.type(await screen.findByRole("textbox", { name: "Name" }), "ops2");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Too many changes in a short time");
+  });
 });

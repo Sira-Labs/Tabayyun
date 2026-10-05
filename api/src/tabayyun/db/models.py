@@ -564,3 +564,19 @@ class AuditEvent(OrgMixin, Base):
     ip_address: Mapped[str | None] = mapped_column(INET)
     user_agent: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
+
+
+class RateLimit(Base):
+    """One fixed window of one rate-limit bucket and key (spec 015). Not tenant data: no
+    `org_id`, no RLS; read before any org is known, pruned after a day."""
+
+    __tablename__ = "rate_limits"
+    __table_args__ = (
+        PrimaryKeyConstraint("bucket", "key", "window_start"),
+        Index("ix_rate_limits_window_start", "window_start"),
+    )
+
+    bucket: Mapped[str] = mapped_column(Text, nullable=False)
+    key: Mapped[str] = mapped_column(Text, nullable=False)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    hits: Mapped[int] = mapped_column(Integer, nullable=False)

@@ -85,6 +85,7 @@ export const ERROR_TEXT: Record<string, string> = {
   workspace_not_empty: "The workspace still holds data; it can only be deleted when empty.",
   "second-factor-required": "Sign in with a passkey again: admin actions need one from the last 12 hours.",
   "not found": "It no longer exists, or you cannot see it.",
+  rate_limited: "Too many changes in a short time. Wait a minute and try again.",
 };
 
 /** A user-facing message for a failed admin call. */
