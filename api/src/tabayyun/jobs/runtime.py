@@ -8,6 +8,7 @@ from tabayyun.connectors import NetPolicy
 from tabayyun.db import make_engine, make_session_factory
 from tabayyun.secrets import Keyring
 from tabayyun.services.cache import RunCache
+from tabayyun.services.dataset_runs import RunFetch
 from tabayyun.services.fetches import FetchDeps
 from tabayyun.settings import get_settings
 
@@ -46,6 +47,11 @@ def fetch_deps() -> FetchDeps:
     return FetchDeps(
         cache=run_cache(), net=NetPolicy.from_settings(settings), keyring=Keyring.from_settings(settings)
     )
+
+
+def run_fetch() -> RunFetch:
+    """How dataset runs in this worker fill their gaps from connectors (spec 021)."""
+    return RunFetch(deps=fetch_deps(), budget_s=float(get_settings().run_fetch_budget_s))
 
 
 async def dispose() -> None:

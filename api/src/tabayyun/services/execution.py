@@ -16,12 +16,15 @@ from tabayyun.services.cache import RunCache
 
 
 async def execute(
-    factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID, cache: RunCache | None
+    factory: async_sessionmaker[AsyncSession],
+    run_id: uuid.UUID,
+    cache: RunCache | None,
+    run_fetch: dataset_runs.RunFetch | None = None,
 ) -> None:
     """Run the executor matching the run's trigger. Never raises; failures land on the run."""
     async with factory() as session:
         trigger = (await session.execute(select(Run.trigger).where(Run.id == run_id))).scalar_one_or_none()
     if trigger == dataset_runs.DATASET_TRIGGER:
-        await dataset_runs.execute_dataset_run(factory, run_id, cache)
+        await dataset_runs.execute_dataset_run(factory, run_id, cache, run_fetch)
     else:
         await runs.execute_run(factory, run_id, cache)

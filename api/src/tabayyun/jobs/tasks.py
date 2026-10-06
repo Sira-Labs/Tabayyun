@@ -43,7 +43,7 @@ async def run_checks_job(run_id: str, org_id: str | None = None) -> None:
     """
     org = DEFAULT_ORG_ID if org_id is None else uuid.UUID(org_id)
     factory = for_org(runtime.session_factory(), org)
-    await execution.execute(factory, uuid.UUID(run_id), runtime.run_cache())
+    await execution.execute(factory, uuid.UUID(run_id), runtime.run_cache(), runtime.run_fetch())
 
 
 @app.periodic(cron="*/10 * * * *")
