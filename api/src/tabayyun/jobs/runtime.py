@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from tabayyun.connectors import NetPolicy
 from tabayyun.db import make_engine, make_session_factory
+from tabayyun.secrets import Keyring
 from tabayyun.services.cache import RunCache
+from tabayyun.services.fetches import FetchDeps
 from tabayyun.settings import get_settings
 
 _engine: AsyncEngine | None = None
@@ -35,6 +38,14 @@ def run_cache() -> RunCache:
     if _cache is None:
         _cache = RunCache.from_settings(get_settings())
     return _cache
+
+
+def fetch_deps() -> FetchDeps:
+    """What fetches need in the worker: the cache, the network policy and the keyring (spec 021)."""
+    settings = get_settings()
+    return FetchDeps(
+        cache=run_cache(), net=NetPolicy.from_settings(settings), keyring=Keyring.from_settings(settings)
+    )
 
 
 async def dispose() -> None:

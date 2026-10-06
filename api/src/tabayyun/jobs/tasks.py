@@ -1,5 +1,5 @@
 """Procrastinate tasks: run execution and the stale-run reaper (spec 002), invitation email
-(spec 014)."""
+(spec 014), connector fetches, checks, polling and their pruning (spec 021)."""
 
 from __future__ import annotations
 
@@ -12,16 +12,21 @@ from tabayyun.db import for_org
 from tabayyun.db.models import DEFAULT_ORG_ID
 from tabayyun.jobs import app, runtime
 from tabayyun.jobs.names import (
+    CHECK_SOURCE_TASK,
+    FETCH_QUEUE,
+    FETCH_WINDOW_TASK,
     MAIL_QUEUE,
     MAINTENANCE_QUEUE,
+    POLL_SOURCES_TASK,
     PRUNE_RATE_LIMITS_TASK,
+    PRUNE_SOURCE_FETCHES_TASK,
     REAP_STALE_RUNS_TASK,
     RUN_CHECKS_TASK,
     RUNS_QUEUE,
     SEND_INVITATION_TASK,
 )
 from tabayyun.mail import MailError, SmtpConfig
-from tabayyun.services import execution, rate_limits
+from tabayyun.services import execution, fetches, rate_limits
 from tabayyun.services import runs as runs_service
 from tabayyun.services.admin import invitations
 from tabayyun.settings import get_settings
@@ -86,3 +91,54 @@ async def send_invitation_email(context: JobContext, invitation_id: str, org_id:
         public_url=settings.public_url,
         final_attempt=context.job.attempts + 1 >= MAIL_ATTEMPTS,
     )
+
+
+FETCH_ATTEMPTS = 5
+
+
+@app.task(
+    queue=FETCH_QUEUE,
+    name=FETCH_WINDOW_TASK,
+    pass_context=True,
+    retry=RetryStrategy(
+        max_attempts=FETCH_ATTEMPTS, exponential_wait=10, retry_exceptions=[fetches.RetryableFetchError]
+    ),
+)
+async def fetch_window(context: JobContext, fetch_id: str, org_id: str) -> None:
+    """Fill a source's coverage gaps (spec 021); retryable errors are retried with backoff.
+
+    Deferred with the lock `source:<id>`, so one fetch per source runs at a time.
+    """
+    factory = for_org(runtime.session_factory(), uuid.UUID(org_id))
+    outcome = await fetches.execute_fetch(factory, runtime.fetch_deps(), uuid.UUID(fetch_id))
+    final = context.job.attempts + 1 >= FETCH_ATTEMPTS
+    if outcome is not None and outcome.retryable and not final:
+        raise fetches.RetryableFetchError(outcome.error or "retryable")
+
+
+@app.task(queue=FETCH_QUEUE, name=CHECK_SOURCE_TASK, retry=False)
+async def check_source(fetch_id: str, org_id: str) -> None:
+    """Reach a source's system and record the outcome in its health (spec 021)."""
+    factory = for_org(runtime.session_factory(), uuid.UUID(org_id))
+    await fetches.execute_check(factory, runtime.fetch_deps(), uuid.UUID(fetch_id))
+
+
+@app.periodic(cron="* * * * *")
+@app.task(queue=MAINTENANCE_QUEUE, name=POLL_SOURCES_TASK, retry=False)
+async def poll_sources(timestamp: int) -> None:
+    """Every minute: a poll fetch for each enabled source whose interval has passed (spec 021)."""
+    now = runs_service.utc_now()
+    due = await fetches.claim_due_sources(runtime.session_factory(), now)
+    for source_id, org, _workspace in due:
+        await fetches.queue_poll(for_org(runtime.session_factory(), org), source_id, now)
+    if due:
+        log.info("sources.polled", count=len(due), tick=timestamp)
+
+
+@app.periodic(cron="17 * * * *")
+@app.task(queue=MAINTENANCE_QUEUE, name=PRUNE_SOURCE_FETCHES_TASK, retry=False)
+async def prune_source_fetches(timestamp: int) -> None:
+    """Hourly: drop fetch history older than 30 days (spec 021)."""
+    pruned = await fetches.prune(runtime.session_factory())
+    if pruned:
+        log.info("fetches.pruned", count=pruned, tick=timestamp)
