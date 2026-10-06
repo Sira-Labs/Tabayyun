@@ -248,7 +248,8 @@ after the response, as it does for runs.
       - A retryable `ConnectorError` stops the fetch; progress so far stays covered. The fetch
         is marked `partial` with the error and retried by Procrastinate; the retry fetches only
         what is still missing.
-      - A non-retryable error marks it `failed`, with no retry.
+      - A non-retryable error marks it `failed`, with no retry. A spent run budget marks it
+        `partial` (what it fetched stays).
    6. **Afterwards**, the fetch records its calls and rows and the health is updated:
       - the outcome is `succeeded` when every call ran, `partial` or `failed` otherwise;
       - the final attempt's state is the fetch's state.
@@ -278,37 +279,37 @@ after the response, as it does for runs.
 
 ## Acceptance criteria
 
-- [ ] Migration 0008 upgrades and downgrades. The new tables have RLS, and the app login can
+- [x] Migration 0008 upgrades and downgrades. The new tables have RLS, and the app login can
       read neither another org's credentials nor its fetches.
-- [ ] A `synthetic` source can be created, given points, and fetched over a day. The cache then
+- [x] A `synthetic` source can be created, given points, and fetched over a day. The cache then
       holds 1440 rows per point at 60 s, coverage spans the day, and a second fetch makes no
       calls.
-- [ ] The fetch engine:
-  - [ ] splits a 30-day window over 250 points with `max_points=100` and `max_span_s=7d`
+- [x] The fetch engine:
+  - [x] splits a 30-day window over 250 points with `max_points=100` and `max_span_s=7d`
         into 15 calls;
-  - [ ] keeps the call rate under `requests_per_second`;
-  - [ ] does not mark the last `settle_s` as covered.
-- [ ] Error handling:
-  - [ ] a retryable error after 2 of 4 calls leaves those 2 covered, and the retry makes only the
+  - [x] keeps the call rate under `requests_per_second`;
+  - [x] does not mark the last `settle_s` as covered.
+- [x] Error handling:
+  - [x] a retryable error after 2 of 4 calls leaves those 2 covered, and the retry makes only the
         other 2;
-  - [ ] a non-retryable error fails the fetch without a retry;
-  - [ ] health moves ok → degraded → failing → ok.
-- [ ] Credentials:
-  - [ ] they round-trip encrypted, and the database holds no plaintext;
-  - [ ] another source's AAD fails to decrypt;
-  - [ ] `rotate` re-encrypts rows from the previous key;
-  - [ ] no response, log line or audit event contains a credential value;
-  - [ ] storing them without a master key answers 503.
-- [ ] The network policy refuses loopback, link-local and metadata addresses always, private
+  - [x] a non-retryable error fails the fetch without a retry;
+  - [x] health moves ok → degraded → failing → ok.
+- [x] Credentials:
+  - [x] they round-trip encrypted, and the database holds no plaintext;
+  - [x] another source's AAD fails to decrypt;
+  - [x] `rotate` re-encrypts rows from the previous key;
+  - [x] no response, log line or audit event contains a credential value;
+  - [x] storing them without a master key answers 503.
+- [x] The network policy refuses loopback, link-local and metadata addresses always, private
       ranges outside the allow-list, and public ones when they are turned off. The HTTP
       client does not follow redirects and connects to the checked address.
-- [ ] Polling defers one fetch per due source and skips sources with a fetch in flight.
-- [ ] A dataset run over a synthetic source with an empty cache fetches inline and checks the
+- [x] Polling defers one fetch per due source and skips sources with a fetch in flight.
+- [x] A dataset run over a synthetic source with an empty cache fetches inline and checks the
       data. A failing connector shows in `stats.fetch_errors`, and the run still succeeds on
       what is cached.
-- [ ] Every route answers 404 across workspaces, and 403 for a role below the one in the table.
+- [x] Every route answers 404 across workspaces, and 403 for a role below the one in the table.
       Every change writes its audit event.
-- [ ] The docs are updated: `deploy/caprover.md` settings and troubleshooting, the architecture
+- [x] The docs are updated: `deploy/caprover.md` settings and troubleshooting, the architecture
       data flow, and the baseline items for connector credentials and SSRF.
 
 ## Test cases
@@ -356,6 +357,30 @@ after the response, as it does for runs.
    never re-read them.
 5. **A `synthetic` connector ships**, not just a test double. It is the framework's end-to-end
    fixture, and it gives staging a live, polling source for demos without a historian.
+
+## Implementation notes
+
+- **Cross-org jobs.** Polling and pruning see every org, so they run through two SECURITY
+  DEFINER functions of migration 0008, like the stale-run reaper:
+  - `tabayyun_claim_due_sources(now, types)` sets `polled_at` and returns the due sources;
+  - `tabayyun_prune_source_fetches(before)` deletes old fetch history.
+- **Lost fetches.** A fetch still `queued` or `running` after an hour counts as a lost
+  worker's, so it no longer blocks polling.
+- **Downgrade.** The downgrade of 0008 puts the old type check back `NOT VALID`. Synthetic
+  sources then stay, and the downgrade loses no data.
+- **Synthetic connector:**
+  - a point the config does not list yields no rows, so the span counts as covered;
+  - its noise is a vectorised splitmix64 in pyarrow compute, because the API has no numpy.
+- **Malformed data.** A connector table with an unknown quality or the wrong columns fails
+  the fetch (`connector returned a malformed batch` or `… an unknown quality`).
+- **Validation errors** from config and credentials answer only `loc`, `msg` and `type`,
+  never the submitted value.
+- **Series registration** is `INSERT … ON CONFLICT (source_id, external_id) DO NOTHING`, so a
+  point registered twice counts as `existing`.
+- **Spec edits:**
+  - the `GET /api/sources/{id}/points` route came out: search runs in the worker and arrives
+    with the browse jobs of S9-2;
+  - the budget rule above was added.
 
 ## Out of scope
 

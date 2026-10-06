@@ -387,3 +387,19 @@ starts; the plan is the backlog until then.
 - [ ] **018 Compare view** — `docs/specs/018-compare-view.md` (S9-7), drafted early on request
       (23 Sep) with `docs/research/06-multi-series-comparison.md`; needs S9-5's chart endpoint.
       The other sprint 9 stories take 019+. Approved 24 Sep; scatter stays in sprint 10 (S10-7).
+- [x] **021 Connector framework** — `docs/specs/021-connector-framework.md` (S9-1, 6 Oct).
+      Every criterion is met; staging needs `TABAYYUN_MASTER_KEY` only to store credentials
+      (the synthetic connector takes none).
+      - Dataset runs fetch their gaps inline, through the same engine as `fetch_window`, within
+        `TABAYYUN_RUN_FETCH_BUDGET_S`, instead of enqueuing fetch jobs and waiting.
+      - Polling and pruning cross orgs, so they run through SECURITY DEFINER functions like
+        the reaper; a fetch in flight for over an hour counts as a lost worker's.
+      - Coverage stops at `now - settle_s` (300 s by default), so late historian data is
+        read again by the next poll.
+      - The downgrade of 0008 adds the old source-type check `NOT VALID`, keeping synthetic
+        sources instead of deleting data.
+      - A connector's own exception is reported as `internal connector error` and logged by
+        type only, so a library message cannot leak a credential.
+- [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
+      `tabayyun-api` and `tabayyun-worker` on staging; then a `synthetic` source with
+      `poll_interval_s` gives staging a live, polling source for demos.

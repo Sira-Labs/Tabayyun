@@ -103,14 +103,17 @@ sequenceDiagram
     participant W as Worker
     participant C as Parquet cache
     participant K as tabayyun_core
+    participant X as External system
 
     U->>API: POST /api/runs {dataset_id} (or a suite schedule)
     API->>PG: queued run with stats.window, job deferred in the same transaction
     API-->>U: 202 {id, status: queued}
     PG-->>W: job via LISTEN / NOTIFY
     W->>PG: claim the run, load series, groups and coverage
-    opt missing ranges (connectors, S9-1)
-        W->>C: fetch_window writes new observations, coverage recorded
+    opt missing ranges of connector sources (spec 021)
+        W->>X: connector calls, paced per source, within the run's fetch budget
+        X-->>W: observations (Arrow batches)
+        W->>C: new observations written, coverage recorded up to now minus settle
     end
     W->>C: read the dataset's series for the window
     W->>K: run_checks_multi(series, metas, groups, window)
@@ -121,11 +124,14 @@ sequenceDiagram
 
 1. Scheduler enqueues `run_suite(suite_id, window)`; a user starts one with `POST /api/runs
    {dataset_id}` (spec 008, trigger `manual`).
-2. Worker resolves the dataset to a series list, checks the Parquet cache for coverage, and
-   enqueues `fetch_window` jobs for missing ranges per source (connector-specific batching
-   and rate limits).
-3. Connector writes new observations to the cache (append-only, idempotent by
-   `(series, ts)`), and records coverage.
+2. Worker resolves the dataset to a series list and checks the Parquet cache for coverage.
+   For series of connector sources it fetches the missing ranges itself, through the same
+   engine as the `fetch_window` job (spec 021): calls cut to the connector's limits, paced per
+   source, within `TABAYYUN_RUN_FETCH_BUDGET_S`. Polling (`poll_sources`) keeps sources current
+   between runs.
+3. The fetch engine writes new observations to the cache (append-only; a later write of the
+   same `(series, ts)` wins) and records coverage up to `now - settle_s`. A fetch that fails
+   is listed in `stats.fetch_errors`; the run checks what is cached.
 4. Worker calls `core.run_checks_multi(series_batches, metas, groups, window)`; Rust runs each
    check as a kernel over each series with its own profile and each cross-series check over
    every series group whose members all have data, on one grid (`align`), and returns one
