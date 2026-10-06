@@ -191,11 +191,11 @@ class Connector(ABC):
 | `GET /api/sources/{id}/fetches?limit=` | viewer | none | the latest fetches, newest first, at most 100 |
 
 - Changes write audit events:
-  - `source.created`, `source.updated` and `source.fetch_requested`, with details naming the
-    changed keys;
+  - `source.created`, `source.updated`, `source.series_registered` (with the counts) and
+    `source.fetch_requested`, with details naming the changed keys;
   - `source.credentials_set` and `source.credentials_cleared`, with no values.
 - New rate-limit buckets:
-  - `source.write`: 60 per minute per user, on the admin routes;
+  - `source.write`: 60 per minute per user, on the admin routes and series registration;
   - `source.fetch`: 30 per minute per user, on `check` and `fetches`.
 
 ### Jobs

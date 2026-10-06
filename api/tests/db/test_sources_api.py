@@ -220,6 +220,10 @@ async def test_register_series_fetch_inline_and_history(admin_env, tmp_path):
             f["trigger"] for f in (await alice.get(f"/api/sources/{source['id']}/fetches")).json()["items"]
         ]
         assert statuses == ["check", "manual"]
+    assert [e.details for e in admin_env.events("source.series_registered")] == [
+        {"created": 2, "existing": 0},
+        {"created": 0, "existing": 2},
+    ]
     [event] = [e for e in admin_env.events("source.fetch_requested") if e.details["trigger"] == "manual"]
     assert event.details["series"] is None and event.details["force"] is False
 

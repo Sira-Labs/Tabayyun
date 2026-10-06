@@ -247,9 +247,9 @@ async def clear_credentials(
 
 
 async def register_series(
-    session: AsyncSession, scope: Scope, source_id: uuid.UUID, items: list[dict[str, Any]]
+    session: AsyncSession, scope: Scope, actor: audit.Actor, source_id: uuid.UUID, items: list[dict[str, Any]]
 ) -> tuple[int, int]:
-    """Make each point a series of the source; (created, already there).
+    """Make each point a series of the source; (created, already there). Audited with the counts.
 
     Raises:
         SourceError: 404, 409 `not_a_connector`.
@@ -272,7 +272,17 @@ async def register_series(
         )
         if (await session.execute(stmt)).first() is not None:
             created += 1
-    return created, len(items) - created
+    existing = len(items) - created
+    await audit.record(
+        session,
+        actor,
+        "source.series_registered",
+        "source",
+        source.id,
+        workspace_id=scope.workspace_id,
+        details={"created": created, "existing": existing},
+    )
+    return created, existing
 
 
 async def request_fetch(

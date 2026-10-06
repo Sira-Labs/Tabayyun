@@ -306,16 +306,18 @@ async def delete_credentials(
     return Response(status_code=204)
 
 
-@router.post("/{source_id}/series", response_model=SeriesRegistered)
+@router.post("/{source_id}/series", response_model=SeriesRegistered, dependencies=[SOURCE_WRITE_LIMIT])
 async def register_series(
     source_id: uuid.UUID,
+    request: Request,
     session: SessionDep,
     scope: WriteScope,
+    principal: ActorDep,
     body: Annotated[list[PointIn], Body(max_length=sources_service.MAX_SERIES_PER_CALL)],
 ) -> SeriesRegistered:
     """Make points of the source's system series of the source (editors)."""
     created, existing = await sources_service.register_series(
-        session, scope, source_id, [p.model_dump() for p in body]
+        session, scope, _actor(request, principal), source_id, [p.model_dump() for p in body]
     )
     return SeriesRegistered(created=created, existing=existing)
 
