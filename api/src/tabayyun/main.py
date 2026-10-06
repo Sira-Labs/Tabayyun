@@ -18,6 +18,7 @@ from sqlalchemy.exc import DBAPIError
 from tabayyun import __version__
 from tabayyun.auth import CsrfMiddleware, OidcClient, build_oidc
 from tabayyun.authz import get_principal
+from tabayyun.connectors import NetPolicy
 from tabayyun.db import DB_OK, check_db, guard_schema, make_engine, make_session_factory, worker_commits
 from tabayyun.db.roles import check_login, is_rls_violation
 from tabayyun.headers import SecurityHeadersMiddleware, server_error
@@ -37,9 +38,11 @@ from tabayyun.routers import (
     sources,
     workspaces,
 )
+from tabayyun.secrets import Keyring
 from tabayyun.services import runs as runs_service
 from tabayyun.services.admin.errors import AdminError
 from tabayyun.services.cache import RunCache
+from tabayyun.services.sources import SourceError
 from tabayyun.settings import Settings, get_settings
 
 log = structlog.get_logger()
@@ -85,6 +88,8 @@ def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = No
     app.state.session_factory = make_session_factory(engine)
     # Inline jobs write the Parquet cache from the API process (spec 006); opened on first use.
     app.state.run_cache = RunCache.from_settings(settings)
+    app.state.net_policy = NetPolicy.from_settings(settings)
+    app.state.keyring = Keyring.from_settings(settings)
     app.state.schema_revision = None
     app.state.oidc = oidc
 
@@ -109,6 +114,14 @@ def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = No
     async def rate_limited(request: Request, exc: RateLimitedError) -> Response:
         """Over a bucket's limit (spec 015): 429 with `Retry-After`."""
         return rate_limited_response(exc)
+
+    @app.exception_handler(SourceError)
+    async def source_refused(request: Request, exc: SourceError) -> JSONResponse:
+        """A refused sources request (spec 021): its status, its code and any field errors."""
+        content: dict[str, Any] = {"detail": exc.code}
+        if exc.errors is not None:
+            content["errors"] = exc.errors
+        return JSONResponse(status_code=exc.status, content=content)
 
     @app.exception_handler(AdminError)
     async def admin_refused(request: Request, exc: AdminError) -> JSONResponse:

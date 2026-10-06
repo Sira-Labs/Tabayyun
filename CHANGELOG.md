@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Connector framework (spec 021):
+  - Connector sources are created and changed, enabled or disabled, given credentials, given
+    series, checked and fetched under `/api/sources`, with a fetch history.
+  - `fetch_window` fills coverage gaps: calls cut to the connector's limits, paced per
+    source, retried on transient errors, with health per source.
+  - Sources poll on their own `poll_interval_s`.
+  - Dataset runs fetch what the cache lacks before checking.
+  - The built-in `synthetic` connector generates deterministic series with optional faults.
+- Connector credentials are write-only and encrypted with AES-256-GCM under
+  `TABAYYUN_MASTER_KEY`, with key rotation (`python -m tabayyun.secrets rotate`).
+
+### Security
+- Connectors only reach addresses the network policy allows. Loopback, link-local and cloud
+  metadata addresses are always refused, and private ranges unless listed in
+  `TABAYYUN_CONNECTOR_ALLOWED_NETWORKS`. HTTP clients connect to the checked address and do
+  not follow redirects.
+
 ## [0.2.0] - 2026-10-05
 
 Sprint 8: sign-in, tenants and the first security baseline pass.

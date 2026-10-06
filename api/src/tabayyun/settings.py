@@ -2,6 +2,9 @@
 file; nothing here has a real default for a secret (see docs/frontend/02-security-baseline.md).
 """
 
+import base64
+import binascii
+import ipaddress
 import re
 from datetime import timedelta
 from functools import lru_cache
@@ -107,6 +110,23 @@ class Settings(BaseSettings):
     invitation_ttl: timedelta = Field(
         default=timedelta(days=14), description="How long an invitation stays open."
     )
+    # Connectors (spec 021).
+    master_key: SecretStr | None = Field(
+        default=None,
+        description="Base64 of 32 bytes; encrypts connector credentials (none stored without it).",
+    )
+    master_key_previous: SecretStr | None = Field(
+        default=None, description="The key before a rotation; still decrypts until `tabayyun.secrets rotate`."
+    )
+    connector_allowed_networks: str = Field(
+        default="", description="Comma-separated CIDRs of private networks connectors may reach."
+    )
+    connector_allow_public: bool = Field(
+        default=True, description="Whether connectors may reach public addresses."
+    )
+    run_fetch_budget_s: int = Field(
+        default=120, ge=0, description="Wall time a dataset run may spend fetching its gaps; 0 turns it off."
+    )
 
     @field_validator("session_idle", "session_absolute", "passkey_fresh", "invitation_ttl", mode="before")
     @classmethod
@@ -116,6 +136,35 @@ class Settings(BaseSettings):
             unit = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}[m.group(2)]
             return timedelta(**{unit: int(m.group(1))})
         return value
+
+    @field_validator("master_key", "master_key_previous")
+    @classmethod
+    def _master_key(cls, value: SecretStr | None) -> SecretStr | None:
+        """32 bytes of base64 or nothing: a wrong key is never right, so refuse it in every env."""
+        if value is None or not value.get_secret_value().strip():
+            return None
+        try:
+            raw = base64.b64decode(value.get_secret_value().strip(), validate=True)
+        except (binascii.Error, ValueError):
+            raise ValueError("master_key must be base64") from None
+        if len(raw) != 32:
+            raise ValueError("master_key must decode to 32 bytes (openssl rand -base64 32)")
+        return value
+
+    @field_validator("connector_allowed_networks")
+    @classmethod
+    def _networks(cls, value: str) -> str:
+        """Every entry a CIDR (or address); normalised and comma-joined."""
+        try:
+            nets = [str(ipaddress.ip_network(p.strip(), strict=False)) for p in value.split(",") if p.strip()]
+        except ValueError as exc:
+            raise ValueError(f"connector_allowed_networks: {exc}") from None
+        return ",".join(nets)
+
+    @property
+    def allowed_networks(self) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+        """`connector_allowed_networks` parsed."""
+        return tuple(ipaddress.ip_network(n) for n in self.connector_allowed_networks.split(",") if n)
 
     @field_validator("sign_in_methods")
     @classmethod

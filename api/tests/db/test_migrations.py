@@ -36,6 +36,9 @@ EXPECTED_TABLES = {
     "audit_events",
     # Spec 015.
     "rate_limits",
+    # Spec 021.
+    "source_credentials",
+    "source_fetches",
 }
 HYPERTABLES = {"findings", "metrics", "scores"}
 

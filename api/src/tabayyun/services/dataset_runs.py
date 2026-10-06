@@ -3,14 +3,17 @@
 `POST /api/runs {dataset_id}` resolves the dataset's window against "now", stores it in
 `stats.window` and queues a run with trigger `manual`. The worker then:
 
-1. reads every series of the dataset from the Parquet cache (spec 006) and notes the parts
-   of the window the cache does not cover (`stats.missing`, from the coverage rows);
-2. skips series without cached rows (`stats.series_skipped`) and fails the run when none has
+1. fetches the parts of the window the cache lacks for series of connector sources (spec 021),
+   within `TABAYYUN_RUN_FETCH_BUDGET_S`; a failed or unfinished fetch is listed in
+   `stats.fetch_errors` and does not fail the run;
+2. reads every series of the dataset from the Parquet cache (spec 006) and notes the parts
+   of the window the cache still does not cover (`stats.missing`, from the coverage rows);
+3. skips series without cached rows (`stats.series_skipped`) and fails the run when none has
    any;
-3. runs the single-series checks on every series and the cross-series checks on every group
+4. runs the single-series checks on every series and the cross-series checks on every group
    whose members are all in the dataset and have data; other groups are listed in
    `stats.groups_skipped`;
-4. persists scores and findings per series like an upload run (spec 003), in one transaction
+5. persists scores and findings per series like an upload run (spec 003), in one transaction
    that takes the per-series locks in series-id order, so two dataset runs sharing series
    cannot deadlock.
 
@@ -33,11 +36,12 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from tabayyun import core
+from tabayyun import connectors, core
 from tabayyun.authz.scope import Scope
-from tabayyun.db.models import DatasetSeries, Run, Score, Series
+from tabayyun.db.models import DatasetSeries, Run, Score, Series, Source
 from tabayyun.services import coverage as coverage_service
 from tabayyun.services import datasets as datasets_service
+from tabayyun.services import fetches
 from tabayyun.services import findings as findings_service
 from tabayyun.services import groups as groups_service
 from tabayyun.services import runs as runs_service
@@ -83,6 +87,16 @@ class Plan:
     groups: list[dict[str, Any]] = field(default_factory=list)
     groups_outside: list[dict[str, Any]] = field(default_factory=list)
     missing: dict[str, list[list[int]]] = field(default_factory=dict)
+    fetched: dict[str, int] = field(default_factory=dict)
+    fetch_errors: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RunFetch:
+    """What a run needs to fill its gaps from connectors (spec 021)."""
+
+    deps: fetches.FetchDeps
+    budget_s: float
 
 
 # Creation (request path)
@@ -176,12 +190,72 @@ async def _plan(session: AsyncSession, run: Run) -> Plan | None:
                 "params": group.params,
             }
         )
-    for m in members:
+    await _note_missing(session, plan)
+    return plan
+
+
+async def _note_missing(session: AsyncSession, plan: Plan) -> None:
+    """`plan.missing`: per member, the parts of the window the cache does not cover."""
+    plan.missing = {}
+    for m in plan.members:
         covered = await coverage_service.covered_ranges(session, m.id)
-        gaps = coverage_service.missing_ranges(covered, start_ns, end_ns)
+        gaps = coverage_service.missing_ranges(covered, plan.start_ns, plan.end_ns)
         if gaps:
             plan.missing[str(m.id)] = [[s, e] for s, e in gaps]
-    return plan
+
+
+async def _fill_gaps(
+    factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID, plan: Plan, run_fetch: RunFetch | None
+) -> None:
+    """Fetch the gaps of members of connector sources inline, then note what is still missing.
+
+    One `run` fetch per source, all within the budget; errors and a spent budget are noted in
+    `plan.fetch_errors`, never raised.
+    """
+    if not plan.missing or run_fetch is None or run_fetch.budget_s <= 0:
+        return
+    deps = run_fetch.deps
+    wanted: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
+    for m in plan.members:
+        if str(m.id) in plan.missing:
+            wanted[m.source_id].append(m.id)
+    async with factory() as session:
+        sources = {
+            s.id: s
+            for s in (await session.scalars(select(Source).where(Source.id.in_(list(wanted))))).all()
+            if connectors.is_connector(s.type) and s.enabled
+        }
+    if not sources:
+        return
+    deadline = deps.monotonic() + run_fetch.budget_s
+    for source_id in sorted(sources, key=str):
+        if deps.monotonic() >= deadline:
+            plan.fetch_errors.append({"source_id": str(source_id), "error": fetches.BUDGET_SPENT})
+            continue
+        async with factory() as session, session.begin():
+            fetch = await fetches.create_fetch(
+                session,
+                sources[source_id],
+                trigger="run",
+                start=ns_to_datetime(plan.start_ns),
+                end=ns_to_datetime_ceil(plan.end_ns),
+                series_ids=wanted[source_id],
+                run_id=run_id,
+            )
+        outcome = await fetches.execute_fetch(factory, deps, fetch.id, deadline=deadline)
+        if outcome is not None:
+            plan.fetched[str(source_id)] = outcome.rows
+        if outcome is None or outcome.status != "succeeded":
+            plan.fetch_errors.append(
+                {
+                    "source_id": str(source_id),
+                    "fetch_id": str(fetch.id),
+                    "status": None if outcome is None else outcome.status,
+                    "error": None if outcome is None else outcome.error,
+                }
+            )
+    async with factory() as session:
+        await _note_missing(session, plan)
 
 
 def _read(cache: RunCache, plan: Plan) -> dict[str, pa.RecordBatch]:
@@ -216,7 +290,10 @@ def _check(plan: Plan, batches: dict[str, pa.RecordBatch]) -> core.MultiReport:
 
 
 async def execute_dataset_run(
-    factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID, cache: RunCache | None
+    factory: async_sessionmaker[AsyncSession],
+    run_id: uuid.UUID,
+    cache: RunCache | None,
+    run_fetch: RunFetch | None = None,
 ) -> None:
     """Execute one queued dataset run to a terminal state. Never raises; failures land on the run."""
     run_log = log.bind(run_id=str(run_id))
@@ -249,6 +326,7 @@ async def execute_dataset_run(
             raise runs_service.RunFailureError("dataset deleted")
         if cache is None:
             raise runs_service.RunFailureError("no cache configured")
+        await _fill_gaps(factory, run_id, plan, run_fetch)
         try:
             batches = await asyncio.to_thread(_read, cache, plan)
         except CacheError as exc:
@@ -357,6 +435,8 @@ async def _persist(
                 if str(m.id) not in report.reports
             ],
             "missing": plan.missing,
+            **({"fetched": plan.fetched} if plan.fetched else {}),
+            **({"fetch_errors": plan.fetch_errors} if plan.fetch_errors else {}),
         }
         await session.execute(update(Run).where(Run.id == run_id).values(stats=stats))
     return stats

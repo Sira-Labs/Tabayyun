@@ -95,6 +95,10 @@ Rules:
     | `TABAYYUN_SMTP_PORT`, `TABAYYUN_SMTP_STARTTLS` | optional; defaults `587` and `true` |
     | `TABAYYUN_SMTP_USERNAME`, `TABAYYUN_SMTP_PASSWORD` | optional; the Google Workspace relay admits the server by IP and needs neither |
     | `TABAYYUN_INVITATION_TTL` | optional; how long an invitation stays open, default `14d` |
+    | `TABAYYUN_MASTER_KEY` | encrypts connector credentials (spec 021): `openssl rand -base64 32`, kept in the password manager; the same value on the worker. Unset: sources work, but credentials cannot be stored |
+    | `TABAYYUN_CONNECTOR_ALLOWED_NETWORKS` | optional; comma-separated CIDRs of the plant networks connectors may reach, e.g. `10.20.0.0/16`. Private ranges are refused otherwise; loopback and cloud metadata always |
+    | `TABAYYUN_CONNECTOR_ALLOW_PUBLIC` | optional, default `true`; `false` keeps connectors on the allowed networks only |
+    | `TABAYYUN_RUN_FETCH_BUDGET_S` | optional, default `120`: how long a dataset run may spend fetching what the cache lacks; `0` turns it off |
 
     With `TABAYYUN_ENV=prod` the api refuses to start without the four sign-in settings
     (spec 013); staging runs `prod` too, so set up the realm (section 4a) first.
@@ -121,7 +125,7 @@ which the live system uses.
 | Name | Value |
 |---|---|
 | `TABAYYUN_ROLE` | `worker` |
-| the api variables | identical to the api app (`TABAYYUN_ENV`, `TABAYYUN_DATABASE_URL` with the app login, `TABAYYUN_SESSION_SECRET`, `TABAYYUN_PUBLIC_URL` and the `TABAYYUN_SMTP_*` rows, since the worker sends the invitation emails); the worker never needs `TABAYYUN_MIGRATION_DATABASE_URL` |
+| the api variables | identical to the api app (`TABAYYUN_ENV`, `TABAYYUN_DATABASE_URL` with the app login, `TABAYYUN_SESSION_SECRET`, `TABAYYUN_PUBLIC_URL` and the `TABAYYUN_SMTP_*` rows, since the worker sends the invitation emails, and the connector rows `TABAYYUN_MASTER_KEY`, `TABAYYUN_CONNECTOR_*` and `TABAYYUN_RUN_FETCH_BUDGET_S`, since the worker fetches); the worker never needs `TABAYYUN_MIGRATION_DATABASE_URL` |
 | `TABAYYUN_CACHE_URL` and `TABAYYUN_S3_*` | see section 3a; without them the cache is `/data/cache` inside the container (tick persistent data with that path to keep it) |
 | `TABAYYUN_WORKER_CONCURRENCY` | optional, default `2` |
 
@@ -447,6 +451,21 @@ Staging needs none of it: its data can be rebuilt.
   against it, time it, drop it, and record the time in `TASKS.md`. Never restore production
   data into staging.
 
+## Connector credentials: rotating the master key
+
+Connector credentials (spec 021) are encrypted under `TABAYYUN_MASTER_KEY`. To rotate it:
+
+1. Generate the new key: `openssl rand -base64 32`.
+2. On `tabayyun-api` and `tabayyun-worker`, set `TABAYYUN_MASTER_KEY_PREVIOUS` to the old
+   value and `TABAYYUN_MASTER_KEY` to the new one, then Save & Update both apps. Both keys
+   now decrypt.
+3. In the api container's terminal, run `python -m tabayyun.secrets rotate`. It re-encrypts
+   every source's credentials under the new key and prints how many.
+4. Remove `TABAYYUN_MASTER_KEY_PREVIOUS` from both apps.
+
+A lost master key cannot be recovered: set a new one and enter each source's credentials
+again.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -467,6 +486,11 @@ Staging needs none of it: its data can be rebuilt.
 | API or worker log: `db.rls_bypassed` and the container exits with code 4 | `TABAYYUN_DATABASE_URL` uses the owner (or a superuser) instead of the app login; prod refuses it (spec 015) | Switch to `tabayyun_app` as in section 3 |
 | Many `429` answers with `{"detail": "rate_limited"}` or a "Too many sign-in attempts" page; log `rate.limited` | a client went over a limit (spec 015: 20 sign-ins per minute per IP, 60 admin changes per minute per user, 50 invitations per hour) | Wait for `Retry-After`. If every user is refused together, the limits see one address: a proxy in front of the web app must be on a private network and send `X-Forwarded-For`. `TABAYYUN_RATE_LIMITS=false` is for load tests only |
 | API log: `rate.unavailable` | the api could not count a limited request (database trouble); it let the request through | Look at the database; limits resume by themselves |
+| `PUT /api/sources/{id}/credentials` answers 503 `credentials_unavailable` | `TABAYYUN_MASTER_KEY` is not set on the api | Set it on the api **and** the worker (same value) |
+| A fetch fails with `credentials unavailable: TABAYYUN_MASTER_KEY is not set` or `… do not decrypt` | the worker has no master key, or another one than the api | Give the worker the api's key; after a lost key, set the credentials again |
+| A fetch or check fails with `target not allowed: <host>` | the host resolves to a private, loopback or link-local address outside `TABAYYUN_CONNECTOR_ALLOWED_NETWORKS` | Add the plant network's CIDR to `TABAYYUN_CONNECTOR_ALLOWED_NETWORKS` on the api and the worker; loopback and metadata addresses are never allowed |
+| A fetch fails with `invalid stored settings: …` | the source's config no longer validates (after an upgrade) | Fix it with `PATCH /api/sources/{id}` |
+| A source's health reads `failing`; fetches keep failing | three or more fetches in a row failed; `health.last_error` says why | Fix the cause, then `POST /api/sources/{id}/check` |
 | Keycloak shows `Invalid parameter: redirect_uri` | the realm was rendered for another address than `TABAYYUN_PUBLIC_URL` | Clients → `tabayyun-api` → Settings: valid redirect URI `<public>/api/auth/callback`, or re-render and re-import |
 | After Google or GitHub: "Sign-in failed (invalid_token)" | the provider's email is unverified, or the realm lacks the `identity provider` mapper | Verify the email at the provider; re-import the realm |
 | Sign-in page says "runs without sign-in (dev mode)" | `TABAYYUN_AUTH_MODE=dev` on a non-prod install | Unset it (oidc is the default in prod) |

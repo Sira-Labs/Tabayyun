@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tabayyun import core
 from tabayyun.authz import ReadScope, Scope, WriteScope, get_session
 from tabayyun.db import for_org
-from tabayyun.services import dataset_runs
+from tabayyun.services import dataset_runs, fetches
 from tabayyun.services import runs as runs_service
 from tabayyun.services import series as series_service
 from tabayyun.services.datasets import DatasetError
@@ -102,11 +102,16 @@ async def _create_dataset_run(
         ) from exc
     if request.app.state.settings.inline_jobs:
         await session.commit()
+        state = request.app.state
         background.add_task(
             dataset_runs.execute_dataset_run,
-            for_org(request.app.state.session_factory, scope.org_id),
+            for_org(state.session_factory, scope.org_id),
             run.id,
-            request.app.state.run_cache,
+            state.run_cache,
+            dataset_runs.RunFetch(
+                deps=fetches.FetchDeps(cache=state.run_cache, net=state.net_policy, keyring=state.keyring),
+                budget_s=float(state.settings.run_fetch_budget_s),
+            ),
         )
     else:
         await runs_service.enqueue_run(session, run.id, scope.org_id)

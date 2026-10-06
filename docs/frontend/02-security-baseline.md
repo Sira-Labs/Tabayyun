@@ -18,7 +18,7 @@ review item, or an ops runbook entry.
 
 ## Input handling
 - [ ] Pydantic v2 strict models on every endpoint; size limits on bodies and uploads; pagination caps.
-- [ ] Connector URLs validated against an allow-list and private-range rules (SSRF); DNS re-resolution pinned; redirects disabled.
+- [x] Connector URLs validated against an allow-list and private-range rules (SSRF); DNS re-resolution pinned; redirects disabled. (Spec 021: `NetPolicy` checks every resolved address. Loopback, link-local and metadata addresses are always refused, private ranges are refused outside `TABAYYUN_CONNECTOR_ALLOWED_NETWORKS`, and public ones optionally. HTTP clients connect to the checked address, with Host and SNI kept, and do not follow redirects.)
 - [ ] SQL only via SQLAlchemy parameters; DataFusion sessions read-only with timeouts; user SQL cannot reach Postgres.
 - [ ] File uploads: type sniffing, size cap, stored outside web root, never executed.
 
@@ -34,7 +34,7 @@ review item, or an ops runbook entry.
 
 ## Secrets and configuration
 - [ ] No secrets in code, images or config files; environment variables or mounted secret files only; startup refuses placeholder secrets.
-- [ ] Connector credentials encrypted at rest with a KMS-style envelope key (`TABAYYUN_MASTER_KEY` from secret store); write-only in the UI; rotation supported.
+- [x] Connector credentials encrypted at rest with a KMS-style envelope key (`TABAYYUN_MASTER_KEY` from secret store); write-only in the UI; rotation supported. (Spec 021: AES-256-GCM, bound to their source by the associated data. The API never returns them, and they appear in no log or audit event. `TABAYYUN_MASTER_KEY_PREVIOUS` plus `python -m tabayyun.secrets rotate` rotate the key. The S9-4 pages show only whether credentials are set.)
 - [ ] Licence keys are Ed25519-signed; the public key is embedded; private key never leaves the vendor.
 
 ## Supply chain and build

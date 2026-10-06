@@ -93,7 +93,10 @@ async def _seed_org(app: Any, prefix: str) -> dict[str, str]:
             "/api/datasets", json={"name": f"{prefix}-set", "series_ids": [s1, s2], "window": {"last": "24h"}}
         )
         assert dataset.status_code == 201, dataset.text
+        source = await c.post("/api/sources", json={"type": "synthetic", "name": f"{prefix}-synthetic"})
+        assert source.status_code == 201, source.text
     return {
+        "source": source.json()["id"],
         "run": run["id"],
         "series": s1,
         "finding": finding,
@@ -190,6 +193,26 @@ def _seed_memberships(owner: Engine) -> None:
     )
 
 
+def _seed_connector_rows(owner_url: str) -> None:
+    """Spec 021: credentials and a fetch for each org's upload source (the bytes need not decrypt)."""
+    owner = create_engine(owner_url)
+    try:
+        _owner_sql(
+            owner,
+            "INSERT INTO source_credentials (org_id, source_id, key_id, nonce, ciphertext) "
+            "SELECT org_id, id, 'deadbeef', '\\x00'::bytea, '\\x00'::bytea FROM sources",
+        )
+        _owner_sql(
+            owner,
+            "INSERT INTO source_fetches "
+            "(id, org_id, workspace_id, source_id, trigger, window_start, window_end) "
+            "SELECT gen_random_uuid(), org_id, workspace_id, id, 'manual', now() - interval '1 day', now() "
+            "FROM sources",
+        )
+    finally:
+        owner.dispose()
+
+
 def _as(app: Any, user: uuid.UUID, org: uuid.UUID, workspace: uuid.UUID) -> Any:
     """Make every request of `app` act as `user` in `org` and `workspace`."""
     app.dependency_overrides[get_principal] = lambda: Principal(user_id=user, org_id=org)
@@ -212,6 +235,7 @@ async def _seed(owner_url: str, cache_dir: str) -> Seed:
     try:
         seed.a = await _seed_org(app_a, "a")
         seed.b = await _seed_org(app_b, "b")
+        _seed_connector_rows(owner_url)
         # A queued run keeps its upload row (and its job): the uploads table gets a row.
         async with AsyncClient(
             transport=ASGITransport(app=queued), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
@@ -373,6 +397,20 @@ ROUTES = [
     ("GET", "/api/datasets/{dataset_id}", "dataset", None),
     ("PATCH", "/api/datasets/{dataset_id}", "dataset", {"name": "renamed"}),
     ("DELETE", "/api/datasets/{dataset_id}", "dataset", None),
+    # Spec 021: connector sources.
+    ("GET", "/api/sources/{source_id}", "source", None),
+    ("PATCH", "/api/sources/{source_id}", "source", {"name": "renamed"}),
+    ("PUT", "/api/sources/{source_id}/credentials", "source", {"token": "t"}),
+    ("DELETE", "/api/sources/{source_id}/credentials", "source", None),
+    ("POST", "/api/sources/{source_id}/series", "source", [{"external_id": "x", "name": "x"}]),
+    ("POST", "/api/sources/{source_id}/check", "source", None),
+    (
+        "POST",
+        "/api/sources/{source_id}/fetches",
+        "source",
+        {"start": "2026-01-01T00:00:00Z", "end": "2026-01-02T00:00:00Z"},
+    ),
+    ("GET", "/api/sources/{source_id}/fetches", "source", None),
 ]
 READ_BACK = {
     "run": "/api/runs/{}",
@@ -380,6 +418,7 @@ READ_BACK = {
     "series": "/api/series/{}",
     "group": "/api/series-groups/{}",
     "dataset": "/api/datasets/{}",
+    "source": "/api/sources/{}",
 }
 # Scoped to the signed-in user, not to a tenant: `test_auth_flow.py` checks that another user's
 # session gives 404 (spec 013).
@@ -479,11 +518,14 @@ async def test_other_org_gets_404_for_every_admin_route(seed, app_for, method, t
             assert conn.execute(text("SELECT name FROM teams WHERE id = :t"), {"t": TEAM_A}).scalar() == "ops"
             open_a = "SELECT revoked_at IS NULL FROM invitations WHERE id = :i"
             assert conn.execute(text(open_a), {"i": INVITATION_A}).scalar() is True
+            # Only the seeded events: the refused request wrote none in org B.
+            seeded = "('org.renamed', 'source.created')"
             assert (
                 conn.execute(
-                    text("SELECT count(*) FROM audit_events WHERE org_id = :o"), {"o": ORG_B}
+                    text(f"SELECT count(*) FROM audit_events WHERE org_id = :o AND action NOT IN {seeded}"),  # noqa: S608
+                    {"o": ORG_B},
                 ).scalar()
-                == 1
+                == 0
             )
     finally:
         owner.dispose()
