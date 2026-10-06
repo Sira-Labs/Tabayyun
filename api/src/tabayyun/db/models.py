@@ -9,8 +9,8 @@ Conventions:
   so a later spec extends the values with a plain migration.
 - `findings`, `metrics` and `scores` become TimescaleDB hypertables when available; their
   primary keys therefore include the time column.
-- No column stores a secret: `sources.credentials_ref` names a key in the environment or a
-  secret store, never the value.
+- No column stores a secret in the clear: connector credentials are AES-GCM ciphertext in
+  `source_credentials` (spec 021), readable only through `tabayyun.secrets`.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from tabayyun.db import Base
@@ -46,7 +46,7 @@ DEFAULT_ORG_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 DEFAULT_WORKSPACE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
 BOOTSTRAP_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000003")
 
-SOURCE_TYPES = ("upload", "csv_dir", "pi_web_api", "opc_ua")
+SOURCE_TYPES = ("upload", "csv_dir", "pi_web_api", "opc_ua", "synthetic")
 SERIES_KINDS = ("measurement", "counter", "setpoint", "status")
 RUN_TRIGGERS = ("upload", "suite", "manual")
 RUN_STATUSES = ("queued", "running", "succeeded", "failed")
@@ -58,6 +58,8 @@ WORKSPACE_ROLES = ("admin", "editor", "viewer")
 SIGN_IN_METHODS = ("google", "github", "passkey")
 INVITABLE_ORG_ROLES = ("admin", "member")
 EMAIL_STATUSES = ("not_configured", "queued", "sent", "failed")
+FETCH_TRIGGERS = ("manual", "poll", "run", "check")
+FETCH_STATUSES = ("queued", "running", "succeeded", "partial", "failed")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -281,7 +283,12 @@ class Source(TenantMixin, Base):
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
     credentials_ref: Mapped[str | None] = mapped_column(Text)
     health: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
 
 
 class Series(TenantMixin, Base):
@@ -564,6 +571,58 @@ class AuditEvent(OrgMixin, Base):
     ip_address: Mapped[str | None] = mapped_column(INET)
     user_agent: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
+
+
+class SourceCredentials(OrgMixin, Base):
+    """A connector source's credentials (spec 021): AES-256-GCM ciphertext bound to the source by
+    its associated data; written and read only through `tabayyun.secrets`."""
+
+    __tablename__ = "source_credentials"
+
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sources.id", ondelete="CASCADE"), primary_key=True
+    )
+    key_id: Mapped[str] = mapped_column(Text, nullable=False)
+    nonce: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class SourceFetch(TenantMixin, Base):
+    """One fetch of a connector source (spec 021): requested, polled, inside a run, or a check."""
+
+    __tablename__ = "source_fetches"
+    __table_args__ = (
+        CheckConstraint(_in("trigger", FETCH_TRIGGERS), name="trigger"),
+        CheckConstraint(_in("status", FETCH_STATUSES), name="status"),
+        Index("ix_source_fetches_source_created", "source_id", text("created_at DESC")),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sources.id", ondelete="CASCADE"), nullable=False
+    )
+    trigger: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="queued")
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    series_ids: Mapped[list[uuid.UUID] | None] = mapped_column(ARRAY(UUID(as_uuid=True)))
+    force: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    calls: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    rows: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    error: Mapped[str | None] = mapped_column(Text)
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = _created_at()
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class RateLimit(Base):

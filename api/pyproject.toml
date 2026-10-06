@@ -20,6 +20,7 @@ dependencies = [
     "joserfc>=1.2",
     "httpx>=0.27",
     "aiosmtplib>=4",
+    "cryptography>=44",
 ]
 
 [project.optional-dependencies]

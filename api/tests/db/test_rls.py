@@ -190,6 +190,26 @@ def _seed_memberships(owner: Engine) -> None:
     )
 
 
+def _seed_connector_rows(owner_url: str) -> None:
+    """Spec 021: credentials and a fetch for each org's upload source (the bytes need not decrypt)."""
+    owner = create_engine(owner_url)
+    try:
+        _owner_sql(
+            owner,
+            "INSERT INTO source_credentials (org_id, source_id, key_id, nonce, ciphertext) "
+            "SELECT org_id, id, 'deadbeef', '\\x00'::bytea, '\\x00'::bytea FROM sources",
+        )
+        _owner_sql(
+            owner,
+            "INSERT INTO source_fetches "
+            "(id, org_id, workspace_id, source_id, trigger, window_start, window_end) "
+            "SELECT gen_random_uuid(), org_id, workspace_id, id, 'manual', now() - interval '1 day', now() "
+            "FROM sources",
+        )
+    finally:
+        owner.dispose()
+
+
 def _as(app: Any, user: uuid.UUID, org: uuid.UUID, workspace: uuid.UUID) -> Any:
     """Make every request of `app` act as `user` in `org` and `workspace`."""
     app.dependency_overrides[get_principal] = lambda: Principal(user_id=user, org_id=org)
@@ -212,6 +232,7 @@ async def _seed(owner_url: str, cache_dir: str) -> Seed:
     try:
         seed.a = await _seed_org(app_a, "a")
         seed.b = await _seed_org(app_b, "b")
+        _seed_connector_rows(owner_url)
         # A queued run keeps its upload row (and its job): the uploads table gets a row.
         async with AsyncClient(
             transport=ASGITransport(app=queued), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
