@@ -50,6 +50,8 @@ RULES: dict[str, Rule] = {
         Rule("auth.sessions", 30, MINUTE),
         Rule("admin.write", 60, MINUTE),
         Rule("admin.invite", 50, HOUR),
+        Rule("source.write", 60, MINUTE),
+        Rule("source.fetch", 30, MINUTE),
     )
 }
 

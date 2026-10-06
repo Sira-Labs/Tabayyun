@@ -42,4 +42,6 @@ def test_the_bucket_table_matches_the_spec():
         "auth.sessions": (30, MINUTE),
         "admin.write": (60, MINUTE),
         "admin.invite": (50, HOUR),
+        "source.write": (60, MINUTE),
+        "source.fetch": (30, MINUTE),
     }
