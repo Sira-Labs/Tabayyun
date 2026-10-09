@@ -317,8 +317,9 @@ Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, S
 - [ ] GitHub OAuth app for the Keycloak broker (callback
       `https://miftachun.apps.data-and-ai-dude.ch/realms/tabayyun/broker/github/endpoint`),
       credentials to the realm's GitHub provider at import (spec 013).
-- [ ] Around 7 Oct: move both DMARC records from `p=none` to `p=quarantine` once the
-      reports show only Google sending (reminder scheduled).
+- [x] Both DMARC records at `p=quarantine` (9 Oct); the .ch record's reports go to the .com
+      mailbox, authorised by TXT `data-and-ai-dude.ch._report._dmarc` = `v=DMARC1` in the
+      .com zone.
 
 ## Shipping without merge clicks (ADR-0017, 2 Oct 2026)
 
