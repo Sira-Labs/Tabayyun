@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -411,6 +412,10 @@ ROUTES = [
         {"start": "2026-01-01T00:00:00Z", "end": "2026-01-02T00:00:00Z"},
     ),
     ("GET", "/api/sources/{source_id}/fetches", "source", None),
+    # Spec 022: searches, metadata imports and one job.
+    ("POST", "/api/sources/{source_id}/search", "source", {"query": "flow"}),
+    ("POST", "/api/sources/{source_id}/metadata", "source", {}),
+    ("GET", "/api/sources/{source_id}/fetches/{fetch_id}", "source", None),
 ]
 READ_BACK = {
     "run": "/api/runs/{}",
@@ -452,7 +457,10 @@ LISTS = ["/api/runs", "/api/findings", "/api/series", "/api/sources", "/api/seri
 
 
 def _url(template: str, value: str) -> str:
-    return template.split("{")[0] + value + template.split("}")[1]
+    """The template with its first id filled by `value`, any later one by a random id."""
+    head, _, rest = template.partition("{")
+    tail = rest.partition("}")[2]
+    return head + value + re.sub(r"\{[a-z_]+\}", str(uuid.uuid4()), tail)
 
 
 async def _call(app: Any, method: str, url: str, body: Any = None) -> Any:
