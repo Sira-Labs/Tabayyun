@@ -45,3 +45,25 @@ def test_the_bucket_table_matches_the_spec():
         "source.write": (60, MINUTE),
         "source.fetch": (30, MINUTE),
     }
+
+
+def test_source_jobs_count_against_source_fetch():
+    """Checks, fetches, searches and metadata imports share the `source.fetch` bucket (specs 021, 022)."""
+    from fastapi.routing import APIRoute
+
+    import tabayyun.main  # noqa: F401  (imports the jobs package before the router, as the app does)
+    from tabayyun.routers import sources
+
+    bucket = sources.SOURCE_FETCH_LIMIT.dependency
+    limited = {
+        (method, route.path)
+        for route in sources.router.routes
+        if isinstance(route, APIRoute) and any(d.dependency is bucket for d in route.dependencies)
+        for method in route.methods
+    }
+    assert limited == {
+        ("POST", "/api/sources/{source_id}/check"),
+        ("POST", "/api/sources/{source_id}/fetches"),
+        ("POST", "/api/sources/{source_id}/search"),
+        ("POST", "/api/sources/{source_id}/metadata"),
+    }
