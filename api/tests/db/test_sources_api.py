@@ -209,11 +209,13 @@ async def test_register_series_fetch_inline_and_history(admin_env, tmp_path):
         queued = await alice.post(f"/api/sources/{source['id']}/fetches", json=DAY)
         assert queued.status_code == 202
         history = (await alice.get(f"/api/sources/{source['id']}/fetches")).json()["items"]
+        # "gone" is not a configured point: the fetch keeps flow's day and ends partial (spec 022).
         assert [(f["id"], f["status"], f["trigger"], f["rows"]) for f in history] == [
-            (queued.json()["id"], "succeeded", "manual", 1440)
+            (queued.json()["id"], "partial", "manual", 1440)
         ]
+        assert history[0]["error"] == "1 point(s) failed: point not configured: gone"
         detail = (await alice.get(f"/api/sources/{source['id']}")).json()
-        assert detail["health"]["status"] == "ok" and detail["n_series"] == 2
+        assert detail["health"]["status"] == "degraded" and detail["n_series"] == 2
         check = await alice.post(f"/api/sources/{source['id']}/check")
         assert check.status_code == 202
         statuses = [

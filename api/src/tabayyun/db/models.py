@@ -58,7 +58,7 @@ WORKSPACE_ROLES = ("admin", "editor", "viewer")
 SIGN_IN_METHODS = ("google", "github", "passkey")
 INVITABLE_ORG_ROLES = ("admin", "member")
 EMAIL_STATUSES = ("not_configured", "queued", "sent", "failed")
-FETCH_TRIGGERS = ("manual", "poll", "run", "check")
+FETCH_TRIGGERS = ("manual", "poll", "run", "check", "search", "metadata")
 FETCH_STATUSES = ("queued", "running", "succeeded", "partial", "failed")
 
 
@@ -594,7 +594,8 @@ class SourceCredentials(OrgMixin, Base):
 
 
 class SourceFetch(TenantMixin, Base):
-    """One fetch of a connector source (spec 021): requested, polled, inside a run, or a check."""
+    """One job of a connector source: a fetch (requested, polled, inside a run), a check (spec
+    021), a point search or a metadata import (spec 022)."""
 
     __tablename__ = "source_fetches"
     __table_args__ = (
@@ -620,6 +621,8 @@ class SourceFetch(TenantMixin, Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )
     run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    params: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = _created_at()
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -10,7 +10,8 @@ Every target is resolved once and every address it resolves to is checked:
 
 HTTP connectors get a client pinned to the checked address (the original name stays in the
 Host header and TLS SNI, so certificates are still verified against it), without redirects:
-a second DNS answer or a 30x cannot send it elsewhere.
+a second DNS answer or a 30x cannot send it elsewhere. A connector may pass an `ssl.SSLContext`
+that trusts a private certificate authority (spec 022); verification is never turned off.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
+import ssl
 from collections.abc import Awaitable, Callable, Iterable
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
@@ -75,10 +77,14 @@ class NetPolicy:
         *,
         allow_public: bool = True,
         resolver: Resolver = system_resolver,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
+        """`transport` replaces the network under the pinned transport, for tests only: the
+        address checks and the pinning still run in front of it."""
         self.allowed = tuple(allowed)
         self.allow_public = allow_public
         self._resolve = resolver
+        self._transport = transport
 
     @classmethod
     def from_settings(cls, settings: Settings) -> NetPolicy:
@@ -115,8 +121,12 @@ class NetPolicy:
             raise TargetRefusedError(f"target not allowed: {host}")
         return [ipaddress.ip_address(a) for a in dict.fromkeys(answers)]
 
-    async def http_client(self, base_url: str, **kwargs: object) -> httpx.AsyncClient:
+    async def http_client(
+        self, base_url: str, *, verify: ssl.SSLContext | None = None, **kwargs: object
+    ) -> httpx.AsyncClient:
         """A client for `base_url` pinned to its checked address, without redirects.
+
+        `verify` is the TLS context to verify the server with (default: the system's trust).
 
         Raises:
             TargetRefusedError: the URL is not http(s), or its host is refused.
@@ -126,7 +136,8 @@ class NetPolicy:
             raise TargetRefusedError(f"not an http(s) URL: {base_url}")
         port = url.port or (443 if url.scheme == "https" else 80)
         address = (await self.resolve(url.hostname, port))[0]
-        transport = PinnedTransport(httpx.AsyncHTTPTransport(), url.hostname, str(address))
+        inner = self._transport or httpx.AsyncHTTPTransport(verify=verify if verify is not None else True)
+        transport = PinnedTransport(inner, url.hostname, str(address))
         return httpx.AsyncClient(
             base_url=base_url,
             transport=transport,

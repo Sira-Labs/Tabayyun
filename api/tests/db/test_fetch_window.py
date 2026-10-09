@@ -1,6 +1,6 @@
-"""The fetch engine against Postgres and a local cache (spec 021): a day from the synthetic
-connector, idempotence, settling, partial fetches and their retry, failures, health, the
-budget, polling, the job lock and pruning."""
+"""The fetch engine against Postgres and a local cache (specs 021, 022): a day from the synthetic
+connector, idempotence, settling, partial fetches and their retry, failures, a missing point,
+health, the budget, checks, searches and metadata imports, polling, the job lock and pruning."""
 
 from __future__ import annotations
 
@@ -293,10 +293,107 @@ async def test_check(env, scripted):
     async with env.factory() as session, session.begin():
         source = await session.get(Source, source_id)
         check = await fetches.create_fetch(session, source, trigger="check", start=NOW, end=NOW)
-    outcome = await fetches.execute_check(env.factory, env.deps, check.id)
+    outcome = await fetches.execute_task(env.factory, env.deps, check.id)
     assert outcome.status == "succeeded" and not scripted.calls
     health = (await env.row(Source, source_id)).health
     assert health["status"] == "ok" and "last_fetch" not in health
+
+
+async def test_a_missing_point_ends_partial_and_keeps_the_others(env):
+    source_id, (flow, _level) = await env.source()
+    async with env.factory() as session, session.begin():
+        gone = Series(
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WORKSPACE_ID,
+            source_id=source_id,
+            external_id="gone",
+            name="gone",
+        )
+        session.add(gone)
+    outcome = await env.run(await env.fetch(source_id))
+    assert (outcome.status, outcome.retryable) == ("partial", False)
+    assert outcome.error == "1 point(s) failed: point not configured: gone"
+    assert outcome.result == {"point_errors": {str(gone.id): "point not configured: gone"}}
+    assert await env.covered(gone.id) == [] and await env.covered(flow) != []
+    assert env.read(source_id, flow).num_rows == 1440
+    assert (await env.row(Source, source_id)).health["status"] == "degraded"
+
+
+async def _task(env, source_id, trigger, *, params=None, series_ids=None, user_id=None) -> uuid.UUID:
+    async with env.factory() as session, session.begin():
+        source = await session.get(Source, source_id)
+        row = await fetches.create_fetch(
+            session,
+            source,
+            trigger=trigger,
+            start=NOW,
+            end=NOW,
+            params=params,
+            series_ids=series_ids,
+            user_id=user_id,
+        )
+        return row.id
+
+
+async def test_search_task_stores_the_matches(env):
+    source_id, _ = await env.source()
+    task_id = await _task(env, source_id, "search", params={"query": "FL", "limit": 10})
+    outcome = await fetches.execute_task(env.factory, env.deps, task_id)
+    assert outcome.status == "succeeded"
+    row = await env.row(SourceFetch, task_id)
+    assert row.result == {
+        "items": [{"external_id": "flow", "name": "flow", "unit": None, "description": None}],
+        "truncated": False,
+    }
+    one = await _task(env, source_id, "search", params={"query": "", "limit": 1})
+    await fetches.execute_task(env.factory, env.deps, one)
+    assert (await env.row(SourceFetch, one)).result["truncated"] is True
+
+
+async def test_metadata_task_fills_empty_fields_and_reports_failures(env):
+    points = [{"external_id": "flow", "unit": "m3/h", "base": 50}, {"external_id": "level", "unit": "m"}]
+    source_id, (flow, level) = await env.source(points=points)
+    async with env.factory() as session, session.begin():
+        (await session.get(Series, level)).unit = "ft"  # edited by hand: kept
+        gone = Series(
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WORKSPACE_ID,
+            source_id=source_id,
+            external_id="gone",
+            name="gone",
+        )
+        session.add(gone)
+    task_id = await _task(env, source_id, "metadata", params={"overwrite": False})
+    outcome = await fetches.execute_task(env.factory, env.deps, task_id)
+    assert (outcome.status, outcome.error) == ("partial", "1 series failed: point not configured: gone")
+    result = (await env.row(SourceFetch, task_id)).result
+    assert (result["updated"], result["unchanged"], result["failed"]) == (2, 0, 1)
+    assert result["series"][str(flow)] == {"changed": ["unit", "metadata"]}
+    assert result["series"][str(level)] == {"changed": ["metadata"]}
+    assert result["series"][str(gone.id)] == {"error": "point not configured: gone"}
+    flow_row, level_row = await env.row(Series, flow), await env.row(Series, level)
+    assert flow_row.unit == "m3/h" and level_row.unit == "ft"
+    assert flow_row.metadata_["synthetic"]["base"] == 50 and "imported_at" in flow_row.metadata_["synthetic"]
+
+    again = await _task(env, source_id, "metadata", params={"overwrite": True}, series_ids=[flow, level])
+    assert (await fetches.execute_task(env.factory, env.deps, again)).status == "succeeded"
+    result = (await env.row(SourceFetch, again)).result
+    assert result["series"][str(flow)] == {"changed": []} and result["series"][str(level)] == {
+        "changed": ["unit"]
+    }
+    assert (await env.row(Series, level)).unit == "m"
+
+
+async def test_source_tasks_share_the_check_job(env):
+    source_id, _ = await env.source()
+    async with env.factory() as session, session.begin():
+        source = await session.get(Source, source_id)
+        for trigger in ("check", "search", "metadata"):
+            row = await fetches.create_fetch(session, source, trigger=trigger, start=NOW, end=NOW)
+            await fetches.enqueue(session, row)
+    async with env.factory() as session:
+        names = (await session.scalars(text("SELECT task_name FROM procrastinate_jobs"))).all()
+    assert names == ["tabayyun.check_source"] * 3
 
 
 # Jobs, polling and pruning

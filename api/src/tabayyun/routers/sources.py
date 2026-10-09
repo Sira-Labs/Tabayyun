@@ -217,7 +217,7 @@ async def _start(
         return
     await session.commit()
     deps = fetches.FetchDeps(cache=state.run_cache, net=state.net_policy, keyring=state.keyring)
-    run = fetches.execute_check if fetch.trigger == "check" else fetches.execute_fetch
+    run = fetches.execute_task if fetch.trigger in fetches.TASK_TRIGGERS else fetches.execute_fetch
     background.add_task(run, for_org(state.session_factory, scope.org_id), deps, fetch.id)
 
 

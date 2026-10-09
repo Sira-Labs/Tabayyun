@@ -1,5 +1,5 @@
-"""The synthetic connector (spec 021): determinism across fetches and windows, the faults, config
-validation, search, and the registry's `build`."""
+"""The synthetic connector (specs 021, 022): determinism across fetches and windows, the faults,
+config validation, search, describe, unknown points as failures, and the registry's `build`."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pyarrow as pa
 import pytest
 
 from tabayyun import connectors
-from tabayyun.connectors import BATCH_SCHEMA, ConnectorError, NetPolicy, PointRef
+from tabayyun.connectors import BATCH_SCHEMA, ConnectorError, NetPolicy, PointFailure, PointRef
 from tabayyun.connectors.synthetic import ROWS_PER_BATCH, SPIKE_EVERY, grid
 
 S = 1_000_000_000
@@ -69,8 +69,11 @@ def test_faults():
     assert spikes and all((ts // (60 * S)) % SPIKE_EVERY == 0 for ts in spikes)
 
 
-def test_unknown_point_yields_nothing_and_long_spans_are_chunked():
-    assert fetch(make(), T0, T0 + DAY, "nope") is None
+def test_unknown_point_is_a_failure_and_long_spans_are_chunked():
+    async def unknown():
+        return [b async for b in make().fetch([PointRef(SERIES, "nope")], T0, T0 + DAY)]
+
+    assert asyncio.run(unknown()) == [PointFailure(SERIES, "point not configured: nope")]
 
     async def batches():
         return [b async for b in make(interval_s=1).fetch([PointRef(SERIES, "flow")], T0, T0 + DAY)]
@@ -118,3 +121,14 @@ def test_registry():
 def test_limits_take_the_config():
     limits = make(max_points=7, max_span_s=3600, requests_per_second=2).limits()
     assert (limits.max_points, limits.max_span_ns, limits.requests_per_second) == (7, 3600 * S, 2)
+
+
+def test_describe_gives_unit_and_settings_and_names_unknown_points():
+    conn = make(points=[{"external_id": "flow", "name": "Inlet flow", "unit": "m3/h", "base": 50}])
+    other = uuid.uuid4()
+    got = asyncio.run(conn.describe([PointRef(SERIES, "flow"), PointRef(other, "nope")]))
+    assert got[0].series_id == SERIES and got[0].error is None
+    assert got[0].metadata.unit == "m3/h" and got[0].metadata.description == "Inlet flow"
+    assert got[0].metadata.extra["base"] == 50 and got[0].metadata.extra["faults"] == []
+    assert (got[1].series_id, got[1].metadata, got[1].error) == (other, None, "point not configured: nope")
+    assert type(conn).supports("describe") and type(conn).supports("search")
