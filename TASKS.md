@@ -318,8 +318,8 @@ Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, S
       `https://miftachun.apps.data-and-ai-dude.ch/realms/tabayyun/broker/github/endpoint`),
       credentials to the realm's GitHub provider at import (spec 013).
 - [x] Both DMARC records at `p=quarantine` (9 Oct); the .ch record's reports go to the .com
-      mailbox. Optional: TXT `data-and-ai-dude.ch._report._dmarc` = `v=DMARC1` in the .com
-      zone, so receivers accept that cross-domain report address.
+      mailbox, authorised by TXT `data-and-ai-dude.ch._report._dmarc` = `v=DMARC1` in the
+      .com zone.
 
 ## Shipping without merge clicks (ADR-0017, 2 Oct 2026)
 
