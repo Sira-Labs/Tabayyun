@@ -1,0 +1,43 @@
+[
+  {
+    "WebId": "F1AbEAFFIC101FLOW",
+    "Id": "5f0a6c2e-1b3d-4e8f-9a7b-2c1d0e3f4a5b",
+    "Name": "Flow",
+    "Description": "Inlet flow (AF)",
+    "Path": "\\\\AFSRV01\\Plant\\Area1\\FIC101|Flow",
+    "Type": "Double",
+    "TypeQualifier": "",
+    "DefaultUnitsName": "cubic meter per hour",
+    "DefaultUnitsNameAbbreviation": "m3/h",
+    "DisplayDigits": -5,
+    "DataReferencePlugIn": "PI Point",
+    "ConfigString": "\\\\PISRV01\\FIC101.PV",
+    "IsConfigurationItem": false,
+    "IsExcluded": false,
+    "IsHidden": false,
+    "IsManualDataEntry": false,
+    "HasChildren": true,
+    "CategoryNames": ["Process"],
+    "Step": false,
+    "TraitName": "",
+    "Links": {
+      "Self": "https://pi.example.com/piwebapi/attributes/F1AbEAFFIC101FLOW",
+      "Point": "https://pi.example.com/piwebapi/points/F1DPFIC101PV"
+    }
+  },
+  {
+    "WebId": "F1AbEAFFIC101DESIGN",
+    "Id": "6a1b7d3f-2c4e-4f9a-8b8c-3d2e1f4a5b6c",
+    "Name": "Flow design",
+    "Description": "Design flow (static)",
+    "Path": "\\\\AFSRV01\\Plant\\Area1\\FIC101|Flow design",
+    "Type": "Double",
+    "DefaultUnitsNameAbbreviation": "m3/h",
+    "DataReferencePlugIn": "",
+    "Step": false,
+    "TraitName": "",
+    "Links": {
+      "Self": "https://pi.example.com/piwebapi/attributes/F1AbEAFFIC101DESIGN"
+    }
+  }
+]

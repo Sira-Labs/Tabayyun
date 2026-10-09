@@ -1,0 +1,19 @@
+{
+  "F1AbEAFFIC101FLOW": {
+    "Items": [
+      {"WebId": "F1AbTFLOWMIN", "Name": "Minimum", "TraitName": "LimitMinimum"},
+      {"WebId": "F1AbTFLOWMAX", "Name": "Maximum", "TraitName": "LimitMaximum"},
+      {"WebId": "F1AbTFLOWLO", "Name": "Lo", "TraitName": "LimitLo"},
+      {"WebId": "F1AbTFLOWHI", "Name": "Hi", "TraitName": "LimitHi"},
+      {"WebId": "F1AbTFLOWHIHI", "Name": "HiHi", "TraitName": "LimitHiHi"}
+    ],
+    "Links": {}
+  },
+  "values": {
+    "F1AbTFLOWMIN": {"Timestamp": "1970-01-01T00:00:00Z", "Value": 0.0, "UnitsAbbreviation": "m3/h", "Good": true, "Questionable": false, "Substituted": false, "Annotated": false},
+    "F1AbTFLOWMAX": {"Timestamp": "1970-01-01T00:00:00Z", "Value": 120.0, "UnitsAbbreviation": "m3/h", "Good": true, "Questionable": false, "Substituted": false, "Annotated": false},
+    "F1AbTFLOWLO": {"Timestamp": "1970-01-01T00:00:00Z", "Value": 20.0, "UnitsAbbreviation": "m3/h", "Good": true, "Questionable": false, "Substituted": false, "Annotated": false},
+    "F1AbTFLOWHI": {"Timestamp": "1970-01-01T00:00:00Z", "Value": 90.0, "UnitsAbbreviation": "m3/h", "Good": true, "Questionable": false, "Substituted": false, "Annotated": false},
+    "F1AbTFLOWHIHI": {"Timestamp": "1970-01-01T00:00:00Z", "Value": 110.0, "UnitsAbbreviation": "m3/h", "Good": true, "Questionable": false, "Substituted": false, "Annotated": false}
+  }
+}

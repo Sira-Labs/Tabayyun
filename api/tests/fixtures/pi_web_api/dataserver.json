@@ -1,0 +1,13 @@
+{
+  "WebId": "F1DSPISRV01",
+  "Id": "c4b1b3b3-2f0f-4b47-9b1e-2a5a0f0e7a01",
+  "Name": "PISRV01",
+  "Path": "\\\\PISRV01",
+  "IsConnected": true,
+  "ServerVersion": "3.4.445.688",
+  "ServerTime": "2026-10-06T12:00:00Z",
+  "Links": {
+    "Self": "https://pi.example.com/piwebapi/dataservers/F1DSPISRV01",
+    "Points": "https://pi.example.com/piwebapi/dataservers/F1DSPISRV01/points"
+  }
+}
