@@ -17,6 +17,22 @@ All notable changes to this project are documented here. The format follows
   - The built-in `synthetic` connector generates deterministic series with optional faults.
 - Connector credentials are write-only and encrypted with AES-256-GCM under
   `TABAYYUN_MASTER_KEY`, with key rotation (`python -m tabayyun.secrets rotate`).
+- PI Web API connector (spec 022):
+  - A `pi_web_api` source reads an AVEVA PI System over https, with Basic or bearer
+    credentials and an optional private certificate authority.
+  - Point search by name covers the PI Data Archive and, when configured, the PI Point
+    attributes of an AF database.
+  - Recorded values are paged past PI's silent `maxCount` cut. PI's quality flags and system
+    states map to good, uncertain, bad and estimated.
+  - The metadata import fills unit, limits and asset path. It keeps PI's exception and
+    compression settings in the series metadata.
+- Connector sources gain `POST /api/sources/{id}/search`, `POST /api/sources/{id}/metadata`
+  and `GET /api/sources/{id}/fetches/{fetch_id}` (spec 022).
+
+### Changed
+- A point a connector cannot read no longer fails a fetch. The other points are fetched, and
+  the fetch ends `partial` with the failed points in `result.point_errors`. The `synthetic`
+  connector reports unconfigured points this way instead of returning nothing (spec 022).
 
 ### Security
 - Connectors only reach addresses the network policy allows. Loopback, link-local and cloud

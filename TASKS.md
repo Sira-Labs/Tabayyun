@@ -401,6 +401,21 @@ starts; the plan is the backlog until then.
         sources instead of deleting data.
       - A connector's own exception is reported as `internal connector error` and logged by
         type only, so a library message cannot leak a credential.
+- [x] **022 PI Web API connector** — `docs/specs/022-pi-web-api-connector.md` (S9-2, 10 Oct).
+      Every criterion is met. It is tested against a fake PI Web API whose fixtures are built
+      from AVEVA's reference shapes; a real PI server is still to be tried (owner input for S9).
+      - Recorded values are read one stream at a time, not with `streamsets`: the reference does
+        not say whether `maxCount` counts per stream there, and paging depends on it.
+      - Paging restarts at the last timestamp and skips, by count, the values already read
+        there. A full page with one timestamp only is an error, since it cannot advance.
+      - Search, metadata and check share the unretried `check_source` job. Results go into the
+        new `source_fetches.params` and `result` columns (migration 0009).
+      - A point a connector cannot read is a `PointFailure`. The fetch ends `partial`, not
+        retryable, and the other points keep their data.
+      - The metadata import fills only empty fields unless `overwrite`. It never clears a field,
+        and it skips limits the PATCH rules (spec 004) would refuse.
+      - WebIds are checked against PI's URL-safe alphabet before they go into a path. Link URLs
+        that PI returns are never followed.
 - [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
       `tabayyun-api` and `tabayyun-worker` on staging; then a `synthetic` source with
       `poll_interval_s` gives staging a live, polling source for demos.

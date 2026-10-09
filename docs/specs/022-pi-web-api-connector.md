@@ -245,30 +245,30 @@ asset database is set.
 
 ## Acceptance criteria
 
-- [ ] `POST /api/sources` with `type=pi_web_api` validates the config: https-only `base_url`,
+- [x] `POST /api/sources` with `type=pi_web_api` validates the config: https-only `base_url`,
   the path shapes of `data_server` and `asset_database`, a `ca_pem` that loads, and `max_count`
   bounds.
-- [ ] Credentials accept `basic` and `bearer` and nothing else; they are sent as Basic or Bearer
+- [x] Credentials accept `basic` and `bearer` and nothing else; they are sent as Basic or Bearer
   and never logged.
-- [ ] Every request carries `X-Requested-With`; TLS is verified, against `ca_pem` when set.
-- [ ] `check` succeeds against the fixture server, and fails for a 401 (not retryable), a 503
+- [x] Every request carries `X-Requested-With`; TLS is verified, against `ca_pem` when set.
+- [x] `check` succeeds against the fixture server, and fails for a 401 (not retryable), a 503
   (retryable) and a disconnected data server.
-- [ ] Search returns PI points and, with an asset database, PI Point AF attributes, capped at
+- [x] Search returns PI points and, with an asset database, PI Point AF attributes, capped at
   `limit`; a bare word is wrapped in `*`.
-- [ ] A fetch reads recorded values with paging past `max_count`, without duplicating values at
+- [x] A fetch reads recorded values with paging past `max_count`, without duplicating values at
   a page boundary and keeping several values at one timestamp.
-- [ ] Quality follows the table: system states and errors are NaN and `bad`, questionable is
+- [x] Quality follows the table: system states and errors are NaN and `bad`, questionable is
   `uncertain`, substituted is `estimated`.
-- [ ] A deleted point yields `PointFailure`: the other points' data and coverage are kept, and
+- [x] A deleted point yields `PointFailure`: the other points' data and coverage are kept, and
   the fetch ends `partial` with `result.point_errors`.
-- [ ] The metadata import fills unit, limits and asset path. It does not overwrite edited
+- [x] The metadata import fills unit, limits and asset path. It does not overwrite edited
   values without `overwrite`, skips invalid limits, and stores the compression settings under
   `metadata.pi_web_api`.
-- [ ] `POST …/search`, `POST …/metadata` and `GET …/fetches/{id}` work as specified, with roles,
+- [x] `POST …/search`, `POST …/metadata` and `GET …/fetches/{id}` work as specified, with roles,
   rate limits and audit events; viewers cannot start them.
-- [ ] Integration test: search, register, fetch, a dataset run with findings, and a metadata
+- [x] Integration test: search, register, fetch, a dataset run with findings, and a metadata
   import, against the recorded fixture server.
-- [ ] `deploy/caprover.md` documents a PI source: network allow-list, certificate authority,
+- [x] `deploy/caprover.md` documents a PI source: network allow-list, certificate authority,
   credentials and the PI Web API settings it relies on.
 
 ## Test cases
@@ -312,6 +312,26 @@ The fixtures are built from the response shapes in AVEVA's PI Web API reference,
 from a live server: the project has no PI test server (`docs/roadmap/sprints.md`, owner input
 for S9). When one is available, `tests/fixtures/pi_web_api/README.md` explains how to replace
 them with real recordings.
+
+## Implementation notes
+
+- **One job for three tasks.** Checks, searches and metadata imports share the unretried
+  `check_source` job (`fetches.execute_task`). Disabling a source stops fetches and polls only.
+- **One value per timestamp in the cache.** The connector returns every value PI holds,
+  including several at one timestamp. The Parquet cache keeps one per timestamp (spec 006), so
+  a run counts 1440 rows for the fake's 1441-value day.
+- **Point failures** end a fetch `partial`, not retryable, and turn the source's health
+  `degraded`: a deleted tag is worth an admin's look, not a retry storm.
+- **AF search matches attribute names only.** `elementattributes` takes an attribute-name and
+  an element-name filter, and they combine with AND. Searching the element name too would need
+  a second request per search.
+- **Spec edits made during implementation:**
+  - the 0009 downgrade keeps `search` and `metadata` rows behind a `NOT VALID` check, as 0008
+    does, instead of deleting them;
+  - `POST …/metadata` no longer answers `source_disabled`;
+  - any full page holding a single timestamp is an error, since the next request would return
+    the same page;
+  - `synthetic` reports unconfigured points as `PointFailure`.
 
 ## Out of scope
 
