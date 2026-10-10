@@ -314,9 +314,23 @@ async def list_series(
     kind: str | None,
     limit: int,
     cursor: str | None,
+    unit: str | None = None,
+    score_max: float | None = None,
 ) -> tuple[list[Series], str | None]:
-    """Series by name, keyset-paginated on `(name, id)`; `q` matches name or external id."""
+    """Series by name, keyset-paginated on `(name, id)`; `q` matches name or external id, `unit`
+    the unit ignoring case, `score_max` the latest raw overall score (spec 024)."""
     stmt = select(Series).where(Series.workspace_id == scope.workspace_id)
+    if unit is not None:
+        stmt = stmt.where(func.lower(Series.unit) == unit.strip().lower())
+    if score_max is not None:
+        latest = (
+            select(Score.series_id, Score.overall)
+            .where(Score.layer == "raw")
+            .distinct(Score.series_id)
+            .order_by(Score.series_id, Score.computed_at.desc())
+            .subquery()
+        )
+        stmt = stmt.join(latest, latest.c.series_id == Series.id).where(latest.c.overall <= score_max)
     if q:
         pattern = _like_pattern(q)
         stmt = stmt.where(
@@ -333,6 +347,22 @@ async def list_series(
     rows = list((await session.execute(stmt)).scalars())
     next_cursor = encode_name_cursor(rows[limit - 1]) if len(rows) > limit else None
     return rows[:limit], next_cursor
+
+
+async def list_units(session: AsyncSession, scope: Scope) -> list[tuple[str, int]]:
+    """The workspace's distinct non-empty units with their series counts, most used first.
+
+    Units are grouped ignoring case, as the `unit` filter matches them; each group is named by
+    one of its spellings."""
+    key = func.lower(Series.unit)
+    count = func.count()
+    stmt = (
+        select(func.min(Series.unit), count)
+        .where(Series.workspace_id == scope.workspace_id, Series.unit.is_not(None), Series.unit != "")
+        .group_by(key)
+        .order_by(count.desc(), key)
+    )
+    return [(str(unit), int(n)) for unit, n in (await session.execute(stmt)).tuples()]
 
 
 # Updates

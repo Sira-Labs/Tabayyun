@@ -95,3 +95,16 @@ export type ScoreRow = {
   n_findings: number;
   computed_at: string;
 };
+
+/** One row of `GET /api/series` (spec 004, the catalogue of spec 024). */
+export type SeriesSummary = {
+  id: string;
+  source_id: string;
+  external_id: string;
+  name: string;
+  unit: string | null;
+  kind: string;
+  latest_score: { overall: number; computed_at: string } | null;
+  open_findings: number;
+  last_run_at: string | null;
+};

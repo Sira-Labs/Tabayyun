@@ -68,6 +68,12 @@ export function Layout() {
             <Link to="/runs/new" className={navClass} activeProps={{ className: navActive }}>
               New run
             </Link>
+            <Link to="/series" className={navClass} activeProps={{ className: navActive }}>
+              Series
+            </Link>
+            <Link to="/sources" className={navClass} activeProps={{ className: navActive }}>
+              Sources
+            </Link>
             {isAdmin && (
               <Link to="/admin" className={navClass} activeProps={{ className: navActive }}>
                 Admin

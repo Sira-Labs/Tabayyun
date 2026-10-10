@@ -7,6 +7,10 @@ import { Login } from "./pages/Login";
 import { RunForm } from "./pages/RunForm";
 import { RunReport } from "./pages/RunReport";
 import { RunsList } from "./pages/RunsList";
+import { SeriesCatalogue, validateSeriesSearch } from "./pages/SeriesCatalogue";
+import { SourceDetail } from "./pages/sources/SourceDetail";
+import { SourceNew } from "./pages/sources/SourceNew";
+import { SourcesList } from "./pages/sources/SourcesList";
 
 /** Fallback for unknown paths. */
 function NotFound() {
@@ -28,6 +32,15 @@ const indexRoute = createRoute({
 const runsRoute = createRoute({ getParentRoute: () => appRoute, path: "/runs", component: RunsList });
 const newRunRoute = createRoute({ getParentRoute: () => appRoute, path: "/runs/new", component: RunForm });
 const runRoute = createRoute({ getParentRoute: () => appRoute, path: "/runs/$runId", component: RunReport });
+const seriesRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/series",
+  validateSearch: validateSeriesSearch,
+  component: SeriesCatalogue,
+});
+const sourcesRoute = createRoute({ getParentRoute: () => appRoute, path: "/sources", component: SourcesList });
+const newSourceRoute = createRoute({ getParentRoute: () => appRoute, path: "/sources/new", component: SourceNew });
+const sourceRoute = createRoute({ getParentRoute: () => appRoute, path: "/sources/$sourceId", component: SourceDetail });
 const accountRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings/account", component: Account });
 const adminRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -46,7 +59,18 @@ const loginRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  appRoute.addChildren([indexRoute, runsRoute, newRunRoute, runRoute, accountRoute, adminRoute]),
+  appRoute.addChildren([
+    indexRoute,
+    runsRoute,
+    newRunRoute,
+    runRoute,
+    seriesRoute,
+    sourcesRoute,
+    newSourceRoute,
+    sourceRoute,
+    accountRoute,
+    adminRoute,
+  ]),
   loginRoute,
 ]);
 

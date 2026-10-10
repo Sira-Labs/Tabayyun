@@ -37,7 +37,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 class SourceOut(BaseModel):
-    """One source and how many series it holds."""
+    """One source, how many series it holds, and its last fetch (spec 024)."""
 
     id: str
     type: str
@@ -47,6 +47,7 @@ class SourceOut(BaseModel):
     enabled: bool
     connector: bool
     health_status: str
+    last_fetch: dict[str, Any] | None = None
 
 
 class SourceList(BaseModel):
@@ -263,6 +264,7 @@ async def list_sources(session: SessionDep, scope: ReadScope) -> SourceList:
                 enabled=s.enabled,
                 connector=connectors.is_connector(s.type),
                 health_status=(s.health or {}).get("status", "unknown"),
+                last_fetch=(s.health or {}).get("last_fetch"),
             )
             for s, n in rows
         ]
