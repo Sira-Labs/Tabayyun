@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import ssl
 
 import httpx
 import pytest
@@ -121,3 +122,50 @@ def test_pinned_transport_rewrites_the_target_and_keeps_host_and_sni():
     assert request.url.host == PUBLIC and request.url.path == "/piwebapi/points"
     assert request.headers["host"] == "pi.example.com"
     assert request.extensions["sni_hostname"] == "pi.example.com"
+
+
+def test_injected_transport_still_gets_checked_and_pinned_requests():
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={})
+
+    policy = NetPolicy(
+        resolver=resolver({"pi.example.com": [PUBLIC]}), transport=httpx.MockTransport(handler)
+    )
+
+    async def go():
+        async with await policy.http_client("https://pi.example.com/piwebapi") as client:
+            await client.get("points")
+        with pytest.raises(TargetRefusedError):
+            await NetPolicy(
+                resolver=resolver({"pi.example.com": ["127.0.0.1"]}), transport=httpx.MockTransport(handler)
+            ).http_client("https://pi.example.com/piwebapi")
+
+    asyncio.run(go())
+    [request] = seen
+    assert request.url.host == PUBLIC and request.url.path == "/piwebapi/points"
+    assert request.headers["host"] == "pi.example.com"
+
+
+def test_verify_context_reaches_the_transport(monkeypatch):
+    created: list[dict] = []
+    real = httpx.AsyncHTTPTransport
+
+    def spy(**kwargs):
+        created.append(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncHTTPTransport", spy)
+    context = ssl.create_default_context()
+
+    async def go():
+        policy = NetPolicy(resolver=resolver({"pi.example.com": [PUBLIC]}))
+        async with await policy.http_client("https://pi.example.com/piwebapi", verify=context):
+            pass
+        async with await policy.http_client("https://pi.example.com/piwebapi"):
+            pass
+
+    asyncio.run(go())
+    assert created == [{"verify": context}, {"verify": True}]

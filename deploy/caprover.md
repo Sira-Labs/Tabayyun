@@ -451,6 +451,63 @@ Staging needs none of it: its data can be rebuilt.
   against it, time it, drop it, and record the time in `TASKS.md`. Never restore production
   data into staging.
 
+## Adding a PI Web API source
+
+A `pi_web_api` source (spec 022) reads an AVEVA PI System through PI Web API: point search,
+recorded values and metadata. It needs `TABAYYUN_MASTER_KEY` on the api and the worker, because
+it takes credentials.
+
+**On the PI side** (the PI administrator):
+
+- PI Web API's `AuthenticationMethods` must include **Basic** or **Bearer**. Kerberos, the
+  default, is not supported yet.
+- Use a dedicated, read-only identity, for example a domain account `PLANT\svc-tabayyun` mapped
+  to a PI identity that reads the points and the AF database.
+- Keep `EnableCSRFDefense` on: Tabayyun sends `X-Requested-With` on every request.
+- `MaxReturnedItemsPerCall` (default 150,000) must be at least the source's `max_count`
+  (default 10,000).
+- The rate limit (default 1,000 requests per second per client) is far above the source's
+  `requests_per_second` (default 20).
+
+**On the Tabayyun side:**
+
+1. **Network.** PI Web API usually sits on a plant network, so add its CIDR to
+   `TABAYYUN_CONNECTOR_ALLOWED_NETWORKS` on the api and the worker, then Save & Update both.
+   Without it, checks fail with `target not allowed`.
+2. **TLS.** Only `https://` URLs are accepted, and certificates are always verified. A
+   certificate from a private certificate authority needs that authority's PEM certificate in
+   the source's `ca_pem`.
+3. **Create the source** as a workspace admin. JSON escapes each backslash of a PI path, so
+   `\\PISRV01` is written `\\\\PISRV01`:
+
+   ```bash
+   curl -X POST "$URL/api/sources" -H 'Content-Type: application/json' -H 'X-Tabayyun-Request: 1' \
+     -d '{"type": "pi_web_api", "name": "PI plant", "config": {
+           "base_url": "https://pi.plant.example/piwebapi",
+           "data_server": "\\\\PISRV01",
+           "asset_database": "\\\\AFSRV01\\Plant",
+           "poll_interval_s": 300}}'
+   ```
+
+4. **Set credentials:** `PUT /api/sources/{id}/credentials` with
+   `{"kind": "basic", "username": "PLANT\\svc-tabayyun", "password": "…"}` or
+   `{"kind": "bearer", "token": "…"}`. They are write-only.
+5. **Check:** `POST /api/sources/{id}/check`. The source's `health` turns `ok`.
+6. **Find points:** `POST /api/sources/{id}/search` with `{"query": "FIC1"}`, then read the
+   matches with `GET /api/sources/{id}/fetches/{job id}` under `result.items`.
+   - A word is matched anywhere in the name; use `*` and `?` for your own pattern.
+   - AF attributes match by their own name, and only those with a PI Point data reference are
+     listed.
+7. **Register** the chosen points with `POST /api/sources/{id}/series`, using each match's
+   `external_id`, which is its PI path.
+8. **Import metadata:** `POST /api/sources/{id}/metadata` with `{}`.
+   - It fills each series' empty unit, limits and asset path from PI and AF.
+   - It stores `ExcDev`, `CompDev`, `CompMax` and related settings under
+     `metadata.pi_web_api`.
+   - `{"overwrite": true}` also replaces values edited by hand.
+
+Fetches, polls and dataset runs then read the series' recorded values.
+
 ## Connector credentials: rotating the master key
 
 Connector credentials (spec 021) are encrypted under `TABAYYUN_MASTER_KEY`. To rotate it:
@@ -490,6 +547,11 @@ again.
 | A fetch fails with `credentials unavailable: TABAYYUN_MASTER_KEY is not set` or `… do not decrypt` | the worker has no master key, or another one than the api | Give the worker the api's key; after a lost key, set the credentials again |
 | A fetch or check fails with `target not allowed: <host>` | the host resolves to a private, loopback or link-local address outside `TABAYYUN_CONNECTOR_ALLOWED_NETWORKS` | Add the plant network's CIDR to `TABAYYUN_CONNECTOR_ALLOWED_NETWORKS` on the api and the worker; loopback and metadata addresses are never allowed |
 | A fetch fails with `invalid stored settings: …` | the source's config no longer validates (after an upgrade) | Fix it with `PATCH /api/sources/{id}` |
+| A PI check or fetch fails with `PI Web API refused the credentials` | wrong credentials, Basic and Bearer both disabled in PI Web API's `AuthenticationMethods`, or the identity cannot read the data | Fix the credentials or PI Web API's settings (section "Adding a PI Web API source"); the error is not retried |
+| A PI check fails with `PI Web API's TLS certificate is not trusted; set ca_pem …` | PI Web API's certificate comes from a private certificate authority | Put that authority's PEM certificate into the source's `ca_pem` with `PATCH /api/sources/{id}` |
+| A PI check fails with `data server not connected` | PI Web API cannot reach the PI Data Archive | A PI-side problem; retried by the next check or poll |
+| A PI fetch ends `partial` with `N point(s) failed: … not found` | a registered point was deleted or renamed in PI, or the identity cannot see it; `result.point_errors` names the series | Register the new path, or fix the PI identity's access; the other points keep fetching |
+| A PI fetch fails with `more than N values at one timestamp` | a point holds more values at one timestamp than `max_count` | Raise the source's `max_count` (up to PI Web API's `MaxReturnedItemsPerCall`) |
 | A source's health reads `failing`; fetches keep failing | three or more fetches in a row failed; `health.last_error` says why | Fix the cause, then `POST /api/sources/{id}/check` |
 | Keycloak shows `Invalid parameter: redirect_uri` | the realm was rendered for another address than `TABAYYUN_PUBLIC_URL` | Clients → `tabayyun-api` → Settings: valid redirect URI `<public>/api/auth/callback`, or re-render and re-import |
 | After Google or GitHub: "Sign-in failed (invalid_token)" | the provider's email is unverified, or the realm lacks the `identity provider` mapper | Verify the email at the provider; re-import the realm |

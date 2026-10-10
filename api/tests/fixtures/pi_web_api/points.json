@@ -1,0 +1,50 @@
+[
+  {
+    "WebId": "F1DPFIC101PV",
+    "Id": 101,
+    "Name": "FIC101.PV",
+    "Path": "\\\\PISRV01\\FIC101.PV",
+    "Descriptor": "Inlet flow",
+    "PointClass": "classic",
+    "PointType": "Float32",
+    "DigitalSetName": "",
+    "Span": 200.0,
+    "Zero": 0.0,
+    "EngineeringUnits": "m3/h",
+    "Step": false,
+    "Future": false,
+    "DisplayDigits": -5
+  },
+  {
+    "WebId": "F1DPLIC201PV",
+    "Id": 201,
+    "Name": "LIC201.PV",
+    "Path": "\\\\PISRV01\\LIC201.PV",
+    "Descriptor": "Tank level",
+    "PointClass": "classic",
+    "PointType": "Float32",
+    "DigitalSetName": "",
+    "Span": 10.0,
+    "Zero": 0.0,
+    "EngineeringUnits": "m",
+    "Step": false,
+    "Future": false,
+    "DisplayDigits": -5
+  },
+  {
+    "WebId": "F1DPPMP301STATE",
+    "Id": 301,
+    "Name": "PMP301.STATE",
+    "Path": "\\\\PISRV01\\PMP301.STATE",
+    "Descriptor": "Feed pump state",
+    "PointClass": "classic",
+    "PointType": "Digital",
+    "DigitalSetName": "Pump",
+    "Span": 0.0,
+    "Zero": 0.0,
+    "EngineeringUnits": "",
+    "Step": true,
+    "Future": false,
+    "DisplayDigits": -5
+  }
+]

@@ -17,11 +17,15 @@ from tabayyun.connectors.base import (
     ConnectorConfig,
     FetchedBatch,
     Limits,
+    PointDescription,
+    PointFailure,
+    PointMetadata,
     PointRef,
     RemotePoint,
 )
 from tabayyun.connectors.errors import AuthError, ConnectorError, NotSupportedError, TargetRefusedError
 from tabayyun.connectors.net import NetPolicy
+from tabayyun.connectors.pi_web_api import PiWebApiConnector
 from tabayyun.connectors.synthetic import SyntheticConnector
 
 __all__ = [
@@ -35,6 +39,9 @@ __all__ = [
     "Limits",
     "NetPolicy",
     "NotSupportedError",
+    "PointDescription",
+    "PointFailure",
+    "PointMetadata",
     "PointRef",
     "RemotePoint",
     "TargetRefusedError",
@@ -87,3 +94,4 @@ def build(
 
 
 register(SyntheticConnector)
+register(PiWebApiConnector)

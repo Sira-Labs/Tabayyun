@@ -8,7 +8,8 @@ window twice, or in different pieces, gives the same rows. Optional faults:
 - `flatline`: 02:00 to 03:00 UTC each day holds the 02:00 value.
 
 It needs no credentials or network: the framework's end-to-end fixture and a live, polling
-source for demos on staging.
+source for demos on staging. `describe` gives each point's unit and generator settings, and a
+point the config does not have is a `PointFailure` (spec 022).
 """
 
 from __future__ import annotations
@@ -28,6 +29,9 @@ from tabayyun.connectors.base import (
     Connector,
     ConnectorConfig,
     FetchedBatch,
+    PointDescription,
+    PointFailure,
+    PointMetadata,
     PointRef,
     RemotePoint,
 )
@@ -160,10 +164,29 @@ class SyntheticConnector(Connector):
         ]
         return found[:limit]
 
+    async def describe(self, points: Sequence[PointRef]) -> list[PointDescription]:
+        """Unit, name and generator settings of each configured point."""
+        by_id = {p.external_id: p for p in self._config.points}
+        out: list[PointDescription] = []
+        for ref in points:
+            point = by_id.get(ref.external_id)
+            if point is None:
+                out.append(
+                    PointDescription(ref.series_id, None, error=f"point not configured: {ref.external_id}")
+                )
+                continue
+            extra = point.model_dump(include={"base", "amplitude", "period_s", "noise", "faults"})
+            out.append(
+                PointDescription(
+                    ref.series_id, PointMetadata(unit=point.unit, description=point.name, extra=extra)
+                )
+            )
+        return out
+
     async def fetch(
         self, points: Sequence[PointRef], start_ns: int, end_ns: int
-    ) -> AsyncIterator[FetchedBatch]:
-        """Rows of every known point; a point the config does not have yields nothing."""
+    ) -> AsyncIterator[FetchedBatch | PointFailure]:
+        """Rows of every configured point; any other point is a `PointFailure`."""
         cfg = self._config
         by_id = {p.external_id: p for p in cfg.points}
         interval_ns = cfg.interval_s * SECOND_NS
@@ -171,6 +194,7 @@ class SyntheticConnector(Connector):
         for ref in points:
             point = by_id.get(ref.external_id)
             if point is None:
+                yield PointFailure(ref.series_id, f"point not configured: {ref.external_id}")
                 continue
             for lo in range(0, len(stamps), ROWS_PER_BATCH):
                 ts = pa.array(stamps[lo : lo + ROWS_PER_BATCH], pa.int64())

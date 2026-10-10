@@ -71,7 +71,7 @@ golden fixture; every kernel has a criterion benchmark.
 | `authz` | `authorize(principal, action, resource)`, `visible_ids(principal, resource_type)`, role hierarchy, share resolution, RLS context (`SET LOCAL app.org_id`). |
 | `orgs`, `workspaces`, `members`, `teams`, `invitations` | Tenant model and admin panel APIs. |
 | `sources`, `series`, `datasets` | Connector configuration, series catalogue, metadata import (PI AF, OPC UA address space, CSV). |
-| `connectors` | Plugin-style connector framework; each connector yields Arrow batches; runs in the job worker, never in the request path. |
+| `connectors` | Plugin-style connector framework; each connector yields Arrow batches; runs in the job worker, never in the request path. Built in: `synthetic` (spec 021) and `pi_web_api` (spec 022), with point search and metadata import as worker jobs. |
 | `checks`, `suites`, `runs`, `findings`, `scores` | Check registry (built-in from core + plugin manifests), suite scheduling, run execution, results persistence. |
 | `alerts` | Rules, channels (email, webhook, Slack/Teams), throttling. |
 | `shares` | Share grants and link tokens. |

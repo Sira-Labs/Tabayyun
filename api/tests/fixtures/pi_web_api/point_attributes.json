@@ -1,0 +1,23 @@
+{
+  "Items": [
+    {"Name": "tag", "Value": "FIC101.PV"},
+    {"Name": "descriptor", "Value": "Inlet flow"},
+    {"Name": "engunits", "Value": "m3/h"},
+    {"Name": "pointtype", "Value": "Float32"},
+    {"Name": "zero", "Value": 0.0},
+    {"Name": "span", "Value": 200.0},
+    {"Name": "typicalvalue", "Value": 50.0},
+    {"Name": "excdev", "Value": 0.1},
+    {"Name": "excdevpercent", "Value": 0.05},
+    {"Name": "excmin", "Value": 0},
+    {"Name": "excmax", "Value": 600},
+    {"Name": "compdev", "Value": 0.2},
+    {"Name": "compdevpercent", "Value": 0.1},
+    {"Name": "compmin", "Value": 0},
+    {"Name": "compmax", "Value": 28800},
+    {"Name": "compressing", "Value": 1},
+    {"Name": "step", "Value": 0},
+    {"Name": "pointsource", "Value": "OPC"}
+  ],
+  "Links": {}
+}

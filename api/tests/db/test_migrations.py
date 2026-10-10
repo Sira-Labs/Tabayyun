@@ -220,3 +220,46 @@ def test_0004_backfills_org_ids_and_downgrades(db_url, fresh_schema, mode):
     migrate.upgrade(db_url, "head", timescale=mode)
     assert _current_revision(db_url) == migrate.head_revision()
     migrate.check(db_url)
+
+
+def test_0009_downgrades_keeping_source_jobs(db_url, fresh_schema):
+    """0009 adds `params` and `result`; its downgrade drops them and keeps search rows (spec 022)."""
+    fresh_schema("auto")
+    engine = create_engine(db_url)
+    source = "00000000-0000-0000-0000-0000000000e1"
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO sources (id, org_id, workspace_id, type, name) "
+                    "VALUES (:id, :org, :ws, 'synthetic', 'syn')"
+                ),
+                {"id": source, "org": str(DEFAULT_ORG_ID), "ws": str(DEFAULT_WORKSPACE_ID)},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO source_fetches (id, org_id, workspace_id, source_id, trigger, window_start, "
+                    "window_end, params) VALUES (gen_random_uuid(), :org, :ws, :src, 'search', now(), now(), "
+                    '\'{"query": "flow"}\')'
+                ),
+                {"org": str(DEFAULT_ORG_ID), "ws": str(DEFAULT_WORKSPACE_ID), "src": source},
+            )
+        migrate.downgrade(db_url, "0008")
+        assert _current_revision(db_url) == "0008"
+        columns = {c["name"] for c in inspect(engine).get_columns("source_fetches")}
+        assert {"params", "result"}.isdisjoint(columns)
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT trigger FROM source_fetches")).scalars().all() == ["search"]
+        with pytest.raises(Exception, match="ck_source_fetches_trigger"), engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO source_fetches (id, org_id, workspace_id, source_id, trigger, window_start, "
+                    "window_end) VALUES (gen_random_uuid(), :org, :ws, :src, 'metadata', now(), now())"
+                ),
+                {"org": str(DEFAULT_ORG_ID), "ws": str(DEFAULT_WORKSPACE_ID), "src": source},
+            )
+    finally:
+        engine.dispose()
+    migrate.upgrade(db_url, "head", timescale="auto")
+    assert _current_revision(db_url) == migrate.head_revision()
+    migrate.check(db_url)

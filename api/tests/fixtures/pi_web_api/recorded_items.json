@@ -1,0 +1,8 @@
+{
+  "questionable": {"Value": 51.5, "UnitsAbbreviation": "m3/h", "Good": true, "Questionable": true, "Substituted": false, "Annotated": false},
+  "substituted": {"Value": 49.0, "UnitsAbbreviation": "m3/h", "Good": true, "Questionable": false, "Substituted": true, "Annotated": false},
+  "io_timeout": {"Value": {"Name": "I/O Timeout", "Value": 246, "IsSystem": true}, "UnitsAbbreviation": "", "Good": false, "Questionable": false, "Substituted": false, "Annotated": false},
+  "error": {"Value": null, "Errors": [{"FieldName": "Value", "Message": ["The value could not be read."]}], "Good": false, "Questionable": false, "Substituted": false, "Annotated": false},
+  "pump_running": {"Value": {"Name": "Running", "Value": 1, "IsSystem": false}, "UnitsAbbreviation": "", "Good": true, "Questionable": false, "Substituted": false, "Annotated": false},
+  "pump_stopped": {"Value": {"Name": "Stopped", "Value": 0, "IsSystem": false}, "UnitsAbbreviation": "", "Good": true, "Questionable": false, "Substituted": false, "Annotated": false}
+}

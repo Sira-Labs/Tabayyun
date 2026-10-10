@@ -1,13 +1,16 @@
 """The fetch engine (spec 021): fill a connector source's coverage gaps from its system.
 
-A fetch is a `source_fetches` row (manual, poll, run or check). Executing it:
+A fetch is a `source_fetches` row (manual, poll or run; checks, point searches and metadata
+imports are rows too and run through `execute_task`, spec 022). Executing a fetch:
 
 1. loads the source, its series and their gaps (coverage against the fetch window), decrypts
    the credentials and builds the connector, then marks the fetch `running`;
 2. runs the planned calls in time order, paced per source; each call's batches go to the raw
    layer of the cache, and the call's span is recorded as covered up to `now - settle_s`, in
    its own transaction, so progress survives a later failure;
-3. ends `succeeded`, or `partial` / `failed` on an error, and updates the source's health.
+3. ends `succeeded`, or `partial` / `failed` on an error, and updates the source's health. A
+   point the connector cannot read (`PointFailure`) gets no coverage for that call and ends the
+   fetch `partial`, not retryable, with the point's message in `result.point_errors`.
 
 A retryable error leaves the fetch `partial` and the caller (the job) retries; the retry
 fetches only what is still missing. Connector errors carry admin-facing messages; anything
@@ -33,11 +36,22 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tabayyun import connectors, secrets
-from tabayyun.connectors import BATCH_SCHEMA, QUALITIES, Connector, ConnectorError, NetPolicy, PointRef
+from tabayyun.connectors import (
+    BATCH_SCHEMA,
+    QUALITIES,
+    Connector,
+    ConnectorError,
+    NetPolicy,
+    PointDescription,
+    PointFailure,
+    PointRef,
+)
 from tabayyun.connectors.plan import Call, Pacer, plan_calls, settled_end
 from tabayyun.db.models import Series, Source, SourceFetch
 from tabayyun.jobs.names import CHECK_SOURCE_TASK, FETCH_QUEUE, FETCH_WINDOW_TASK
 from tabayyun.services import coverage as coverage_service
+from tabayyun.services import source_metadata
+from tabayyun.services.admin import audit
 from tabayyun.services.cache import CacheError, RunCache
 from tabayyun.services.runs import utc_now
 from tabayyun.services.timeconv import datetime_to_ns
@@ -51,6 +65,9 @@ KEEP_FOR = timedelta(days=30)
 INTERNAL_ERROR = "internal connector error"
 BUDGET_SPENT = "fetch budget spent"
 NO_MASTER_KEY = "credentials unavailable: TABAYYUN_MASTER_KEY is not set"
+# Triggers that read data into the cache, and the source jobs that only talk to the system.
+DATA_TRIGGERS = ("manual", "poll", "run")
+TASK_TRIGGERS = ("check", "search", "metadata")
 
 # Procrastinate's defer function with a lock: one fetch per source runs at a time.
 DEFER_LOCKED_SQL = text(
@@ -87,6 +104,8 @@ class FetchOutcome:
     error: str | None = None
     retryable: bool = False
     series_rows: dict[str, int] = field(default_factory=dict)
+    point_errors: dict[str, str] = field(default_factory=dict)
+    result: dict[str, Any] | None = None
 
 
 @dataclass
@@ -96,6 +115,9 @@ class _Plan:
     connector: Connector
     calls: list[Call]
     settle_ns: int
+    trigger: str = "manual"
+    params: dict[str, Any] | None = None
+    series_ids: list[uuid.UUID] | None = None
 
 
 class _StopError(Exception):
@@ -121,6 +143,7 @@ async def create_fetch(
     user_id: uuid.UUID | None = None,
     run_id: uuid.UUID | None = None,
     status: str = "queued",
+    params: dict[str, Any] | None = None,
 ) -> SourceFetch:
     """A fetch row of `source` in the caller's transaction."""
     fetch = SourceFetch(
@@ -135,6 +158,7 @@ async def create_fetch(
         force=force,
         requested_by=user_id,
         run_id=run_id,
+        params=params,
     )
     session.add(fetch)
     await session.flush()
@@ -143,7 +167,8 @@ async def create_fetch(
 
 async def enqueue(session: AsyncSession, fetch: SourceFetch) -> None:
     """Defer the fetch's job in the caller's transaction, locked to its source."""
-    task = CHECK_SOURCE_TASK if fetch.trigger == "check" else FETCH_WINDOW_TASK
+    # Checks, searches and metadata imports share the unretried source-task job (spec 022).
+    task = CHECK_SOURCE_TASK if fetch.trigger in TASK_TRIGGERS else FETCH_WINDOW_TASK
     args = {"fetch_id": str(fetch.id), "org_id": str(fetch.org_id)}
     await session.execute(
         DEFER_LOCKED_SQL,
@@ -193,6 +218,13 @@ async def execute_fetch(
         outcome.error, outcome.retryable = str(stop), stop.retryable
     else:
         outcome.status = "succeeded"
+    if outcome.point_errors:
+        outcome.result = {"point_errors": outcome.point_errors}
+        if outcome.status == "succeeded":
+            # A missing point will not come back by retrying; the others are in the cache.
+            first = next(iter(outcome.point_errors.values()))
+            outcome.status = "partial"
+            outcome.error = f"{len(outcome.point_errors)} point(s) failed: {first}"
     result = await _finish(factory, deps, fetch_id, outcome, fetch_log)
     fetch_log.info(
         "fetch.finished",
@@ -204,10 +236,13 @@ async def execute_fetch(
     return result
 
 
-async def execute_check(
+async def execute_task(
     factory: async_sessionmaker[AsyncSession], deps: FetchDeps, fetch_id: uuid.UUID
 ) -> FetchOutcome | None:
-    """Reach the source's system with its connector's `check`; the outcome lands in its health."""
+    """Run a check, point search or metadata import of a source (specs 021, 022).
+
+    The outcome lands on the row (`result` for searches and imports) and in the source's health.
+    """
     fetch_log = log.bind(fetch_id=str(fetch_id))
     try:
         plan = await _prepare(factory, deps, fetch_id, with_calls=False)
@@ -216,15 +251,103 @@ async def execute_check(
     if plan is None:
         return None
     try:
-        await plan.connector.check()
+        if plan.trigger == "search":
+            outcome = await _search(plan)
+        elif plan.trigger == "metadata":
+            outcome = await _describe(factory, deps, plan, fetch_id)
+        else:
+            await plan.connector.check()
+            outcome = FetchOutcome("succeeded")
     except ConnectorError as exc:
         outcome = FetchOutcome("failed", error=str(exc), retryable=exc.retryable)
     except Exception as exc:  # noqa: BLE001  (a connector bug must land on the fetch, not the worker)
         fetch_log.error("fetch.connector_crashed", error_type=type(exc).__name__)
         outcome = FetchOutcome("failed", error=INTERNAL_ERROR)
-    else:
-        outcome = FetchOutcome("succeeded")
     return await _finish(factory, deps, fetch_id, outcome, fetch_log)
+
+
+async def _search(plan: _Plan) -> FetchOutcome:
+    """The connector's matches for the row's query, at most its limit."""
+    params = plan.params or {}
+    limit = int(params.get("limit", 100))
+    found = await plan.connector.search(str(params.get("query", "")), limit)
+    items = [
+        {"external_id": p.external_id, "name": p.name, "unit": p.unit, "description": p.description}
+        for p in found[:limit]
+    ]
+    return FetchOutcome("succeeded", result={"items": items, "truncated": len(found) >= limit})
+
+
+async def _describe(
+    factory: async_sessionmaker[AsyncSession], deps: FetchDeps, plan: _Plan, fetch_id: uuid.UUID
+) -> FetchOutcome:
+    """Describe the row's series in chunks, then apply the metadata in one transaction."""
+    async with factory() as session:
+        stmt = select(Series.id, Series.external_id).where(Series.source_id == plan.source_id)
+        if plan.series_ids is not None:
+            stmt = stmt.where(Series.id.in_(plan.series_ids))
+        refs = [
+            PointRef(i, e) for i, e in (await session.execute(stmt.order_by(Series.external_id))).tuples()
+        ]
+    chunk = plan.connector.limits().max_points
+    descriptions: list[PointDescription] = []
+    for lo in range(0, len(refs), chunk):
+        part = refs[lo : lo + chunk]
+        got = await plan.connector.describe(part)
+        if {d.series_id for d in got} != {r.series_id for r in part}:
+            raise ConnectorError("connector described other points than it was asked for", retryable=False)
+        descriptions.extend(got)
+
+    overwrite = bool((plan.params or {}).get("overwrite", False))
+    now = deps.clock()
+    per_series: dict[str, dict[str, Any]] = {}
+    updated = unchanged = failed = 0
+    async with factory() as session, session.begin():
+        source = await session.get(Source, plan.source_id)
+        source_type = source.type if source is not None else "connector"
+        rows = {
+            s.id: s
+            for s in (
+                await session.scalars(
+                    select(Series).where(Series.id.in_([d.series_id for d in descriptions])).with_for_update()
+                )
+            ).all()
+        }
+        for desc in descriptions:
+            series = rows.get(desc.series_id)
+            if desc.metadata is None or series is None:
+                failed += 1
+                per_series[str(desc.series_id)] = {"error": desc.error or "series not found"}
+                continue
+            applied = source_metadata.apply(
+                series, desc.metadata, source_type=source_type, overwrite=overwrite, now=now
+            )
+            per_series[str(desc.series_id)] = applied.as_result()
+            if applied.changed:
+                updated += 1
+            else:
+                unchanged += 1
+        result = {"updated": updated, "unchanged": unchanged, "failed": failed, "series": per_series}
+        fetch = await session.get(SourceFetch, fetch_id)
+        if fetch is not None and fetch.requested_by is not None and source is not None:
+            await audit.record(
+                session,
+                audit.Actor(user_id=fetch.requested_by, org_id=plan.org_id),
+                "source.metadata_imported",
+                "source",
+                source.id,
+                workspace_id=source.workspace_id,
+                details={
+                    "fetch_id": str(fetch_id),
+                    "updated": updated,
+                    "unchanged": unchanged,
+                    "failed": failed,
+                },
+            )
+    if failed:
+        first = next(v["error"] for v in per_series.values() if "error" in v)
+        return FetchOutcome("partial", error=f"{failed} series failed: {first}", result=result)
+    return FetchOutcome("succeeded", result=result)
 
 
 async def _prepare(
@@ -244,7 +367,7 @@ async def _prepare(
             raise _StopError("source deleted", retryable=False)
         fetch.status = "running"
         fetch.started_at = fetch.started_at or deps.clock()
-        if not source.enabled and fetch.trigger != "check":
+        if not source.enabled and fetch.trigger in DATA_TRIGGERS:
             raise _StopError("source disabled", retryable=False)
         try:
             credentials = await secrets.load(session, deps.keyring, org_id=source.org_id, source_id=source.id)
@@ -260,7 +383,16 @@ async def _prepare(
         if with_calls:
             gaps = await _gaps(session, source, fetch)
             calls = plan_calls(gaps, connector.limits().within(connectors.Limits.of(connector.config)))
-        return _Plan(source.id, source.org_id, connector, calls, connector.config.settle_s * SECOND_NS)
+        return _Plan(
+            source.id,
+            source.org_id,
+            connector,
+            calls,
+            connector.config.settle_s * SECOND_NS,
+            trigger=fetch.trigger,
+            params=fetch.params,
+            series_ids=fetch.series_ids,
+        )
 
 
 async def _gaps(
@@ -294,10 +426,15 @@ async def _run_call(
     """One connector call: collect its batches, write them to the cache, record coverage."""
     wanted = {p.series_id for p in call.points}
     tables: dict[uuid.UUID, list[pa.Table]] = defaultdict(list)
+    failed: set[uuid.UUID] = set()
     try:
         async for batch in plan.connector.fetch(call.points, call.start_ns, call.end_ns):
             if batch.series_id not in wanted:
                 raise _StopError("connector returned rows for a point it was not asked for", retryable=False)
+            if isinstance(batch, PointFailure):
+                failed.add(batch.series_id)
+                outcome.point_errors[str(batch.series_id)] = batch.message[:500]
+                continue
             tables[batch.series_id].append(_checked(batch.table))
     except ConnectorError as exc:
         raise _StopError(str(exc), retryable=exc.retryable) from None
@@ -310,6 +447,8 @@ async def _run_call(
         raise _StopError("no cache configured", retryable=False)
     rows = 0
     for series_id, parts in tables.items():
+        if series_id in failed:
+            continue
         table = pa.concat_tables(parts)
         if table.num_rows == 0:
             continue
@@ -334,6 +473,8 @@ async def _run_call(
     async with factory() as session, session.begin():
         if covered_end > call.start_ns:
             for point in call.points:
+                if point.series_id in failed:
+                    continue
                 await coverage_service.record(
                     session,
                     org_id=plan.org_id,
@@ -379,6 +520,8 @@ async def _finish(
         fetch.status = outcome.status
         fetch.error = outcome.error
         fetch.finished_at = now
+        if outcome.result is not None:
+            fetch.result = outcome.result
         source = await session.get(Source, fetch.source_id, with_for_update=True)
         if source is not None:
             before = (source.health or {}).get("status", "unknown")
@@ -414,7 +557,7 @@ def next_health(
             consecutive_failures=failures,
             last_error={"at": now.isoformat(), "message": fetch.error, "retryable": retryable},
         )
-    if fetch.trigger != "check":
+    if fetch.trigger in DATA_TRIGGERS:
         out["last_fetch"] = {
             "id": str(fetch.id),
             "status": fetch.status,

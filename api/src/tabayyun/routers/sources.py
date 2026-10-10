@@ -1,8 +1,10 @@
-"""Sources API (spec 004, spec 021): the workspace's sources; connector sources are created,
-changed, given credentials and series, checked and fetched here.
+"""Sources API (specs 004, 021, 022): the workspace's sources; connector sources are created,
+changed, given credentials and series, checked, searched, fetched and their metadata imported
+here.
 
-Roles: viewers read, editors register series and request fetches and checks, workspace
-admins create and change sources and their credentials. Credentials are write-only.
+Roles: viewers read, editors register series and request fetches, checks, searches and
+metadata imports, workspace admins create and change sources and their credentials.
+Credentials are write-only.
 """
 
 from __future__ import annotations
@@ -144,6 +146,27 @@ class FetchOut(BaseModel):
     finished_at: datetime | None
 
 
+class FetchDetail(FetchOut):
+    """One job with what it was asked and what it found (spec 022)."""
+
+    params: dict[str, Any] | None
+    result: dict[str, Any] | None
+
+
+class SearchIn(BaseModel):
+    """A point search: a name, with `*` and `?` wildcards or without (then it is `*query*`)."""
+
+    query: str = Field(min_length=1, max_length=200, pattern=r"\S")
+    limit: int = Field(default=100, ge=1, le=1000)
+
+
+class MetadataIn(BaseModel):
+    """A metadata import for all of the source's series, or the named ones."""
+
+    series_ids: list[uuid.UUID] | None = Field(default=None, max_length=1000)
+    overwrite: bool = False
+
+
 class FetchList(BaseModel):
     """The latest fetches, newest first."""
 
@@ -188,7 +211,11 @@ async def _detail(session: AsyncSession, source: Source) -> SourceDetail:
 
 
 def _fetch_out(f: SourceFetch) -> FetchOut:
-    return FetchOut(
+    return FetchOut(**_fetch_fields(f))
+
+
+def _fetch_fields(f: SourceFetch) -> dict[str, Any]:
+    return dict(
         id=str(f.id),
         trigger=f.trigger,
         status=f.status,
@@ -217,7 +244,7 @@ async def _start(
         return
     await session.commit()
     deps = fetches.FetchDeps(cache=state.run_cache, net=state.net_policy, keyring=state.keyring)
-    run = fetches.execute_check if fetch.trigger == "check" else fetches.execute_fetch
+    run = fetches.execute_task if fetch.trigger in fetches.TASK_TRIGGERS else fetches.execute_fetch
     background.add_task(run, for_org(state.session_factory, scope.org_id), deps, fetch.id)
 
 
@@ -368,6 +395,72 @@ async def request_fetch(
     )
     await _start(request, background, session, scope, fetch)
     return FetchCreated(id=str(fetch.id))
+
+
+@router.post(
+    "/{source_id}/search", status_code=202, response_model=FetchCreated, dependencies=[SOURCE_FETCH_LIMIT]
+)
+async def search_points(
+    source_id: uuid.UUID,
+    request: Request,
+    background: BackgroundTasks,
+    session: SessionDep,
+    scope: WriteScope,
+    principal: ActorDep,
+    body: SearchIn,
+) -> FetchCreated:
+    """Search the source's system for points in the worker; the matches land in the job's result."""
+    now = datetime.now(UTC)
+    fetch = await sources_service.request_fetch(
+        session,
+        scope,
+        _actor(request, principal),
+        source_id,
+        trigger="search",
+        start=now,
+        end=now,
+        params={"query": body.query.strip(), "limit": body.limit},
+    )
+    await _start(request, background, session, scope, fetch)
+    return FetchCreated(id=str(fetch.id))
+
+
+@router.post(
+    "/{source_id}/metadata", status_code=202, response_model=FetchCreated, dependencies=[SOURCE_FETCH_LIMIT]
+)
+async def import_metadata(
+    source_id: uuid.UUID,
+    request: Request,
+    background: BackgroundTasks,
+    session: SessionDep,
+    scope: WriteScope,
+    principal: ActorDep,
+    body: MetadataIn,
+) -> FetchCreated:
+    """Import unit, limits and the system's settings of the source's series in the worker."""
+    now = datetime.now(UTC)
+    fetch = await sources_service.request_fetch(
+        session,
+        scope,
+        _actor(request, principal),
+        source_id,
+        trigger="metadata",
+        start=now,
+        end=now,
+        series_ids=body.series_ids,
+        params={"overwrite": body.overwrite},
+    )
+    await _start(request, background, session, scope, fetch)
+    return FetchCreated(id=str(fetch.id))
+
+
+@router.get("/{source_id}/fetches/{fetch_id}", response_model=FetchDetail)
+async def get_fetch(
+    source_id: uuid.UUID, fetch_id: uuid.UUID, session: SessionDep, scope: ReadScope
+) -> FetchDetail:
+    """One job of the source, with its parameters and result."""
+    fetch = await sources_service.get_fetch(session, scope, source_id, fetch_id)
+    return FetchDetail(**_fetch_fields(fetch), params=fetch.params, result=fetch.result)
 
 
 @router.get("/{source_id}/fetches", response_model=FetchList)

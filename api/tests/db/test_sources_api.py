@@ -1,5 +1,6 @@
-"""The sources API (spec 021): create, validate, patch, write-only credentials, series, checks
-and fetches, roles, 404 across workspaces, audit events, and an inline fetch end to end."""
+"""The sources API (specs 021, 022): create, validate, patch, write-only credentials, series,
+checks, fetches, point searches and metadata imports, roles, 404 across workspaces, audit
+events, and inline jobs end to end."""
 
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from structlog.testing import capture_logs
 
 from admin_support import ALICE, BOB, MIA, NED, ORG_B
 from tabayyun import connectors
+from tabayyun.connectors import Connector
 from tabayyun.connectors.synthetic import SyntheticConnector
 from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID
 
@@ -126,6 +128,8 @@ async def test_upload_sources_are_not_connectors(admin_env):
             ("POST", "/series", []),
             ("POST", "/check", None),
             ("POST", "/fetches", DAY),
+            ("POST", "/search", {"query": "x"}),
+            ("POST", "/metadata", {}),
         ]:
             r = await alice.request(method, f"/api/sources/{upload}{path}", json=body)
             assert (r.status_code, r.json()["detail"]) == (409, "not_a_connector"), path
@@ -209,11 +213,13 @@ async def test_register_series_fetch_inline_and_history(admin_env, tmp_path):
         queued = await alice.post(f"/api/sources/{source['id']}/fetches", json=DAY)
         assert queued.status_code == 202
         history = (await alice.get(f"/api/sources/{source['id']}/fetches")).json()["items"]
+        # "gone" is not a configured point: the fetch keeps flow's day and ends partial (spec 022).
         assert [(f["id"], f["status"], f["trigger"], f["rows"]) for f in history] == [
-            (queued.json()["id"], "succeeded", "manual", 1440)
+            (queued.json()["id"], "partial", "manual", 1440)
         ]
+        assert history[0]["error"] == "1 point(s) failed: point not configured: gone"
         detail = (await alice.get(f"/api/sources/{source['id']}")).json()
-        assert detail["health"]["status"] == "ok" and detail["n_series"] == 2
+        assert detail["health"]["status"] == "degraded" and detail["n_series"] == 2
         check = await alice.post(f"/api/sources/{source['id']}/check")
         assert check.status_code == 202
         statuses = [
@@ -276,8 +282,12 @@ async def test_roles(admin_env):
             (viewer, "POST", "/series", [], 403),
             (viewer, "POST", "/fetches", DAY, 403),
             (viewer, "POST", "/check", None, 403),
+            (viewer, "POST", "/search", {"query": "x"}, 403),
+            (viewer, "POST", "/metadata", {}, 403),
             (editor, "POST", "/series", [], 200),
             (editor, "POST", "/check", None, 202),
+            (editor, "POST", "/search", {"query": "x"}, 202),
+            (editor, "POST", "/metadata", {}, 202),
             (editor, "PATCH", "", {"name": "x"}, 403),
             (editor, "PUT", "/credentials", {}, 403),
             (editor, "DELETE", "/credentials", None, 403),
@@ -291,7 +301,11 @@ async def test_another_workspace_sees_404(admin_env):
     async with admin_env.client(ALICE) as alice, admin_env.client(BOB, org=ORG_B) as bob:
         source = (await create(alice)).json()
         base = f"/api/sources/{source['id']}"
+        check = (await alice.post(f"{base}/check")).json()["id"]
         for method, path, body in [
+            ("POST", "/search", {"query": "x"}),
+            ("POST", "/metadata", {}),
+            ("GET", f"/fetches/{check}", None),
             ("GET", "", None),
             ("PATCH", "", {"name": "x"}),
             ("PUT", "/credentials", {}),
@@ -332,3 +346,84 @@ async def test_rotation_re_encrypts_under_the_new_key(admin_env, db_url, with_cr
             assert loaded == {"username": "svc", "password": SECRET}
     finally:
         await engine.dispose()
+
+
+# Point search, metadata import and one job (spec 022)
+
+
+async def test_search_and_metadata_jobs_inline(admin_env, tmp_path):
+    points = [{"external_id": "flow", "name": "Inlet flow", "unit": "m3/h", "base": 50}]
+    async with admin_env.client(ALICE, cache_url=str(tmp_path)) as alice:
+        source = (await create(alice, points=points)).json()
+        base = f"/api/sources/{source['id']}"
+        search = await alice.post(f"{base}/search", json={"query": " flo ", "limit": 5})
+        assert search.status_code == 202, search.text
+        job = (await alice.get(f"{base}/fetches/{search.json()['id']}")).json()
+        assert (job["trigger"], job["status"], job["params"]) == (
+            "search",
+            "succeeded",
+            {"query": "flo", "limit": 5},
+        )
+        assert job["result"] == {
+            "items": [{"external_id": "flow", "name": "Inlet flow", "unit": "m3/h", "description": None}],
+            "truncated": False,
+        }
+        await alice.post(
+            f"{base}/series",
+            json=[{"external_id": i["external_id"], "name": "flow"} for i in job["result"]["items"]],
+        )
+        unknown = await alice.post(f"{base}/metadata", json={"series_ids": [str(uuid.uuid4())]})
+        assert (unknown.status_code, unknown.json()["detail"]) == (422, "unknown_series")
+        imported = await alice.post(f"{base}/metadata", json={})
+        job = (await alice.get(f"{base}/fetches/{imported.json()['id']}")).json()
+        assert (job["trigger"], job["status"], job["params"]) == (
+            "metadata",
+            "succeeded",
+            {"overwrite": False},
+        )
+        assert (job["result"]["updated"], job["result"]["failed"]) == (1, 0)
+        [series] = (await alice.get("/api/series", params={"source_id": source["id"]})).json()["items"]
+        assert series["unit"] == "m3/h"
+        listed = (await alice.get(f"{base}/fetches")).json()["items"]
+        assert [f["trigger"] for f in listed] == ["metadata", "search"] and "result" not in listed[0]
+        other = (await create(alice, name="plant-b")).json()
+        missing = await alice.get(f"/api/sources/{other['id']}/fetches/{search.json()['id']}")
+        assert missing.status_code == 404
+    requested = [e.details for e in admin_env.events("source.fetch_requested")]
+    assert {"trigger": "search", "query": "flo", "limit": 5, "series": None} == {
+        k: v for k, v in requested[0].items() if k != "fetch_id"
+    }
+    [imported_event] = admin_env.events("source.metadata_imported")
+    assert (imported_event.actor_user_id, imported_event.details["updated"]) == (ALICE, 1)
+
+
+class Bare(SyntheticConnector):
+    """A connector without search or describe."""
+
+    search = Connector.search  # type: ignore[assignment]
+    describe = Connector.describe  # type: ignore[assignment]
+
+
+async def test_search_and_metadata_need_a_connector_that_has_them(admin_env, monkeypatch):
+    monkeypatch.setitem(connectors._REGISTRY, "synthetic", Bare)  # noqa: SLF001
+    async with admin_env.client(ALICE) as alice:
+        source = (await create(alice)).json()
+        for path, body in [("/search", {"query": "x"}), ("/metadata", {})]:
+            r = await alice.post(f"/api/sources/{source['id']}{path}", json=body)
+            assert (r.status_code, r.json()["detail"]) == (409, "not_supported"), path
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"query": ""},
+        {"query": "   "},
+        {"query": "x" * 201},
+        {"query": "x", "limit": 0},
+        {"query": "x", "limit": 1001},
+    ],
+)
+async def test_search_validation(admin_env, body):
+    async with admin_env.client(ALICE) as alice:
+        source = (await create(alice)).json()
+        assert (await alice.post(f"/api/sources/{source['id']}/search", json=body)).status_code == 422

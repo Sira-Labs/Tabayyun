@@ -1,5 +1,6 @@
-"""Connector sources (spec 021): create and change them, their credentials, their series, and
-fetch requests. Every change writes an audit event in the same transaction.
+"""Connector sources (specs 021, 022): create and change them, their credentials, their series,
+and requests for fetches, checks, point searches and metadata imports. Every change writes an
+audit event in the same transaction.
 
 Credentials are write-only: nothing here returns them, and validation errors are reduced to
 the field names and messages, never the submitted values.
@@ -26,6 +27,8 @@ from tabayyun.services.admin import audit
 
 MAX_WINDOW = timedelta(days=366)
 MAX_SERIES_PER_CALL = 500
+# The connector method each source job needs beyond the interface's required ones.
+OPTIONAL_METHODS = {"search": "search", "metadata": "describe"}
 
 
 class SourceError(Exception):
@@ -296,30 +299,35 @@ async def request_fetch(
     end: datetime,
     series_ids: list[uuid.UUID] | None = None,
     force: bool = False,
+    params: dict[str, Any] | None = None,
 ) -> SourceFetch:
-    """A queued fetch (or check) of a source; the caller defers its job or runs it inline.
+    """A queued job of a source (a fetch, check, search or metadata import); the caller defers
+    its job or runs it inline.
 
     Raises:
-        SourceError: 404, 409 `not_a_connector` or `source_disabled`, 422 `invalid_window` or
-            `unknown_series`.
+        SourceError: 404, 409 `not_a_connector`, `not_supported` or `source_disabled` (fetches
+            only), 422 `invalid_window` or `unknown_series`.
     """
     source = await get_source(session, scope, source_id)
-    require_connector(source)
-    if trigger != "check":
+    cls = require_connector(source)
+    method = OPTIONAL_METHODS.get(trigger)
+    if method is not None and not cls.supports(method):
+        raise SourceError(409, "not_supported")
+    if trigger in fetches.DATA_TRIGGERS:
         if not source.enabled:
             raise SourceError(409, "source_disabled")
         if end <= start or end - start > MAX_WINDOW:
             raise SourceError(422, "invalid_window")
-        if series_ids is not None:
-            known = set(
-                (
-                    await session.scalars(
-                        select(Series.id).where(Series.source_id == source.id, Series.id.in_(series_ids))
-                    )
-                ).all()
-            )
-            if known != set(series_ids):
-                raise SourceError(422, "unknown_series")
+    if series_ids is not None:
+        known = set(
+            (
+                await session.scalars(
+                    select(Series.id).where(Series.source_id == source.id, Series.id.in_(series_ids))
+                )
+            ).all()
+        )
+        if known != set(series_ids):
+            raise SourceError(422, "unknown_series")
     fetch = await fetches.create_fetch(
         session,
         source,
@@ -329,7 +337,15 @@ async def request_fetch(
         series_ids=series_ids,
         force=force,
         user_id=actor.user_id,
+        params=params,
     )
+    details: dict[str, Any] = {"fetch_id": str(fetch.id), "trigger": trigger}
+    if trigger in fetches.DATA_TRIGGERS:
+        details.update(start=start.isoformat(), end=end.isoformat(), force=force)
+    if trigger != "check":
+        details["series"] = None if series_ids is None else len(series_ids)
+    if params:
+        details.update(params)
     await audit.record(
         session,
         actor,
@@ -337,21 +353,25 @@ async def request_fetch(
         "source",
         source.id,
         workspace_id=scope.workspace_id,
-        details={
-            "fetch_id": str(fetch.id),
-            "trigger": trigger,
-            **(
-                {}
-                if trigger == "check"
-                else {
-                    "start": start.isoformat(),
-                    "end": end.isoformat(),
-                    "series": None if series_ids is None else len(series_ids),
-                    "force": force,
-                }
-            ),
-        },
+        details=details,
     )
+    return fetch
+
+
+async def get_fetch(
+    session: AsyncSession, scope: Scope, source_id: uuid.UUID, fetch_id: uuid.UUID
+) -> SourceFetch:
+    """One job of the source.
+
+    Raises:
+        SourceError: 404 when the source or the job is not there.
+    """
+    source = await get_source(session, scope, source_id)
+    fetch = await session.scalar(
+        select(SourceFetch).where(SourceFetch.id == fetch_id, SourceFetch.source_id == source.id)
+    )
+    if fetch is None:
+        raise SourceError(404, "not found")
     return fetch
 
 

@@ -11,9 +11,9 @@ from __future__ import annotations
 import builtins
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
-from typing import ClassVar
+from collections.abc import AsyncIterator, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any, ClassVar
 
 import pyarrow as pa
 from pydantic import BaseModel, ConfigDict, Field
@@ -87,6 +87,44 @@ class FetchedBatch:
     table: pa.Table
 
 
+@dataclass(frozen=True)
+class PointFailure:
+    """A point `fetch` could not read (deleted, renamed, no access): its message, no data.
+
+    The engine records no coverage for it in that call and ends the fetch `partial` (spec 022).
+    """
+
+    series_id: uuid.UUID
+    message: str
+
+
+@dataclass(frozen=True)
+class PointMetadata:
+    """What the external system knows about a point; None where it knows nothing.
+
+    `extra` is the system's own vocabulary (for PI: `ExcDev`, `CompDev`, …), kept under
+    `series.metadata[<source type>]`.
+    """
+
+    unit: str | None = None
+    description: str | None = None
+    physical_min: float | None = None
+    physical_max: float | None = None
+    operational_min: float | None = None
+    operational_max: float | None = None
+    asset_path: str | None = None
+    extra: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class PointDescription:
+    """`describe`'s answer for one series: its metadata, or why there is none."""
+
+    series_id: uuid.UUID
+    metadata: PointMetadata | None
+    error: str | None = None
+
+
 class Connector(ABC):
     """One source's connection to its external system."""
 
@@ -117,9 +155,22 @@ class Connector(ABC):
         """Points whose name or id matches `query`, at most `limit`."""
         raise NotSupportedError(f"{self.type} has no point search")
 
+    async def describe(self, points: Sequence[PointRef]) -> list[PointDescription]:
+        """Metadata of `points` (spec 022): one description per point, in order."""
+        raise NotSupportedError(f"{self.type} has no metadata import")
+
+    @classmethod
+    def supports(cls, method: str) -> bool:
+        """Whether the class overrides an optional method (`search`, `describe`)."""
+        return getattr(cls, method) is not getattr(Connector, method)
+
     @abstractmethod
-    def fetch(self, points: Sequence[PointRef], start_ns: int, end_ns: int) -> AsyncIterator[FetchedBatch]:
+    def fetch(
+        self, points: Sequence[PointRef], start_ns: int, end_ns: int
+    ) -> AsyncIterator[FetchedBatch | PointFailure]:
         """Observations of `points` in `[start_ns, end_ns)`, as batches (several per point allowed).
+
+        A point it cannot read yields a `PointFailure` instead (spec 022); the others go on.
 
         Raises:
             tabayyun.connectors.errors.ConnectorError: the call failed; the engine retries it

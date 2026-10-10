@@ -118,9 +118,9 @@ async def fetch_window(context: JobContext, fetch_id: str, org_id: str) -> None:
 
 @app.task(queue=FETCH_QUEUE, name=CHECK_SOURCE_TASK, retry=False)
 async def check_source(fetch_id: str, org_id: str) -> None:
-    """Reach a source's system and record the outcome in its health (spec 021)."""
+    """A check, point search or metadata import of a source (specs 021, 022); not retried."""
     factory = for_org(runtime.session_factory(), uuid.UUID(org_id))
-    await fetches.execute_check(factory, runtime.fetch_deps(), uuid.UUID(fetch_id))
+    await fetches.execute_task(factory, runtime.fetch_deps(), uuid.UUID(fetch_id))
 
 
 @app.periodic(cron="* * * * *")
