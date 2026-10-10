@@ -8,14 +8,19 @@ import { ErrorLine, inputClass, selectClass } from "./admin/ui";
 
 export const SERIES_KINDS = ["measurement", "setpoint", "status", "counter"] as const;
 export const SCORE_STEPS = [80, 60, 40] as const;
+/** The API's limit on the `unit` filter. */
+const MAX_UNIT = 32;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The catalogue's URL search: only known keys and values pass (spec 024). */
 export function validateSeriesSearch(search: Record<string, unknown>): SeriesFilters {
   const out: SeriesFilters = {};
   const text = (v: unknown) => (typeof v === "string" && v.trim() !== "" ? v.trim().slice(0, 256) : undefined);
   out.q = text(search.q);
-  out.source = text(search.source);
-  out.unit = text(search.unit);
+  const source = text(search.source);
+  if (source && UUID_RE.test(source)) out.source = source;
+  const unit = text(search.unit);
+  if (unit && unit.length <= MAX_UNIT) out.unit = unit;
   const kind = text(search.kind);
   if (kind && (SERIES_KINDS as readonly string[]).includes(kind)) out.kind = kind;
   const score = Number(search.score);
@@ -29,6 +34,12 @@ export function SeriesCatalogue() {
   const filters = validateSeriesSearch(useSearch({ from: "/_app/series" }) as Record<string, unknown>);
   const navigate = useNavigate({ from: "/series" });
   const [text, setText] = useState(filters.q ?? "");
+  // Back and forward change `q` while the page stays mounted: follow it in the box.
+  const [shownQ, setShownQ] = useState(filters.q);
+  if (filters.q !== shownQ) {
+    setShownQ(filters.q);
+    setText(filters.q ?? "");
+  }
   const sources = useQuery({ queryKey: ["sources", "list"], queryFn: sourcesApi.list });
   const units = useQuery({ queryKey: ["series", "units"], queryFn: seriesApi.units });
   const series = useInfiniteQuery({

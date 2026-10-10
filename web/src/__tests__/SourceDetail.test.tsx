@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dialogs } from "../pages/admin/ui";
@@ -80,6 +80,19 @@ describe("SourceDetail", () => {
     expect(await screen.findByText("Added 1 new series, 1 already existed.")).toBeTruthy();
     expect(sent.find((s) => s.url.endsWith("/search"))?.body).toEqual({ query: "FIC1", limit: 100 });
     expect(sent.find((s) => s.url.endsWith("/series"))?.body).toEqual([{ external_id: "\\\\PISRV01\\FIC102.PV", name: "FIC102.PV", unit: "m3/h" }]);
+  });
+
+  it("refuses a fetch window that ends before it starts", async () => {
+    const { route, sent } = backend();
+    stubFetch(route, asRole("editor"));
+    const user = userEvent.setup();
+    renderApp(`/sources/${PI_ID}`);
+    const form = await screen.findByRole("form", { name: "Fetch a window" });
+    fireEvent.change(within(form).getByLabelText("From"), { target: { value: "2026-10-09T12:00" } });
+    fireEvent.change(within(form).getByLabelText("To"), { target: { value: "2026-10-09T06:00" } });
+    await user.click(within(form).getByRole("button", { name: "Fetch" }));
+    expect(within(form).getByRole("alert").textContent).toBe("To must be later than From.");
+    expect(sent).toEqual([]);
   });
 
   it("shows a metadata import's result", async () => {

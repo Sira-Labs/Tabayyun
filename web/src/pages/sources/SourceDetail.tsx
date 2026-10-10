@@ -211,6 +211,7 @@ function FetchAction({ sourceId, disabled }: { sourceId: string; disabled: boole
   const [startAt, setStartAt] = useState("");
   const [endAt, setEndAt] = useState("");
   const [force, setForce] = useState(false);
+  const [windowError, setWindowError] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const job = useJob(sourceId, jobId);
   const start = useMutation({
@@ -219,6 +220,17 @@ function FetchAction({ sourceId, disabled }: { sourceId: string; disabled: boole
   });
   const submit = (e: FormEvent) => {
     e.preventDefault();
+    const from = Date.parse(startAt);
+    const to = Date.parse(endAt);
+    if (!Number.isFinite(from) || !Number.isFinite(to)) {
+      setWindowError("Enter both From and To.");
+      return;
+    }
+    if (to <= from) {
+      setWindowError("To must be later than From.");
+      return;
+    }
+    setWindowError(null);
     start.mutate();
   };
   return (
@@ -241,6 +253,11 @@ function FetchAction({ sourceId, disabled }: { sourceId: string; disabled: boole
           Fetch
         </button>
       </div>
+      {windowError && (
+        <p role="alert" className="text-sm text-red-700 dark:text-red-400">
+          {windowError}
+        </p>
+      )}
       {disabled && <p className="text-sm text-slate-600 dark:text-slate-400">The source is disabled; enable it to fetch.</p>}
       <ErrorLine error={start.error} prefix="Could not start the fetch" />
       {jobId && <JobLine job={job.data} />}

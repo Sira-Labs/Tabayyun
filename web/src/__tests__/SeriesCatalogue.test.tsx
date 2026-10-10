@@ -63,8 +63,21 @@ describe("SeriesCatalogue", () => {
       asked.push(url);
       return { items: [], next_cursor: null };
     });
-    renderApp("/series?kind=nonsense&score=55&q=%20%20");
+    renderApp(`/series?kind=nonsense&score=55&q=%20%20&source=not-a-uuid&unit=${"x".repeat(33)}`);
     expect(await screen.findByText("No series match.")).toBeTruthy();
     expect(asked[0]).toBe("/api/series?limit=50");
+  });
+
+  it("keeps the search box in step with the URL", async () => {
+    stubFetch((url) => {
+      if (url === "/api/sources") return { items: [] };
+      if (url === "/api/series/units") return { items: [] };
+      return { items: [], next_cursor: null };
+    });
+    const { router } = renderApp("/series?q=one");
+    await screen.findByText("No series match.");
+    expect((screen.getByLabelText("Search") as HTMLInputElement).value).toBe("one");
+    await router.navigate({ to: "/series", search: { q: "two" } });
+    await waitFor(() => expect((screen.getByLabelText("Search") as HTMLInputElement).value).toBe("two"));
   });
 });
