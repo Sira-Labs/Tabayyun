@@ -12,6 +12,8 @@ HTTP connectors get a client pinned to the checked address (the original name st
 Host header and TLS SNI, so certificates are still verified against it), without redirects:
 a second DNS answer or a 30x cannot send it elsewhere. A connector may pass an `ssl.SSLContext`
 that trusts a private certificate authority (spec 022); verification is never turned off.
+Connectors over plain TCP (OPC UA, spec 023) get the checked address from `tcp_target` and
+connect to it themselves.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ import asyncio
 import ipaddress
 import socket
 import ssl
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
@@ -78,13 +80,16 @@ class NetPolicy:
         allow_public: bool = True,
         resolver: Resolver = system_resolver,
         transport: httpx.AsyncBaseTransport | None = None,
+        redirect: Mapping[str, str] | None = None,
     ) -> None:
-        """`transport` replaces the network under the pinned transport, for tests only: the
-        address checks and the pinning still run in front of it."""
+        """`transport` replaces the network under the pinned HTTP transport, and `redirect` maps
+        a checked address to another for TCP connectors; both for tests only: the address checks
+        still run in front of them."""
         self.allowed = tuple(allowed)
         self.allow_public = allow_public
         self._resolve = resolver
         self._transport = transport
+        self._redirect = dict(redirect or {})
 
     @classmethod
     def from_settings(cls, settings: Settings) -> NetPolicy:
@@ -120,6 +125,15 @@ class NetPolicy:
         if not all(self.allows(a) for a in answers):
             raise TargetRefusedError(f"target not allowed: {host}")
         return [ipaddress.ip_address(a) for a in dict.fromkeys(answers)]
+
+    async def tcp_target(self, host: str, port: int) -> str:
+        """The checked address a TCP connector connects to for `host` (spec 023).
+
+        Raises:
+            TargetRefusedError: it does not resolve, or an address it resolves to is refused.
+        """
+        address = str((await self.resolve(host, port))[0])
+        return self._redirect.get(address, address)
 
     async def http_client(
         self, base_url: str, *, verify: ssl.SSLContext | None = None, **kwargs: object

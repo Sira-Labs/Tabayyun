@@ -160,6 +160,20 @@ class Connector(ABC):
         raise NotSupportedError(f"{self.type} has no metadata import")
 
     @classmethod
+    def prepare_credentials(
+        cls, new: BaseModel, previous: BaseModel | None, *, source_id: uuid.UUID
+    ) -> tuple[BaseModel, dict[str, Any]]:
+        """Credentials as they are stored, completed from `new` (and the stored `previous`), with
+        audit details (spec 023: OPC UA keeps or generates its client certificate). Default: `new`.
+        """
+        return new, {}
+
+    @classmethod
+    def client_certificate(cls, credentials: BaseModel) -> dict[str, Any] | None:
+        """The public part of the source's client identity, if the connector has one (spec 023)."""
+        return None
+
+    @classmethod
     def supports(cls, method: str) -> bool:
         """Whether the class overrides an optional method (`search`, `describe`)."""
         return getattr(cls, method) is not getattr(Connector, method)

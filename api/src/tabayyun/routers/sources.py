@@ -333,6 +333,25 @@ async def delete_credentials(
     return Response(status_code=204)
 
 
+class ClientCertificate(BaseModel):
+    """A source's client certificate for the server's trust list (spec 023); never the key."""
+
+    certificate_pem: str
+    sha1: str
+    sha256: str
+    application_uri: str | None
+    not_after: datetime
+
+
+@router.get("/{source_id}/client-certificate", response_model=ClientCertificate)
+async def get_client_certificate(
+    source_id: uuid.UUID, request: Request, session: SessionDep, scope: ReadScope
+) -> ClientCertificate:
+    """The certificate the source presents to its server, to trust it there."""
+    info = await sources_service.client_certificate(session, scope, source_id, request.app.state.keyring)
+    return ClientCertificate(**info)
+
+
 @router.post("/{source_id}/series", response_model=SeriesRegistered, dependencies=[SOURCE_WRITE_LIMIT])
 async def register_series(
     source_id: uuid.UUID,

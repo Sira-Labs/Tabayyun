@@ -416,6 +416,8 @@ ROUTES = [
     ("POST", "/api/sources/{source_id}/search", "source", {"query": "flow"}),
     ("POST", "/api/sources/{source_id}/metadata", "source", {}),
     ("GET", "/api/sources/{source_id}/fetches/{fetch_id}", "source", None),
+    # Spec 023: the OPC UA client certificate.
+    ("GET", "/api/sources/{source_id}/client-certificate", "source", None),
 ]
 READ_BACK = {
     "run": "/api/runs/{}",

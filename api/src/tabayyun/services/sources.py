@@ -8,6 +8,7 @@ the field names and messages, never the submitted values.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -203,7 +204,8 @@ async def set_credentials(
     payload: dict[str, Any],
     keyring: secrets.Keyring | None,
 ) -> None:
-    """Validate and store a source's credentials, encrypted.
+    """Validate, complete (spec 023: an OPC UA client identity is kept or generated) and store a
+    source's credentials, encrypted.
 
     Raises:
         SourceError: 404, 409 `not_a_connector`, 422 `no_credentials` (the connector takes
@@ -217,6 +219,9 @@ async def set_credentials(
         model: BaseModel = cls.credentials_model.model_validate(payload)
     except ValidationError as exc:
         raise SourceError(422, "invalid_credentials", field_errors(exc)) from None
+    previous = await _stored(session, scope, source.id, cls, keyring)
+    # Generating a key pair takes a moment: off the event loop.
+    model, details = await asyncio.to_thread(cls.prepare_credentials, model, previous, source_id=source.id)
     try:
         await secrets.store(
             session,
@@ -229,8 +234,59 @@ async def set_credentials(
     except secrets.CredentialsUnavailableError:
         raise SourceError(503, "credentials_unavailable") from None
     await audit.record(
-        session, actor, "source.credentials_set", "source", source.id, workspace_id=scope.workspace_id
+        session,
+        actor,
+        "source.credentials_set",
+        "source",
+        source.id,
+        workspace_id=scope.workspace_id,
+        details=details or None,
     )
+
+
+async def _stored(
+    session: AsyncSession,
+    scope: Scope,
+    source_id: uuid.UUID,
+    cls: type[connectors.Connector],
+    keyring: secrets.Keyring | None,
+) -> BaseModel | None:
+    """The source's stored credentials as its model; None when there are none or they no longer
+    decrypt or validate.
+
+    Raises:
+        SourceError: 503 `credentials_unavailable` (no master key).
+    """
+    try:
+        stored = await secrets.load(session, keyring, org_id=scope.org_id, source_id=source_id)
+    except secrets.CredentialsUnavailableError:
+        raise SourceError(503, "credentials_unavailable") from None
+    except secrets.CredentialsError:
+        return None
+    if stored is None or cls.credentials_model is None:
+        return None
+    try:
+        return cls.credentials_model.model_validate(stored)
+    except ValidationError:
+        return None
+
+
+async def client_certificate(
+    session: AsyncSession, scope: Scope, source_id: uuid.UUID, keyring: secrets.Keyring | None
+) -> dict[str, Any]:
+    """The public client certificate of a source (spec 023), never its key.
+
+    Raises:
+        SourceError: 404, 409 `not_a_connector`, 404 `no_client_certificate`, 503
+            `credentials_unavailable`.
+    """
+    source = await get_source(session, scope, source_id)
+    cls = require_connector(source)
+    stored = await _stored(session, scope, source.id, cls, keyring)
+    info = cls.client_certificate(stored) if stored is not None else None
+    if info is None:
+        raise SourceError(404, "no_client_certificate")
+    return info
 
 
 async def clear_credentials(
