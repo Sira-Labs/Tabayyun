@@ -168,38 +168,40 @@ fn rug_rank(q: Quality) -> u8 {
 
 /// Runs of non-good quality of a *sorted* frame at the resolution of `buckets` equal bins of
 /// `[from, to)` (spec 025). Each bin holding a non-good sample takes its worst class (bad >
-/// estimated > uncertain); adjacent bins of one class merge into one run spanning their bins.
+/// estimated > uncertain). Consecutive such bins of one class merge into one run spanning their
+/// bins unless a good sample lies between them, so sparse samples still make one run.
 pub fn quality_runs(frame: &SeriesFrame, from: i64, to: i64, buckets: usize) -> Vec<QualityRun> {
     let range = window_range(frame, from, to);
     if range.is_empty() || buckets == 0 || to <= from {
         return Vec::new();
     }
-    // (bin, worst class) for each bin with a non-good sample, in bin order.
-    let mut bins: Vec<(usize, Quality)> = Vec::new();
+    // (bin, worst class, whether a good sample lies between it and the previous entry).
+    let mut bins: Vec<(usize, Quality, bool)> = Vec::new();
+    let mut good_since = false;
     for i in range {
         let q = frame.quality[i];
         if q == Quality::Good {
+            good_since = true;
             continue;
         }
         let b = bin_of(frame.ts[i], from, to, buckets);
         match bins.last_mut() {
-            Some((lb, lq)) if *lb == b => {
+            Some((lb, lq, _)) if *lb == b => {
                 if rug_rank(q) > rug_rank(*lq) {
                     *lq = q;
                 }
             }
-            _ => bins.push((b, q)),
+            _ => bins.push((b, q, good_since)),
         }
+        good_since = false;
     }
     let mut runs: Vec<QualityRun> = Vec::new();
-    let mut prev_bin: Option<usize> = None;
-    for (b, q) in bins {
+    for (b, q, broken) in bins {
         let end = if b + 1 == buckets { to } else { bin_start(b + 1, from, to, buckets) };
         match runs.last_mut() {
-            Some(run) if run.quality == q && prev_bin.map(|p| p + 1) == Some(b) => run.end = end,
+            Some(run) if run.quality == q && !broken => run.end = end,
             _ => runs.push(QualityRun { start: bin_start(b, from, to, buckets), end, quality: q }),
         }
-        prev_bin = Some(b);
     }
     runs
 }
@@ -329,13 +331,25 @@ mod tests {
         let runs = quality_runs(&f, 0, 100, 10);
         let got: Vec<(i64, i64, Quality)> = runs.iter().map(|r| (r.start, r.end, r.quality)).collect();
         assert_eq!(got, vec![(10, 20, Uncertain), (20, 30, Bad), (30, 40, Uncertain), (90, 100, Estimated)]);
-        // Adjacent bins of one class merge; a skipped bin splits them.
+        // Good samples between bad bins keep them apart, even in adjacent bins.
         let mut q2 = vec![Good; 100];
         q2[5] = Bad;
         q2[15] = Bad;
         q2[35] = Bad;
         let runs = quality_runs(&frame((0..100).collect(), vec![0.0; 100], q2), 0, 100, 10);
         let got: Vec<(i64, i64)> = runs.iter().map(|r| (r.start, r.end)).collect();
-        assert_eq!(got, vec![(0, 20), (30, 40)]);
+        assert_eq!(got, vec![(0, 10), (10, 20), (30, 40)]);
+    }
+
+    #[test]
+    fn quality_runs_span_empty_bins_between_sparse_samples() {
+        use Quality::*;
+        // Samples every 30 ns in 100 bins of 10 ns: bad samples at 60..=150 sit in bins with
+        // empty bins between them, yet make one run.
+        let ts: Vec<i64> = (0..10).map(|i| i * 30).collect();
+        let q: Vec<Quality> = (0..10).map(|i| if (2..=5).contains(&i) { Bad } else { Good }).collect();
+        let runs = quality_runs(&frame(ts, vec![0.0; 10], q), 0, 1000, 100);
+        let got: Vec<(i64, i64, Quality)> = runs.iter().map(|r| (r.start, r.end, r.quality)).collect();
+        assert_eq!(got, vec![(60, 160, Bad)]);
     }
 }
