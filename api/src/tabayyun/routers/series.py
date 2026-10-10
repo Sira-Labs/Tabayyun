@@ -139,8 +139,11 @@ async def list_series(
     kind: SeriesKind | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     cursor: str | None = None,
+    unit: Annotated[str | None, Query(max_length=32)] = None,
+    score_max: Annotated[float | None, Query(ge=0, le=100)] = None,
 ) -> SeriesList:
-    """Series by name; `q` matches name or external id case-insensitively."""
+    """Series by name; `q` matches name or external id case-insensitively, `unit` the unit,
+    `score_max` the latest overall score at or below it (spec 024)."""
     parsed_source: uuid.UUID | None = None
     if source_id is not None:
         try:
@@ -149,7 +152,15 @@ async def list_series(
             raise HTTPException(status_code=422, detail="source_id is not a UUID") from exc
     try:
         rows, next_cursor = await series_service.list_series(
-            session, scope, q=q or None, source_id=parsed_source, kind=kind, limit=limit, cursor=cursor
+            session,
+            scope,
+            q=q or None,
+            source_id=parsed_source,
+            kind=kind,
+            limit=limit,
+            cursor=cursor,
+            unit=unit or None,
+            score_max=score_max,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -157,6 +168,26 @@ async def list_series(
     return SeriesList(
         items=[SeriesSummary(**_summary_fields(s, stats[s.id])) for s in rows], next_cursor=next_cursor
     )
+
+
+class UnitCount(BaseModel):
+    """A unit and how many series use it."""
+
+    unit: str
+    n: int
+
+
+class UnitList(BaseModel):
+    """The workspace's units, most used first (spec 024)."""
+
+    items: list[UnitCount]
+
+
+@router.get("/units", response_model=UnitList)
+async def list_units(session: Annotated[AsyncSession, Depends(get_session)], scope: ReadScope) -> UnitList:
+    """Distinct units of the workspace's series, for the catalogue's unit filter."""
+    rows = await series_service.list_units(session, scope)
+    return UnitList(items=[UnitCount(unit=unit, n=n) for unit, n in rows])
 
 
 @router.get("/{series_id}", response_model=SeriesOut)
