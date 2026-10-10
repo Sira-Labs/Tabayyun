@@ -350,13 +350,17 @@ async def list_series(
 
 
 async def list_units(session: AsyncSession, scope: Scope) -> list[tuple[str, int]]:
-    """The workspace's distinct non-empty units with their series counts, most used first."""
+    """The workspace's distinct non-empty units with their series counts, most used first.
+
+    Units are grouped ignoring case, as the `unit` filter matches them; each group is named by
+    one of its spellings."""
+    key = func.lower(Series.unit)
     count = func.count()
     stmt = (
-        select(Series.unit, count)
+        select(func.min(Series.unit), count)
         .where(Series.workspace_id == scope.workspace_id, Series.unit.is_not(None), Series.unit != "")
-        .group_by(Series.unit)
-        .order_by(count.desc(), Series.unit)
+        .group_by(key)
+        .order_by(count.desc(), key)
     )
     return [(str(unit), int(n)) for unit, n in (await session.execute(stmt)).tuples()]
 

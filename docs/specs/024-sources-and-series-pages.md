@@ -32,7 +32,7 @@ or source in the catalogue.
 | Route | Change |
 |---|---|
 | `GET /api/series` | new query `unit` (exact, ignoring case) and `score_max` (0–100: the latest raw overall score is at or below it; series without a score are left out) |
-| `GET /api/series/units` | `{"items": [{"unit": "m3/h", "n": 12}]}`: the workspace's distinct non-empty units, by count, then unit |
+| `GET /api/series/units` | `{"items": [{"unit": "m3/h", "n": 12}]}`: the workspace's distinct non-empty units, grouped ignoring case as the filter matches them, by count, then unit |
 | `GET /api/sources` | each item gains `last_fetch` (from its health), so the list needs no request per source |
 
 ### Web routes

@@ -259,7 +259,7 @@ async def test_epoch_seconds_upload_records_the_unit(client):
 
 
 async def test_unit_and_score_filters_and_units(client):
-    """`unit` matches ignoring case, `score_max` the latest score; `/units` counts per unit (spec 024)."""
+    """`unit` and `score_max` filter; `/units` counts units ignoring case (spec 024)."""
     runs = {name: await _upload(client, name, csv=sine_csv(30)) for name in ("flow-a", "flow-b", "level")}
     ids = {name: await _series_id(client, run) for name, run in runs.items()}
     await client.patch(f"/api/series/{ids['flow-a']}", json={"unit": "m3/h"})
@@ -268,7 +268,8 @@ async def test_unit_and_score_filters_and_units(client):
     flows = (await client.get("/api/series", params={"unit": "m3/h"})).json()["items"]
     assert sorted(s["external_id"] for s in flows) == ["flow-a", "flow-b"]
     units = (await client.get("/api/series/units")).json()["items"]
-    assert units == [{"unit": "M3/H", "n": 1}, {"unit": "m", "n": 1}, {"unit": "m3/h", "n": 1}]
+    # Spellings that the filter treats as one unit are counted as one.
+    assert [(u["unit"].lower(), u["n"]) for u in units] == [("m3/h", 2), ("m", 1)]
     scores = {
         s["external_id"]: s["latest_score"]["overall"]
         for s in (await client.get("/api/series")).json()["items"]
