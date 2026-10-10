@@ -220,6 +220,8 @@ async def test_register_series_fetch_inline_and_history(admin_env, tmp_path):
         assert history[0]["error"] == "1 point(s) failed: point not configured: gone"
         detail = (await alice.get(f"/api/sources/{source['id']}")).json()
         assert detail["health"]["status"] == "degraded" and detail["n_series"] == 2
+        [listed] = (await alice.get("/api/sources")).json()["items"]
+        assert listed["last_fetch"]["id"] == queued.json()["id"] and listed["last_fetch"]["rows"] == 1440
         check = await alice.post(f"/api/sources/{source['id']}/check")
         assert check.status_code == 202
         statuses = [
