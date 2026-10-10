@@ -75,6 +75,10 @@ export type Series = {
   physical_max: number | null;
   operational_min: number | null;
   operational_max: number | null;
+  /** Only the detail route returns the fields below. */
+  resolution?: number | null;
+  non_negative?: boolean | null;
+  asset_path?: string | null;
   /** Declared sampling step in ns; only the detail route returns it. */
   expected_interval_ns?: number | null;
   /** Free-form metadata; `example` is set by `deploy/examples/public.py` (spec 019). */

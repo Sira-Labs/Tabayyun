@@ -392,6 +392,9 @@ ROUTES = [
     ("PATCH", "/api/series/{series_id}", "series", {"unit": "bar"}),
     ("GET", "/api/series/{series_id}/metrics", "series", None),
     ("GET", "/api/series/{series_id}/scores", "series", None),
+    # Spec 025: chart points and the profile.
+    ("GET", "/api/series/{series_id}/chart", "series", None),
+    ("GET", "/api/series/{series_id}/profile", "series", None),
     ("GET", "/api/series-groups/{group_id}", "group", None),
     ("PATCH", "/api/series-groups/{group_id}", "group", {"name": "renamed"}),
     ("DELETE", "/api/series-groups/{group_id}", "group", None),

@@ -46,6 +46,17 @@ All notable changes to this project are documented here. The format follows
   - `/series` searches and filters by source, unit, kind and score, with the filters in the URL.
 - `GET /api/series` filters by `unit` and `score_max`. `GET /api/series/units` lists units, and
   `GET /api/sources` includes each source's `last_fetch`.
+- Series page with chart (spec 025):
+  - `/series/:id` draws the series with uPlot: findings as shaded windows, a quality rug,
+    the operating band and the physical limits.
+  - Presets, date inputs, drag-to-zoom, Back and the arrow, `+`, `−` and Home keys set the
+    range, which lives in the URL.
+  - Beside the chart are the series' metadata and its profile.
+  - Catalogue rows and run reports link to the page.
+- `GET /api/series/{id}/chart` returns M4-downsampled points on bins of the requested window,
+  with gap breaks and quality runs, an ETag, and a row cap (`TABAYYUN_CHART_MAX_ROWS`).
+  `GET /api/series/{id}/profile` profiles a window without bad samples and gives the operating
+  band (spec 025).
 
 ### Changed
 - A point a connector cannot read no longer fails a fetch. The other points are fetched, and

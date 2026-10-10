@@ -201,7 +201,10 @@ function SeriesPanel({ seriesId }: { seriesId: string }) {
   return (
     <section aria-labelledby="series-heading" className="rounded-lg border border-slate-200 bg-white p-4 text-sm dark:border-slate-800 dark:bg-slate-900">
       <h2 id="series-heading" className="mb-2 text-base font-semibold">
-        Series {s.name}
+        Series{" "}
+        <Link to="/series/$seriesId" params={{ seriesId: s.id }} className="text-sky-800 underline underline-offset-2 dark:text-sky-300">
+          {s.name}
+        </Link>
       </h2>
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
         <dt className="text-slate-600 dark:text-slate-400">External id</dt>

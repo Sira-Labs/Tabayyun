@@ -8,6 +8,8 @@ import { RunForm } from "./pages/RunForm";
 import { RunReport } from "./pages/RunReport";
 import { RunsList } from "./pages/RunsList";
 import { SeriesCatalogue, validateSeriesSearch } from "./pages/SeriesCatalogue";
+import { SeriesDetail } from "./pages/SeriesDetail";
+import { validateSeriesPageSearch } from "./seriesChart";
 import { SourceDetail } from "./pages/sources/SourceDetail";
 import { SourceNew } from "./pages/sources/SourceNew";
 import { SourcesList } from "./pages/sources/SourcesList";
@@ -38,6 +40,12 @@ const seriesRoute = createRoute({
   validateSearch: validateSeriesSearch,
   component: SeriesCatalogue,
 });
+const seriesDetailRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/series/$seriesId",
+  validateSearch: validateSeriesPageSearch,
+  component: SeriesDetail,
+});
 const sourcesRoute = createRoute({ getParentRoute: () => appRoute, path: "/sources", component: SourcesList });
 const newSourceRoute = createRoute({ getParentRoute: () => appRoute, path: "/sources/new", component: SourceNew });
 const sourceRoute = createRoute({ getParentRoute: () => appRoute, path: "/sources/$sourceId", component: SourceDetail });
@@ -65,6 +73,7 @@ export const routeTree = rootRoute.addChildren([
     newRunRoute,
     runRoute,
     seriesRoute,
+    seriesDetailRoute,
     sourcesRoute,
     newSourceRoute,
     sourceRoute,

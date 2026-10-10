@@ -99,6 +99,7 @@ Rules:
     | `TABAYYUN_CONNECTOR_ALLOWED_NETWORKS` | optional; comma-separated CIDRs of the plant networks connectors may reach, e.g. `10.20.0.0/16`. Private ranges are refused otherwise; loopback and cloud metadata always |
     | `TABAYYUN_CONNECTOR_ALLOW_PUBLIC` | optional, default `true`; `false` keeps connectors on the allowed networks only |
     | `TABAYYUN_RUN_FETCH_BUDGET_S` | optional, default `120`: how long a dataset run may spend fetching what the cache lacks; `0` turns it off |
+    | `TABAYYUN_CHART_MAX_ROWS` | optional, default `10000000`: raw rows one chart or profile request may read; a larger window gets a "zoom in" answer |
 
     With `TABAYYUN_ENV=prod` the api refuses to start without the four sign-in settings
     (spec 013); staging runs `prod` too, so set up the realm (section 4a) first.

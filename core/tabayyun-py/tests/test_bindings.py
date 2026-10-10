@@ -45,6 +45,24 @@ def test_profile_and_downsample():
     assert 0 < small.num_rows <= 1000
 
 
+def test_chart_points_gaps_and_quality():
+    batch = tc.synth(n=10_000, faults=["gap"])
+    ts = [t.value for t in batch.column("ts")]
+    quality = pa.array(["bad" if 100 <= i < 200 else "good" for i in range(len(ts))])
+    table = pa.table({"ts": batch.column("ts"), "value": batch.column("value"), "quality": quality})
+    start, end = ts[0], ts[-1] + 1
+    out = tc.chart(table, start, end, 200)
+    assert set(out) == {"ts", "values", "quality", "n_raw"}
+    assert out["n_raw"] == len(ts)
+    assert 0 < len(out["ts"]) <= 4 * 200 + 50
+    assert out["ts"] == sorted(out["ts"])
+    assert any(v != v for v in out["values"]), "the injected gap breaks the line"
+    assert [q[2] for q in out["quality"]] == ["bad"]
+    assert out["quality"][0][0] <= ts[100] < ts[199] < out["quality"][0][1]
+    with pytest.raises(ValueError):
+        tc.chart(table, end, start, 200)
+
+
 def test_latency_with_ingest_column():
     batch = tc.synth(n=300)
     ts = batch.column("ts")

@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
 import { buttonClass } from "../components/Brand";
 import { formatLocalTime } from "../format";
@@ -144,7 +144,15 @@ export function SeriesCatalogue() {
             <tbody>
               {items.map((s) => (
                 <tr key={s.id} className="border-t border-slate-200 dark:border-slate-800">
-                  <td className="p-2 font-medium">{s.name}</td>
+                  <td className="p-2 font-medium">
+                    <Link
+                      to="/series/$seriesId"
+                      params={{ seriesId: s.id }}
+                      className="text-sky-800 underline underline-offset-2 dark:text-sky-300"
+                    >
+                      {s.name}
+                    </Link>
+                  </td>
                   <td className="hidden break-all p-2 font-mono text-xs md:table-cell">{s.external_id}</td>
                   <td className="hidden p-2 sm:table-cell">{sourceNames[s.source_id] ?? "—"}</td>
                   <td className="p-2">{s.unit ?? "—"}</td>
