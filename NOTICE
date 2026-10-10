@@ -4,3 +4,9 @@ Copyright 2026 Markus Clauss (Abdullah Isa)
 This product includes software developed as part of the Tabayyun project
 (https://github.com/Sira-Labs/Tabayyun), licensed under the Apache License,
 Version 2.0.
+
+Third-party software with a licence other than Apache-2.0, used unmodified as a separately
+installed library (ADR-0018):
+
+- asyncua (opcua-asyncio), https://github.com/FreeOpcUa/opcua-asyncio,
+  GNU Lesser General Public License v3 or later.
