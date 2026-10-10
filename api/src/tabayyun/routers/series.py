@@ -1,13 +1,13 @@
 """Series endpoints: catalogue, metadata and partial updates (spec 004), metric points and
-score history (spec 003)."""
+score history (spec 003), chart points and profile (spec 025)."""
 
 from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +16,9 @@ from tabayyun.authz import ReadScope, Scope, WriteScope, get_session
 from tabayyun.db.models import Series
 from tabayyun.services import findings as findings_service
 from tabayyun.services import series as series_service
-from tabayyun.services.timeconv import datetime_to_ns, parse_time
+from tabayyun.services import series_chart
+from tabayyun.services.cache import CacheError, RunCache
+from tabayyun.services.timeconv import datetime_to_ns, parse_time, parse_time_ns, to_core_ns
 
 router = APIRouter(prefix="/api/series", tags=["series"])
 
@@ -343,4 +345,179 @@ async def list_scores(
             )
             for s in rows
         ]
+    )
+
+
+# Chart and profile (spec 025)
+
+
+class TimeWindow(BaseModel):
+    """A half-open window `[from, to)`, ns since the epoch as strings."""
+
+    from_: str = Field(alias="from")
+    to: str
+
+
+class ExtentOut(BaseModel):
+    """What the cache holds of a series: the earliest start and latest end of its coverage."""
+
+    start: str
+    end: str
+
+
+class QualityRunOut(BaseModel):
+    """A run of one non-good quality class at the chart's bin resolution."""
+
+    start: str
+    end: str
+    quality: str = Field(description="uncertain, bad or estimated")
+
+
+class ChartOut(BaseModel):
+    """M4 points of one series over a window; `values` holds null where the line breaks."""
+
+    window: TimeWindow | None
+    extent: ExtentOut | None
+    layer: str
+    width_px: int
+    n_raw: int
+    ts: list[str]
+    values: list[float | None]
+    quality: list[QualityRunOut]
+
+
+class BandOut(BaseModel):
+    """The operating band and where it comes from."""
+
+    lo: float
+    hi: float
+    source: Literal["metadata", "profile"]
+
+
+class ProfileOut(BaseModel):
+    """The profile of a window without bad-quality samples, and the band derived from it."""
+
+    window: TimeWindow | None
+    profile: dict[str, Any] | None
+    quality_counts: dict[str, int]
+    band: BandOut | None
+
+
+Layer = Literal["raw"]
+
+
+def _window_or_422(from_: str | None, to: str | None) -> tuple[int, int] | None:
+    """The requested `[from, to)` in ns, None when neither is given; 422 when malformed."""
+    if from_ is None and to is None:
+        return None
+    if from_ is None or to is None:
+        raise HTTPException(status_code=422, detail="give both from and to, or neither")
+    try:
+        start, end = to_core_ns(parse_time_ns(from_)), to_core_ns(parse_time_ns(to))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"from/to: {exc}") from exc
+    if end <= start:
+        raise HTTPException(status_code=422, detail="to must be later than from")
+    return start, end
+
+
+async def _series_or_404(session: AsyncSession, scope: Scope, series_id: str) -> Series:
+    """The series in the caller's workspace; 404 otherwise."""
+    series = await series_service.get_series(session, scope, _parse_series_id(series_id))
+    if series is None:
+        raise HTTPException(status_code=404, detail="series not found")
+    return series
+
+
+def _window_out(window: tuple[int, int] | None) -> TimeWindow | None:
+    return TimeWindow.model_validate({"from": str(window[0]), "to": str(window[1])}) if window else None
+
+
+async def _read_or_503(cache: RunCache, series: Series, window: tuple[int, int] | None) -> Any:
+    """Rows of the window, None when there is no window; 503 when the store cannot be read."""
+    if window is None:
+        return None
+    try:
+        return await series_chart.read_window(cache, series, *window)
+    except CacheError as exc:
+        raise HTTPException(status_code=503, detail="cache_unavailable") from exc
+
+
+@router.get("/{series_id}/chart", response_model=ChartOut)
+async def get_chart(
+    series_id: str,
+    request: Request,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    scope: ReadScope,
+    from_: Annotated[str | None, Query(alias="from")] = None,
+    to: str | None = None,
+    width_px: Annotated[int, Query(ge=100, le=4000)] = 1200,
+    layer: Layer = "raw",
+) -> ChartOut | Response:
+    """M4-downsampled points of a window (default: the whole extent, or its latest week).
+
+    422 `window_too_large` when the window holds more rows than `TABAYYUN_CHART_MAX_ROWS`.
+    """
+    series = await _series_or_404(session, scope, series_id)
+    requested = _window_or_422(from_, to)
+    ext = await series_chart.extent(session, series.id, layer)
+    window = requested or (series_chart.default_chart_window(ext) if ext else None)
+    if window is not None:
+        try:
+            series_chart.check_size(ext, *window, request.app.state.settings.chart_max_rows)
+        except series_chart.WindowTooLargeError as exc:
+            raise HTTPException(status_code=422, detail="window_too_large") from exc
+    version = ext.version if ext else None
+    tag = series_chart.etag("chart", series.id, layer, window, width_px, version, series.updated_at)
+    headers = {"ETag": tag, "Cache-Control": "private, no-cache"}
+    if request.headers.get("if-none-match") == tag:
+        return Response(status_code=304, headers=headers)
+    batch = await _read_or_503(request.app.state.run_cache, series, window)
+    points = (
+        await series_chart.chart_points(batch, *window, width_px, series.expected_interval_ns)
+        if window
+        else series_chart.ChartPoints(ts=[], values=[], quality=[], n_raw=0)
+    )
+    response.headers.update(headers)
+    return ChartOut(
+        window=_window_out(window),
+        extent=ExtentOut(start=str(ext.start_ns), end=str(ext.end_ns)) if ext else None,
+        layer=layer,
+        width_px=width_px,
+        n_raw=points.n_raw,
+        ts=[str(t) for t in points.ts],
+        values=points.values,
+        quality=[QualityRunOut(start=str(s), end=str(e), quality=q) for s, e, q in points.quality],
+    )
+
+
+@router.get("/{series_id}/profile", response_model=ProfileOut)
+async def get_profile(
+    series_id: str,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    scope: ReadScope,
+    from_: Annotated[str | None, Query(alias="from")] = None,
+    to: str | None = None,
+    layer: Layer = "raw",
+) -> ProfileOut:
+    """The profile of a window without bad samples (default: the trailing 28 days) and the band."""
+    series = await _series_or_404(session, scope, series_id)
+    requested = _window_or_422(from_, to)
+    ext = await series_chart.extent(session, series.id, layer)
+    window = requested or (series_chart.default_profile_window(ext) if ext else None)
+    if window is not None:
+        try:
+            series_chart.check_size(ext, *window, request.app.state.settings.chart_max_rows)
+        except series_chart.WindowTooLargeError as exc:
+            raise HTTPException(status_code=422, detail="window_too_large") from exc
+    batch = await _read_or_503(request.app.state.run_cache, series, window)
+    profile = await series_chart.window_profile(batch, str(series.id))
+    band = series_chart.band(series, profile)
+    return ProfileOut(
+        window=_window_out(window),
+        profile=profile,
+        quality_counts=series_chart.quality_counts(batch),
+        band=BandOut(**band) if band else None,
     )

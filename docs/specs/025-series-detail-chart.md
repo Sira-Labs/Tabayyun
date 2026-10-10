@@ -25,7 +25,7 @@ zoom into one, and see whether the samples there were bad quality, without expor
 |---|---|
 | `downsample::m4_window(frame, from, to, buckets)` | M4 on `buckets` equal bins of `[from, to)`. Bins come from the window, not the data, so two series asked for the same window share bins (spec 018). Up to four points per bin (first, min, max, last), in time order, without duplicates. |
 | `downsample::gap_breaks(ts, values, max_step)` | Inserts a NaN point one nanosecond after any sample followed by a step longer than `max_step`, so the chart breaks the line there. |
-| `downsample::quality_runs(frame, from, to, buckets)` | Runs `(start, end, quality)` of non-good samples. Each bin with a non-good sample takes its worst class (bad > estimated > uncertain). Adjacent bins of one class merge, and a run spans its bins clipped to the window. |
+| `downsample::quality_runs(frame, from, to, buckets)` | Runs `(start, end, quality)` of non-good samples. Each bin with a non-good sample takes its worst class (bad > estimated > uncertain). Consecutive such bins of one class merge unless a good sample lies between them, so sparse samples (fewer than one per bin) still make one run. A run spans its bins, within the window. |
 | `tabayyun_core.chart(data, from_ns, to_ns, buckets)` | Python binding. Returns `{"ts": [...], "values": [...], "quality": [(start, end, name)], "n_raw": n}`, releasing the GIL. The data needs columns `ts`, `value` and `quality`. |
 
 - Gap breaks use `max_step = 2 × bin width`, or 3 × the series' expected interval when that
@@ -37,7 +37,7 @@ zoom into one, and see whether the samples there were bad quality, without expor
 
 | Route | Response |
 |---|---|
-| `GET /api/series/{id}/chart?from=&to=&width_px=&layer=raw` | `{window: {from, to}, extent: {start, end} \| null, layer, width_px, n_raw, ts: [ns strings], values: [number \| null], quality: [{start, end, quality}]}` |
+| `GET /api/series/{id}/chart?from=&to=&width_px=&layer=raw` | `{window: {from, to} \| null, extent: {start, end} \| null, layer, width_px, n_raw, ts: [ns strings], values: [number \| null], quality: [{start, end, quality}]}` |
 | `GET /api/series/{id}/profile?from=&to=&layer=raw` | `{window: {from, to} \| null, profile \| null, quality_counts: {good, uncertain, bad, estimated}, band: {lo, hi, source} \| null}` |
 
 - **Time parameters:**
@@ -48,7 +48,7 @@ zoom into one, and see whether the samples there were bad quality, without expor
 - **`width_px`:** 100–4000, default 1200. The bins are `width_px` buckets, so the response
   holds at most `4 × width_px` points plus the gap breaks.
 - **`extent`:** the series' covered range from `coverage` (earliest start, latest end).
-  It is null when nothing is cached.
+  It is null when nothing is cached; then `window` is null too unless `from` and `to` were given.
 - **Default chart window:** when `from` and `to` are both absent, the window is the whole
   extent if coverage records at most 2 000 000 rows. Otherwise it is the latest 7 days of
   the extent. Giving only one of them is 422.

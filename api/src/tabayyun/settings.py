@@ -127,6 +127,9 @@ class Settings(BaseSettings):
     run_fetch_budget_s: int = Field(
         default=120, ge=0, description="Wall time a dataset run may spend fetching its gaps; 0 turns it off."
     )
+    chart_max_rows: int = Field(
+        default=10_000_000, ge=1, description="Raw rows one chart or profile request may read (spec 025)."
+    )
 
     @field_validator("session_idle", "session_absolute", "passkey_fresh", "invitation_ttl", mode="before")
     @classmethod
