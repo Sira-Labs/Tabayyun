@@ -40,6 +40,7 @@ describe("SeriesCatalogue", () => {
     const cells = within(table).getAllByRole("row")[1] as HTMLElement;
     expect(within(cells).getByText("PI plant")).toBeTruthy();
     expect(within(cells).getByText("55.5")).toBeTruthy();
+    expect(within(cells).getByRole("link", { name: "TAG1" }).getAttribute("href")).toBe("/series/s1");
 
     await user.click(screen.getByRole("button", { name: "Load more" }));
     await screen.findByText("TAG3");

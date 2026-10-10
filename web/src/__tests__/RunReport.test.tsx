@@ -55,6 +55,7 @@ describe("RunReport", () => {
 
     expect(screen.getByText("tby.latency")).toBeTruthy();
     expect(await screen.findByText("0 to 16")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Pump 1" }).getAttribute("href")).toBe("/series/s");
     expect(screen.getByText("Run succeeded").getAttribute("aria-live") ?? screen.getByText("Run succeeded").closest("[aria-live]")?.getAttribute("aria-live")).toBe("polite");
   });
 
