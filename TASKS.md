@@ -432,6 +432,17 @@ starts; the plan is the backlog until then.
         through its own page size.
       - The network policy gained `tcp_target`, plus a test-only redirect, so OPC UA (plain TCP)
         gets the same address checks as HTTP.
+- [x] **024 Sources pages and series catalogue** — `docs/specs/024-sources-and-series-pages.md`
+      (S9-4, 10 Oct). Every criterion is met.
+      - `/sources`, `/sources/new`, `/sources/:id` and `/series` are in the web app, with
+        navigation.
+      - Actions, settings and credentials follow the workspace role.
+      - Jobs are polled until they end.
+      - The OPC UA page pins the server certificate after a confirmation, and offers the client
+        certificate for download.
+      - The API gained `unit` and `score_max` on `GET /api/series`, `GET /api/series/units`, and
+        `last_fetch` on `GET /api/sources`.
+      - Catalogue rows link nowhere until the series page of S9-5.
 - [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
       `tabayyun-api` and `tabayyun-worker` on staging; then a `synthetic` source with
       `poll_interval_s` gives staging a live, polling source for demos.

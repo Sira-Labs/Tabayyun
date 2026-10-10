@@ -39,6 +39,14 @@ All notable changes to this project are documented here. The format follows
   - The metadata import reads `EngineeringUnits`, `InstrumentRange`, `EURange` and the
     browse path.
 
+- Web pages for connector sources and the series catalogue (spec 024):
+  - `/sources` lists sources with health and last fetch, and `/sources/new` creates them.
+  - `/sources/:id` checks, fetches, finds and adds points, imports metadata, holds the
+    write-only credentials and settings, and pins OPC UA certificates.
+  - `/series` searches and filters by source, unit, kind and score, with the filters in the URL.
+- `GET /api/series` filters by `unit` and `score_max`. `GET /api/series/units` lists units, and
+  `GET /api/sources` includes each source's `last_fetch`.
+
 ### Changed
 - A point a connector cannot read no longer fails a fetch. The other points are fetched, and
   the fetch ends `partial` with the failed points in `result.point_errors`. The `synthetic`

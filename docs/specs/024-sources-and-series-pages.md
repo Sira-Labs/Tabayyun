@@ -33,6 +33,7 @@ or source in the catalogue.
 |---|---|
 | `GET /api/series` | new query `unit` (exact, ignoring case) and `score_max` (0–100: the latest raw overall score is at or below it; series without a score are left out) |
 | `GET /api/series/units` | `{"items": [{"unit": "m3/h", "n": 12}]}`: the workspace's distinct non-empty units, by count, then unit |
+| `GET /api/sources` | each item gains `last_fetch` (from its health), so the list needs no request per source |
 
 ### Web routes
 
@@ -103,23 +104,23 @@ or source in the catalogue.
 
 ## Acceptance criteria
 
-- [ ] `GET /api/series?unit=&score_max=` filter as specified, and `GET /api/series/units`
+- [x] `GET /api/series?unit=&score_max=` filter as specified, and `GET /api/series/units`
   counts units, both within the workspace.
-- [ ] `/sources` lists sources with health and last fetch; "New source" only for admins.
-- [ ] `/sources/new` creates PI Web API, OPC UA and synthetic sources and shows field errors.
-- [ ] `/sources/$sourceId`:
+- [x] `/sources` lists sources with health and last fetch; "New source" only for admins.
+- [x] `/sources/new` creates PI Web API, OPC UA and synthetic sources and shows field errors.
+- [x] `/sources/$sourceId`:
   - actions only for editors and admins;
   - credentials and settings only for admins;
   - viewers see no action buttons.
-- [ ] Check, fetch, search and metadata jobs are followed to their end and their results
+- [x] Check, fetch, search and metadata jobs are followed to their end and their results
   shown. Search results can be added as series.
-- [ ] Credentials forms send the right shapes, are never filled from the server, and can be
+- [x] Credentials forms send the right shapes, are never filled from the server, and can be
   cleared.
-- [ ] The OPC UA pin helper saves the thumbprint after confirmation. The client certificate is
+- [x] The OPC UA pin helper saves the thumbprint after confirmation. The client certificate is
   shown and can be downloaded.
-- [ ] `/series` filters by text, source, unit, kind and score below; the filters are in the
+- [x] `/series` filters by text, source, unit, kind and score below; the filters are in the
   URL; "Load more" pages on.
-- [ ] `pnpm lint`, `pnpm build` and `pnpm test` pass; the API tests cover the additions.
+- [x] `pnpm lint`, `pnpm build` and `pnpm test` pass; the API tests cover the additions.
 
 ## Test cases
 
@@ -140,6 +141,17 @@ Web (`web/src/__tests__`):
 
 API (`api/tests/db/test_series_api.py`): `unit` and `score_max` filters; units counts per
 workspace.
+
+## Implementation notes
+
+- **Re-validating the search.** TanStack Router merges the root route's raw search into each
+  child's, so `/series` validates its filters again when it reads them; unknown keys and values
+  never reach the API.
+- **Roles** come from `/api/workspaces`, which already gives each workspace's effective role.
+  An org owner or admin also counts as an admin, as on the server.
+- **Jobs** are followed by polling every 1.5 s, until server-sent events arrive in S10-4. The
+  history refreshes when a job ends.
+- **Spec edits made during implementation:** `GET /api/sources` gained `last_fetch`.
 
 ## Out of scope
 
