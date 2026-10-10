@@ -443,6 +443,17 @@ starts; the plan is the backlog until then.
       - The API gained `unit` and `score_max` on `GET /api/series`, `GET /api/series/units`, and
         `last_fetch` on `GET /api/sources`.
       - Catalogue rows link nowhere until the series page of S9-5.
+- [x] **025 Series page with chart** — `docs/specs/025-series-detail-chart.md` (S9-5, 10 Oct).
+      Every criterion is met.
+      - `/series/:id` charts M4 points with uPlot.
+      - Findings are shaded windows, and the quality rug sits under the plot.
+      - The operating band comes from metadata or the trailing 28-day profile; physical limits
+        are dashed lines.
+      - Ranges come from presets, inputs, drag, Back and the keyboard, and live in the URL.
+      - The API gained `GET /api/series/{id}/chart` and `GET /api/series/{id}/profile`; the core
+        gained `m4_window`, `gap_breaks` and `quality_runs`.
+      - Opening a 1M-point series measured 390 ms in Chromium, including 274 ms of API time.
+      - The band and profile are computed per request until S10-2 stores baselines.
 - [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
       `tabayyun-api` and `tabayyun-worker` on staging; then a `synthetic` source with
       `poll_interval_s` gives staging a live, polling source for demos.

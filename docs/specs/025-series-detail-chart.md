@@ -112,14 +112,16 @@ zoom into one, and see whether the samples there were bad quality, without expor
 
 1. **Opening.** The page loads the series, then the chart for the URL's range (or the default)
    at the chart's width in CSS pixels. Findings for the chart's window come from
-   `GET /api/findings?series_id=&since=&until=&limit=500`, and the profile loads alongside.
+   `GET /api/findings?series_id=&since=&until=&status=all&limit=500`, so muted and resolved
+   ones are shaded too, with their status in the list. The profile loads alongside.
 2. **Empty.** With `extent: null` the page says that no data is cached yet. For a series of
    a connector source it names the source's Fetch action.
 3. **Zoom.**
    - Any range change replaces the URL search and re-queries.
    - The previous chart stays on screen until the new one arrives.
    - A range narrower than 1 s is widened to 1 s around its centre.
-4. **Too large.** On `window_too_large` the page keeps the previous range and says to zoom in.
+4. **Too large.** On `window_too_large` the page keeps showing the previous chart and says to
+   zoom in.
 5. **Gaps.** A null in `values` breaks the line. Spans with no samples show no line, and the
    rug shows no colour.
 6. **Selection.** `finding` in the URL outlines that finding and scrolls its row into view. It
@@ -127,22 +129,22 @@ zoom into one, and see whether the samples there were bad quality, without expor
 
 ## Acceptance criteria
 
-- [ ] `m4_window` uses window bins; spikes survive; two frames share bin edges;
+- [x] `m4_window` uses window bins; spikes survive; two frames share bin edges;
   `quality_runs` merges runs and picks the worst class; `gap_breaks` breaks long steps.
-- [ ] `GET /api/series/{id}/chart` returns M4 points, extent, `n_raw` and quality runs. It
+- [x] `GET /api/series/{id}/chart` returns M4 points, extent, `n_raw` and quality runs. It
   applies the default window, the row cap, `layer` validation and ETag/304, and returns
   empty arrays when nothing is cached.
-- [ ] `GET /api/series/{id}/profile` profiles the window without bad samples, counts quality
+- [x] `GET /api/series/{id}/profile` profiles the window without bad samples, counts quality
   over all samples, and gives the band from metadata or the profile.
-- [ ] Both routes keep to the caller's workspace (RLS test list).
-- [ ] `/series/$seriesId` shows the header, chart, shaded findings, band, limits, quality
+- [x] Both routes keep to the caller's workspace (RLS test list).
+- [x] `/series/$seriesId` shows the header, chart, shaded findings, band, limits, quality
   rug, findings list, metadata and profile.
-- [ ] Range presets, inputs, drag zoom, back, and the ←, →, `+`, `−` and Home keys change
+- [x] Range presets, inputs, drag zoom, back, and the ←, →, `+`, `−` and Home keys change
   the range in the URL and re-query.
-- [ ] Catalogue rows and the run report's series card link to the page.
-- [ ] A 1 000 000-point series renders under 500 ms after the first load. This is measured
+- [x] Catalogue rows and the run report's series card link to the page.
+- [x] A 1 000 000-point series renders under 500 ms after the first load. This is measured
   in Chromium and recorded below, and the API test times the chart endpoint on 1M points.
-- [ ] `make lint` and `make test` (or the relevant subsets) pass.
+- [x] `make lint` and `make test` (or the relevant subsets) pass.
 
 ## Test cases
 
@@ -178,6 +180,26 @@ zoom into one, and see whether the samples there were bad quality, without expor
   - catalogue and run report links.
 
 ## Implementation notes
+
+- **Speed (criterion "1M points under 500 ms").** Measured in this container on 10 Oct 2026:
+  - The API test reads 1 000 000 raw points from a local cache and answers the chart in
+    274 ms, then 211 ms.
+  - The core's `chart` alone takes 44 ms on about 1M rows in memory.
+  - In Chromium, against the built app, with a mocked API serving a real M4 answer of a
+    997 500-point series (4 199 points), opening the series from the catalogue paints the
+    chart in a median of 137 ms over 7 runs.
+  - With the chart answer delayed by the API's 274 ms, the median is 390 ms (at most 405 ms).
+  - A range change then redraws in 58 ms, or 326 ms with that delay.
+- **uPlot** loads as its own chunk (55 kB, 24 kB gzipped). The page starts that download as it
+  mounts, alongside its API requests. Waiting until the chart data arrived cost about 280 ms.
+- **Quality runs** first merged only bins that touch. Hourly samples in 43-minute bins then
+  made a bad stretch a row of dashes, so runs now merge until a good sample lies between them.
+- **Gap breaks and the ETag.** The ETag includes the series' `updated_at`, because the
+  declared interval moves the gap breaks.
+- **Band.** The band and the profile are computed per request until S10-2 stores baselines.
+  The band uses `tby.operational_range`'s formula with its default `k = 1`.
+- **Tests and uPlot.** All uPlot calls go through `components/chart/uplot.ts`, which the page
+  tests replace, because jsdom has no canvas.
 
 ## Out of scope
 
