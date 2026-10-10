@@ -38,8 +38,9 @@ then find variables by name and get their history checked like any other series.
 
 ### Connector additions (`tabayyun.connectors.Connector`)
 
-- `prepare_credentials(new, previous, *, source_id) -> BaseModel`, a class method. It lets a
-  connector complete credentials before they are stored. The default returns `new`.
+- `prepare_credentials(new, previous, *, source_id) -> tuple[BaseModel, dict[str, Any]]`, a
+  class method. It lets a connector complete credentials before they are stored, and returns them
+  with details for the audit event. The default returns `(new, {})`.
 - `client_certificate(credentials) -> dict | None`, a class method. It returns the public part
   of a client identity, if the connector has one. The default returns None.
 
