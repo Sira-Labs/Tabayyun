@@ -169,3 +169,22 @@ def test_verify_context_reaches_the_transport(monkeypatch):
 
     asyncio.run(go())
     assert created == [{"verify": context}, {"verify": True}]
+
+
+def test_tcp_target_checks_and_only_redirects_checked_addresses():
+    policy = NetPolicy(
+        resolver=resolver({"opcua.example.com": [PUBLIC], "inside": ["127.0.0.1"]}),
+        redirect={PUBLIC: "127.0.0.1"},
+    )
+    assert asyncio.run(policy.tcp_target("opcua.example.com", 4840)) == "127.0.0.1"
+    assert (
+        asyncio.run(
+            NetPolicy(resolver=resolver({"opcua.example.com": [PUBLIC]})).tcp_target(
+                "opcua.example.com", 4840
+            )
+        )
+        == PUBLIC
+    )
+    for host in ("inside", "127.0.0.1", "nowhere"):
+        with pytest.raises(TargetRefusedError):
+            asyncio.run(policy.tcp_target(host, 4840))
