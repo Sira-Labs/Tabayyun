@@ -14,7 +14,7 @@ from tabayyun_core import _native
 
 __version__: str = _native.__version__
 
-__all__ = ["Cache", "builtin_checks", "downsample_m4", "profile", "run_checks", "run_checks_multi", "synth", "__version__"]
+__all__ = ["Cache", "builtin_checks", "chart", "downsample_m4", "profile", "run_checks", "run_checks_multi", "synth", "__version__"]
 
 
 def builtin_checks() -> list[str]:
@@ -115,6 +115,28 @@ def profile(
 def downsample_m4(data: Any, buckets: int, *, ts_col: str = "ts", value_col: str = "value") -> Any:
     """M4 downsampling for charts; returns a pyarrow RecordBatch with ``ts`` and ``value``."""
     return _native.downsample_m4(data, buckets, ts_col, value_col)
+
+
+def chart(
+    data: Any,
+    from_ns: int,
+    to_ns: int,
+    buckets: int,
+    *,
+    expected_interval_ns: int | None = None,
+    ts_col: str = "ts",
+    value_col: str = "value",
+    quality_col: str | None = "quality",
+) -> dict[str, Any]:
+    """Chart points of one series over ``[from_ns, to_ns)`` (spec 025).
+
+    M4 on ``buckets`` equal bins of the window, with a NaN inserted where a gap should break
+    the line, and the runs of non-good quality. Returns ``ts`` (list of int ns), ``values``
+    (list of float), ``quality`` (list of ``(start_ns, end_ns, class)``) and ``n_raw``.
+    """
+    return dict(
+        _native.chart(data, from_ns, to_ns, buckets, expected_interval_ns, ts_col, value_col, quality_col)
+    )
 
 
 def synth(n: int = 1440, interval_ns: int = 60_000_000_000, seed: int = 42, faults: list[str] | None = None) -> Any:

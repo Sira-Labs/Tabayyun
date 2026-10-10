@@ -11,11 +11,12 @@ use pyo3::types::PyDict;
 use pyo3_arrow::{PyRecordBatch, PyRecordBatchReader};
 use std::collections::BTreeMap;
 use tabayyun_core::cache::{Cache, StoreConfig};
-use tabayyun_core::downsample::m4;
+use tabayyun_core::downsample::{gap_breaks, m4, m4_window, quality_runs};
+use tabayyun_core::frame::modal_interval;
 use tabayyun_core::synth::{generate, inject, Rng, SynthSpec};
 use tabayyun_core::{
-    CheckConfig, CheckContext, CheckOutput, Profile, Registry, Scorer, SeriesFrame, SeriesGroup, SeriesMeta,
-    Window,
+    CheckConfig, CheckContext, CheckOutput, Profile, Quality, Registry, Scorer, SeriesFrame, SeriesGroup,
+    SeriesMeta, Window,
 };
 
 fn err<E: std::fmt::Display>(e: E) -> PyErr {
@@ -204,6 +205,62 @@ fn downsample_m4<'py>(
     PyRecordBatch::new(batch).into_pyarrow(py)
 }
 
+/// Chart points of one series over `[from_ns, to_ns)` (spec 025): M4 on `buckets` window bins
+/// with gap breaks, plus the runs of non-good quality. Returns a dict with `ts` (list of int),
+/// `values` (list of float, NaN where the line breaks), `quality` (list of `(start, end, class)`)
+/// and `n_raw` (samples in the window).
+#[pyfunction]
+#[pyo3(signature = (data, from_ns, to_ns, buckets, expected_interval_ns=None, ts_col="ts", value_col="value", quality_col=Some("quality")))]
+#[allow(clippy::too_many_arguments)]
+fn chart<'py>(
+    py: Python<'py>,
+    data: &Bound<'_, PyAny>,
+    from_ns: i64,
+    to_ns: i64,
+    buckets: usize,
+    expected_interval_ns: Option<i64>,
+    ts_col: &str,
+    value_col: &str,
+    quality_col: Option<&str>,
+) -> PyResult<Bound<'py, PyDict>> {
+    if buckets == 0 || to_ns <= from_ns {
+        return Err(PyValueError::new_err("chart needs buckets > 0 and from_ns < to_ns"));
+    }
+    let frame = frame_from_py(data, r#"{"id":"_"}"#, ts_col, value_col, quality_col, None)?;
+    let (ts, values, runs, n_raw) = py.detach(move || {
+        let frame = if frame.is_sorted() { frame } else { frame.normalized().0 };
+        let lo = frame.ts.partition_point(|&t| t < from_ns);
+        let hi = frame.ts.partition_point(|&t| t < to_ns);
+        let n_raw = hi.saturating_sub(lo);
+        // The interval only sets where gaps break the line, so a sample of the window will do.
+        let interval =
+            expected_interval_ns.or_else(|| modal_interval(&frame.ts[lo..hi.max(lo).min(lo + 10_000)]));
+        let bin = ((to_ns as i128 - from_ns as i128) / buckets as i128).max(1) as i64;
+        let max_step = (2 * bin).max(interval.map_or(0, |i| i.saturating_mul(3)));
+        let (ts, values) = m4_window(&frame, from_ns, to_ns, buckets);
+        let (ts, values) = gap_breaks(&ts, &values, max_step);
+        (ts, values, quality_runs(&frame, from_ns, to_ns, buckets), n_raw)
+    });
+    let out = PyDict::new(py);
+    out.set_item("ts", ts)?;
+    out.set_item("values", values)?;
+    let runs: Vec<(i64, i64, &str)> = runs
+        .into_iter()
+        .map(|r| {
+            let class = match r.quality {
+                Quality::Good => "good",
+                Quality::Uncertain => "uncertain",
+                Quality::Bad => "bad",
+                Quality::Estimated => "estimated",
+            };
+            (r.start, r.end, class)
+        })
+        .collect();
+    out.set_item("quality", runs)?;
+    out.set_item("n_raw", n_raw)?;
+    Ok(out)
+}
+
 /// Deterministic synthetic series with injected faults, as a pyarrow RecordBatch.
 #[pyfunction]
 #[pyo3(signature = (n=1440, interval_ns=60_000_000_000, seed=42, faults=vec![]))]
@@ -324,6 +381,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_checks_multi, m)?)?;
     m.add_function(wrap_pyfunction!(profile, m)?)?;
     m.add_function(wrap_pyfunction!(downsample_m4, m)?)?;
+    m.add_function(wrap_pyfunction!(chart, m)?)?;
     m.add_function(wrap_pyfunction!(synth, m)?)?;
     m.add_function(wrap_pyfunction!(builtin_checks, m)?)?;
     m.add_class::<PyCache>()?;
