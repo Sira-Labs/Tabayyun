@@ -28,6 +28,16 @@ All notable changes to this project are documented here. The format follows
     compression settings in the series metadata.
 - Connector sources gain `POST /api/sources/{id}/search`, `POST /api/sources/{id}/metadata`
   and `GET /api/sources/{id}/fetches/{fetch_id}` (spec 022).
+- OPC UA connector (spec 023, `asyncua` under ADR-0018):
+  - An `opc_ua` source reads raw history from an OPC UA server, signed or signed and
+    encrypted, with a client certificate generated per source
+    (`GET /api/sources/{id}/client-certificate`).
+  - The server certificate is pinned by its SHA-256 thumbprint.
+  - Search browses the address space; history reads follow continuation points.
+  - Status codes map to the four qualities: `Good_LocalOverride` and `Good_Clamped` count as
+    uncertain, `Uncertain_SubstituteValue` as estimated.
+  - The metadata import reads `EngineeringUnits`, `InstrumentRange`, `EURange` and the
+    browse path.
 
 ### Changed
 - A point a connector cannot read no longer fails a fetch. The other points are fetched, and
@@ -39,6 +49,9 @@ All notable changes to this project are documented here. The format follows
   metadata addresses are always refused, and private ranges unless listed in
   `TABAYYUN_CONNECTOR_ALLOWED_NETWORKS`. HTTP clients connect to the checked address and do
   not follow redirects.
+- OPC UA connections refuse an unpinned or changed server certificate. They are unencrypted
+  only with an explicit `allow_insecure`, and the client key never leaves the encrypted
+  credentials (spec 023).
 
 ## [0.2.0] - 2026-10-05
 

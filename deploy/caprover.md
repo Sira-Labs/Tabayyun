@@ -508,6 +508,64 @@ it takes credentials.
 
 Fetches, polls and dataset runs then read the series' recorded values.
 
+## Adding an OPC UA source
+
+An `opc_ua` source (spec 023) reads the history of an OPC UA server, for example a SCADA system
+or historian. Like PI, it needs `TABAYYUN_MASTER_KEY` on the api and the worker: the source's
+client certificate and key are stored encrypted with its credentials.
+
+**On the OPC UA side** (the server's administrator):
+
+- The server must offer an endpoint with `Basic256Sha256` (or `Aes128_Sha256_RsaOaep` /
+  `Aes256_Sha256_RsaPss`) and `SignAndEncrypt` (or `Sign`). Unencrypted endpoints work only
+  with `security_policy: "None"` and `allow_insecure: true`. Use them for a lab, never a plant.
+- The variables to read need history: `AccessLevel` with HistoryRead, and the server
+  historizing them.
+- The server must trust Tabayyun's client certificate (step 3).
+
+**On the Tabayyun side:**
+
+1. **Network.** Add the server's network to `TABAYYUN_CONNECTOR_ALLOWED_NETWORKS` on the api
+   and the worker, and allow TCP from the worker to the server's port (4840 by default).
+2. **Create the source** as a workspace admin:
+
+   ```bash
+   curl -X POST "$URL/api/sources" -H 'Content-Type: application/json' -H 'X-Tabayyun-Request: 1' \
+     -d '{"type": "opc_ua", "name": "SCADA", "config": {
+           "endpoint_url": "opc.tcp://scada.plant.example:4840",
+           "poll_interval_s": 300}}'
+   ```
+
+3. **Credentials and client certificate.**
+   - `PUT /api/sources/{id}/credentials` with `{"kind": "anonymous"}`, or
+     `{"kind": "username", "username": "…", "password": "…"}`.
+   - Tabayyun generates the source's client certificate on the first call, and keeps it on later
+     calls.
+   - `GET /api/sources/{id}/client-certificate` returns the certificate as PEM, with its SHA-1
+     and SHA-256 thumbprints. Put it into the server's trusted certificates.
+   - To use a certificate from your own certificate authority, send `client_certificate_pem`
+     and `client_private_key_pem` with the credentials. The key is RSA of at least 2048 bits,
+     unencrypted.
+4. **Pin the server's certificate.**
+   - Run `POST /api/sources/{id}/check`. The first check fails on purpose, with
+     `server certificate not pinned: SHA-256 <thumbprint>, subject <name>`.
+   - Compare that thumbprint with the one the server's administrator sees.
+   - If they match, set `server_certificate_sha256` with `PATCH /api/sources/{id}` (the
+     whole config, including `endpoint_url`). Check again: the source's health turns `ok`.
+   - When the server's certificate is renewed, checks fail with `does not match the pinned`
+     until the new thumbprint is set.
+5. **Find variables:** `POST /api/sources/{id}/search` with `{"query": "FIC"}`. It browses from
+   the Objects folder, or from `browse_root`, and the matches carry node ids such as
+   `ns=2;s=FIC101.PV`.
+6. **Register and import:** register the chosen node ids with `POST /api/sources/{id}/series`,
+   then run `POST /api/sources/{id}/metadata`. It fills the unit from `EngineeringUnits`, the
+   physical range from `InstrumentRange`, the operational range from `EURange`, and the asset
+   path from the browse path.
+
+OPC UA status codes become qualities: `Good_LocalOverride` and `Good_Clamped` count as
+`uncertain`, `Uncertain_SubstituteValue` as `estimated`, and any Bad value as `bad`, with no
+value.
+
 ## Connector credentials: rotating the master key
 
 Connector credentials (spec 021) are encrypted under `TABAYYUN_MASTER_KEY`. To rotate it:
@@ -552,6 +610,12 @@ again.
 | A PI check fails with `data server not connected` | PI Web API cannot reach the PI Data Archive | A PI-side problem; retried by the next check or poll |
 | A PI fetch ends `partial` with `N point(s) failed: … not found` | a registered point was deleted or renamed in PI, or the identity cannot see it; `result.point_errors` names the series | Register the new path, or fix the PI identity's access; the other points keep fetching |
 | A PI fetch fails with `more than N values at one timestamp` | a point holds more values at one timestamp than `max_count` | Raise the source's `max_count` (up to PI Web API's `MaxReturnedItemsPerCall`) |
+| An OPC UA check fails with `server certificate not pinned: SHA-256 …` | the expected first check, or a new source | Compare the thumbprint with the server's, then set `server_certificate_sha256` (section "Adding an OPC UA source") |
+| An OPC UA check fails with `… does not match the pinned …` | the server's certificate changed (renewal), or another server answers at that address | Confirm with the server's administrator, then pin the new thumbprint |
+| An OPC UA check fails with `OPC UA server refused the connection: BadCertificateUntrusted` (or another `BadCertificate…`, `BadSecurityChecksFailed`) | the server does not trust Tabayyun's client certificate | Trust the certificate from `GET /api/sources/{id}/client-certificate` on the server |
+| An OPC UA check fails with `… BadUserAccessDenied` or `BadIdentityTokenRejected` | wrong username or password, or the server refuses anonymous logins | Fix the credentials |
+| An OPC UA check fails with `server offers no Basic256Sha256 SignAndEncrypt endpoint` | the server's security configuration | Choose a `security_policy` and `security_mode` the server offers |
+| An OPC UA fetch ends `partial` with `…: no history read access` or `…: BadNodeIdUnknown` | the variable is not historized, or its node id changed (for example, after the server's namespaces were reordered) | Enable history on the server, or search again and register the new node id |
 | A source's health reads `failing`; fetches keep failing | three or more fetches in a row failed; `health.last_error` says why | Fix the cause, then `POST /api/sources/{id}/check` |
 | Keycloak shows `Invalid parameter: redirect_uri` | the realm was rendered for another address than `TABAYYUN_PUBLIC_URL` | Clients → `tabayyun-api` → Settings: valid redirect URI `<public>/api/auth/callback`, or re-render and re-import |
 | After Google or GitHub: "Sign-in failed (invalid_token)" | the provider's email is unverified, or the realm lacks the `identity provider` mapper | Verify the email at the provider; re-import the realm |

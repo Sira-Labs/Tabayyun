@@ -416,6 +416,22 @@ starts; the plan is the backlog until then.
         and it skips limits the PATCH rules (spec 004) would refuse.
       - WebIds are checked against PI's URL-safe alphabet before they go into a path. Link URLs
         that PI returns are never followed.
+- [x] **023 OPC UA connector** — `docs/specs/023-opc-ua-connector.md` (S9-3, 10 Oct). Every
+      criterion is met, tested against an in-process asyncua server; a real server is still to
+      be tried. ADR-0018 accepts asyncua's LGPL-3.0 as an unmodified, installed library.
+      - The client certificate is generated in the api when credentials are first set, and kept
+        on later updates. Admins read it from `GET …/client-certificate` to trust it on the
+        server. Only the certificate is shown, never the key.
+      - The server certificate is pinned by SHA-256. The first check fails on purpose and names
+        the thumbprint, so a person confirms it before any data flows.
+      - Before reading history, the connector checks each node's `NodeClass` and the HistoryRead
+        bit of its `AccessLevel`. asyncua's test server answers Good with no data for unknown
+        nodes; real servers answer `BadNodeIdUnknown`. Both become point failures.
+      - History reads batch every node of a call into one HistoryRead and follow continuation
+        points. asyncua's test server cuts at `NumValuesPerNode` without one, so the tests page
+        through its own page size.
+      - The network policy gained `tcp_target`, plus a test-only redirect, so OPC UA (plain TCP)
+        gets the same address checks as HTTP.
 - [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
       `tabayyun-api` and `tabayyun-worker` on staging; then a `synthetic` source with
       `poll_interval_s` gives staging a live, polling source for demos.

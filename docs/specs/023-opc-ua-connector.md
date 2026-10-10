@@ -188,26 +188,26 @@ state is `Running`.
 
 ## Acceptance criteria
 
-- [ ] Config validation: `opc.tcp` URLs only, policy and mode values, `None` only with
+- [x] Config validation: `opc.tcp` URLs only, policy and mode values, `None` only with
   `allow_insecure`, thumbprint format, and bounds.
-- [ ] Credentials: anonymous or username. A client certificate is generated, kept across
+- [x] Credentials: anonymous or username. A client certificate is generated, kept across
   credential updates, or accepted when provided and valid; a mismatched pair is refused.
-- [ ] `GET …/client-certificate` returns the public certificate and thumbprints, never the
+- [x] `GET …/client-certificate` returns the public certificate and thumbprints, never the
   key, and 404 without one.
-- [ ] The first check without a pin fails with the server's thumbprint. With the right pin it
+- [x] The first check without a pin fails with the server's thumbprint. With the right pin it
   succeeds; with a wrong pin it fails, not retryable.
-- [ ] Connections go only to addresses the network policy allows. The test redirect is the
+- [x] Connections go only to addresses the network policy allows. The test redirect is the
   only way to reach loopback.
-- [ ] Search finds variables by name below `browse_root`, skips properties, and keeps to
+- [x] Search finds variables by name below `browse_root`, skips properties, and keeps to
   `browse_limit` and `limit`.
-- [ ] A fetch reads history for several nodes with continuation points. Quality follows the
+- [x] A fetch reads history for several nodes with continuation points. Quality follows the
   table, including `Good_LocalOverride` and `Good_Clamped` as `uncertain`.
-- [ ] Unknown nodes, non-variables and nodes without history access are `PointFailure`s; the
+- [x] Unknown nodes, non-variables and nodes without history access are `PointFailure`s; the
   other nodes' data is kept.
-- [ ] `describe` fills unit, `InstrumentRange`, `EURange` and asset path.
-- [ ] Integration test against an `asyncua` server fixture: set up, pin, search, register,
+- [x] `describe` fills unit, `InstrumentRange`, `EURange` and asset path.
+- [x] Integration test against an `asyncua` server fixture: set up, pin, search, register,
   fetch, a dataset run with findings, and a metadata import.
-- [ ] `deploy/caprover.md` documents an OPC UA source; ADR-0018 records the licence decision.
+- [x] `deploy/caprover.md` documents an OPC UA source; ADR-0018 records the licence decision.
 
 ## Test cases
 
@@ -230,6 +230,19 @@ Integration (`api/tests/db`):
 
 - `test_opc_ua_source.py`: end to end through the API, as in the behaviour above.
 - `test_rls.py`: the new route.
+
+## Implementation notes
+
+- **Checking nodes first.** asyncua's test server answers a history read of an unknown or
+  non-historized node with Good and no values. The fetch therefore reads `NodeClass` and
+  `AccessLevel` of all its nodes first, in one Read. This also gives clear point failures on
+  real servers.
+- **Continuation points.** asyncua's test server ignores `NumValuesPerNode` for continuation:
+  it cuts the answer without a continuation point. The tests page with the server's own page
+  size; real servers follow the standard.
+- **The client identity** is generated in a thread (`asyncio.to_thread`), so a 2048-bit key
+  does not block the event loop of the api.
+- **Spec edits made during implementation:** none.
 
 ## Out of scope
 
