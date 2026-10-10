@@ -27,8 +27,10 @@ import { formatStep } from "../timeline";
 import type { Finding, Series } from "../types";
 import { ErrorLine, inputClass, panelClass } from "./admin/ui";
 
-// uPlot loads with the first chart, not with the app.
-const SeriesChart = lazy(() => import("../components/chart/SeriesChart"));
+// uPlot loads with the series page, not with the app; the page starts the download as it
+// mounts, alongside its API requests, instead of after the chart data arrives.
+const loadChart = () => import("../components/chart/SeriesChart");
+const SeriesChart = lazy(loadChart);
 
 const NS_PER_MS = 1e6;
 // How many ranges "Back" remembers.
@@ -75,6 +77,9 @@ export function SeriesDetail() {
   const navigate = useNavigate({ from: "/series/$seriesId" });
   const urlRange = rangeOfSearch(search);
   const { ref: sizer, width } = useRequestWidth();
+  useEffect(() => {
+    void loadChart();
+  }, []);
 
   const series = useQuery({ queryKey: ["series", seriesId], queryFn: () => api.getSeries(seriesId) });
   const sourceId = series.data?.source_id;
