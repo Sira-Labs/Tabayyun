@@ -69,12 +69,14 @@ Rules:
   ```
   docker service inspect srv-captain--tabayyun-db --format '{{json .Spec.TaskTemplate.ContainerSpec.Mounts}}'
   ```
-  It must name `captain--tabayyun-pgdata`; `null` means the data lives in the container, and a
-  restart (any Save & Update, or a server reboot) starts an empty database. CapRover cannot add
-  persistent data to an existing app: delete and recreate it with the box ticked. The old
-  container's data may survive in an anonymous volume (`docker volume ls`, 64 hex
-  characters): copy it into `captain--tabayyun-pgdata` with the database stopped before
-  recreating the app, and run no `docker volume prune` until then.
+  It must name the label's volume: `tabayyun-pgdata`, or `captain--tabayyun-pgdata` on
+  installations that started before CapRover 1.15 (`docker volume ls` shows which). `null`
+  means the data lives in the container, and a restart (any Save & Update, or a server
+  reboot) starts an empty database. CapRover cannot add persistent data to an existing app:
+  delete and recreate it with the box ticked. The old container's data may survive in an
+  anonymous volume (`docker volume ls`, 64 hex characters): copy it into the named volume
+  with the database stopped before recreating the app, and run no `docker volume prune`
+  until then.
 - `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` only apply when the data directory
   is created. Changing them later changes nothing in the database (the owner keeps its
   password), so leave them as they were; to change a password, `ALTER ROLE` in `psql`.

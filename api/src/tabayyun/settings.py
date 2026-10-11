@@ -143,12 +143,13 @@ class Settings(BaseSettings):
     @field_validator("cache_url", "s3_endpoint", "s3_region", "s3_access_key_id", mode="before")
     @classmethod
     def _store_text(cls, value: object) -> object:
-        """Trim the store settings and refuse quotes: a deployment form keeps both literally, and
-        the S3 client cannot build a request URL from them."""
+        """Trim the store settings and refuse quotes around them: a deployment form keeps both
+        literally, and the S3 client cannot build a request URL from them. A quote inside a
+        local cache path is allowed; the core refuses one inside an S3 endpoint."""
         if not isinstance(value, str):
             return value
         text = value.strip()
-        if '"' in text or "'" in text:
+        if text[:1] in ("'", '"') or text[-1:] in ("'", '"'):
             raise ValueError("remove the quotes around the value")
         return text
 

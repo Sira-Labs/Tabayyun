@@ -88,9 +88,14 @@ def test_store_settings_are_trimmed_and_refuse_quotes(monkeypatch):
         "s3://tabayyun-cache",
         "http://srv-captain--rustfs:9000",
     )
-    monkeypatch.setenv("TABAYYUN_S3_ENDPOINT", '"http://srv-captain--rustfs:9000"')
-    with pytest.raises(ValidationError, match="remove the quotes"):
-        Settings()
+    for quoted in ('"http://srv-captain--rustfs:9000"', "'http://srv-captain--rustfs:9000"):
+        monkeypatch.setenv("TABAYYUN_S3_ENDPOINT", quoted)
+        with pytest.raises(ValidationError, match="remove the quotes"):
+            Settings()
+    # A quote inside a local path is part of the path.
+    monkeypatch.delenv("TABAYYUN_S3_ENDPOINT")
+    monkeypatch.setenv("TABAYYUN_CACHE_URL", "/data/o'brien/cache")
+    assert Settings().cache_url == "/data/o'brien/cache"
 
 
 def _prod(**overrides) -> Settings:
