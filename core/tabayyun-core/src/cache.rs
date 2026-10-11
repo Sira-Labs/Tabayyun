@@ -128,6 +128,48 @@ fn invalid(field: &str, reason: impl Into<String>) -> Error {
     Error::InvalidParams { check: format!("cache.{field}"), reason: reason.into() }
 }
 
+/// An S3 endpoint the HTTP client can use: `http(s)://` and no character a URL cannot hold.
+///
+/// object_store builds each request URL from it and panics on an invalid one, so a stray
+/// space or quotes from a deployment form must be refused here, with the setting named.
+fn check_endpoint(ep: &str) -> Result<()> {
+    let bad = |c: char| c.is_whitespace() || c.is_control() || "\"'<>\\`{}|^".contains(c);
+    if ep.chars().any(bad) {
+        return Err(invalid(
+            "s3_endpoint",
+            "contains spaces, quotes or other characters a URL cannot hold (set it without quotes)",
+        ));
+    }
+    if !(ep.starts_with("http://") || ep.starts_with("https://")) {
+        return Err(invalid("s3_endpoint", "must start with http:// or https://"));
+    }
+    Ok(())
+}
+
+/// An S3 bucket name: 3–63 lowercase letters, digits, dots and hyphens.
+fn check_bucket(bucket: &str) -> Result<()> {
+    let ok = (3..=63).contains(&bucket.len())
+        && bucket.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-');
+    if ok {
+        Ok(())
+    } else {
+        Err(invalid("url", format!("`{bucket}` is not an S3 bucket name (3-63 of a-z, 0-9, `.`, `-`)")))
+    }
+}
+
+/// Run a store operation, turning a panic inside it (a dependency's `expect`) into a cache
+/// error, so a caller gets an error to report instead of a crashed request or job.
+pub fn catch_panic<T>(op: impl FnOnce() -> Result<T>) -> Result<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(op)).unwrap_or_else(|payload| {
+        let message = payload
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unknown panic".to_string());
+        Err(Error::Cache(format!("internal error in the store client: {message}")))
+    })
+}
+
 impl Cache {
     /// Open the store named by `cfg.url`. Local directories are created when missing.
     pub fn open(cfg: &StoreConfig) -> Result<Cache> {
@@ -146,6 +188,7 @@ impl Cache {
             if bucket.is_empty() {
                 return Err(invalid("url", "s3:// url without a bucket"));
             }
+            check_bucket(bucket)?;
             let key_id = cfg.s3_access_key_id.as_deref().filter(|s| !s.is_empty());
             let secret = cfg.s3_secret_access_key.as_deref().filter(|s| !s.is_empty());
             let (Some(key_id), Some(secret)) = (key_id, secret) else {
@@ -171,7 +214,8 @@ impl Cache {
                     max_retries: 3,
                     retry_timeout: Duration::from_secs(30),
                 });
-            if let Some(ep) = cfg.s3_endpoint.as_deref().filter(|s| !s.is_empty()) {
+            if let Some(ep) = cfg.s3_endpoint.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                check_endpoint(ep)?;
                 builder = builder.with_endpoint(ep);
             }
             let store = builder.build().map_err(|e| cache_err("s3 config", e))?;
@@ -731,6 +775,40 @@ mod tests {
         let got = cache.read("raw", "src", &["nothing-here"], 0, DAY).unwrap();
         assert!(got[0].is_empty());
         assert_eq!(got[0].meta.id, "nothing-here");
+    }
+
+    fn s3_cfg(url: &str, endpoint: &str) -> StoreConfig {
+        StoreConfig {
+            url: url.to_string(),
+            s3_endpoint: Some(endpoint.to_string()),
+            s3_access_key_id: Some("key".into()),
+            s3_secret_access_key: Some("secret".into()),
+            s3_allow_http: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn refuses_endpoints_and_buckets_a_request_cannot_use() {
+        let err = |url: &str, ep: &str| match Cache::open(&s3_cfg(url, ep)) {
+            Err(e) => e.to_string(),
+            Ok(_) => "opened".to_string(),
+        };
+        // Quotes or inner spaces would make object_store panic on the first request.
+        assert!(err("s3://tabayyun-cache", "\"http://rustfs:9000\"").contains("s3_endpoint"));
+        assert!(err("s3://tabayyun-cache", "http://rust fs:9000").contains("s3_endpoint"));
+        assert!(err("s3://tabayyun-cache", "rustfs:9000").contains("http://"));
+        assert!(err("s3://Tabayyun_Cache", "http://rustfs:9000").contains("bucket name"));
+        // Surrounding whitespace is trimmed, not refused.
+        assert_eq!(err("s3://tabayyun-cache", " http://rustfs:9000 \n"), "opened");
+    }
+
+    #[test]
+    fn catch_panic_turns_a_panic_into_a_cache_error() {
+        let got: Result<()> = catch_panic(|| panic!("request valid: InvalidUri"));
+        let message = got.unwrap_err().to_string();
+        assert!(message.contains("internal error in the store client: request valid"), "{message}");
+        assert_eq!(catch_panic(|| Ok(7)).unwrap(), 7);
     }
 
     #[test]
