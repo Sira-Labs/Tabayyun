@@ -72,6 +72,14 @@ All notable changes to this project are documented here. The format follows
   only with an explicit `allow_insecure`, and the client key never leaves the encrypted
   credentials (spec 023).
 
+### Fixed
+- A cache store setting with a space or quotes (for example `"http://…:9000"`) made the S3
+  client panic, and series charts answered 500. Store settings are now trimmed and quotes
+  refused at start; the core refuses an invalid endpoint or bucket name when it opens the store;
+  a panic inside the store client becomes a cache error (503 `cache_unavailable`), and the API
+  logs the store's message as `series.cache_read_failed`.
+- The PI Web API connector's docstring no longer triggers a `SyntaxWarning` on start.
+
 ## [0.2.0] - 2026-10-05
 
 Sprint 8: sign-in, tenants and the first security baseline pass.

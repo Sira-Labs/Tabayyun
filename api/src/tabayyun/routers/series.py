@@ -7,6 +7,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
+import structlog
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,7 @@ from tabayyun.services.cache import CacheError, RunCache
 from tabayyun.services.timeconv import datetime_to_ns, parse_time, parse_time_ns, to_core_ns
 
 router = APIRouter(prefix="/api/series", tags=["series"])
+log = structlog.get_logger()
 
 SeriesKind = core.SeriesKind
 FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
@@ -440,6 +442,8 @@ async def _read_or_503(cache: RunCache, series: Series, window: tuple[int, int] 
     try:
         return await series_chart.read_window(cache, series, *window)
     except CacheError as exc:
+        # The store's own message goes to the log only: it names hosts and buckets.
+        log.warning("series.cache_read_failed", series_id=str(series.id), error=str(exc))
         raise HTTPException(status_code=503, detail="cache_unavailable") from exc
 
 

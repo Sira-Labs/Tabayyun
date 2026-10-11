@@ -10,7 +10,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_arrow::{PyRecordBatch, PyRecordBatchReader};
 use std::collections::BTreeMap;
-use tabayyun_core::cache::{Cache, StoreConfig};
+use tabayyun_core::cache::{catch_panic, Cache, StoreConfig};
 use tabayyun_core::downsample::{gap_breaks, m4, m4_window, quality_runs};
 use tabayyun_core::frame::modal_interval;
 use tabayyun_core::synth::{generate, inject, Rng, SynthSpec};
@@ -323,7 +323,7 @@ impl PyCache {
     #[new]
     fn new(py: Python<'_>, store_json: &str) -> PyResult<Self> {
         let cfg: StoreConfig = serde_json::from_str(store_json).map_err(err)?;
-        let inner = py.detach(move || Cache::open(&cfg)).map_err(err)?;
+        let inner = py.detach(move || catch_panic(|| Cache::open(&cfg))).map_err(err)?;
         Ok(PyCache { inner })
     }
 
@@ -343,7 +343,7 @@ impl PyCache {
         ingest_col: Option<&str>,
     ) -> PyResult<String> {
         let frame = frame_from_py(data, meta_json, ts_col, value_col, quality_col, ingest_col)?;
-        let report = py.detach(|| self.inner.write(layer, source_id, &frame)).map_err(err)?;
+        let report = py.detach(|| catch_panic(|| self.inner.write(layer, source_id, &frame))).map_err(err)?;
         serde_json::to_string(&report).map_err(err)
     }
 
@@ -359,7 +359,9 @@ impl PyCache {
         end_ns: i64,
     ) -> PyResult<Vec<(String, Bound<'py, PyAny>)>> {
         let ids: Vec<&str> = series_ids.iter().map(String::as_str).collect();
-        let frames = py.detach(|| self.inner.read(layer, source_id, &ids, start_ns, end_ns)).map_err(err)?;
+        let frames = py
+            .detach(|| catch_panic(|| self.inner.read(layer, source_id, &ids, start_ns, end_ns)))
+            .map_err(err)?;
         frames
             .into_iter()
             .map(|f| {

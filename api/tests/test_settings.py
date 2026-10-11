@@ -77,6 +77,27 @@ def test_cache_url_and_legacy_name(monkeypatch):
     assert Settings(cache_url="/tmp/x").cache_url == "/tmp/x"
 
 
+def test_store_settings_are_trimmed_and_refuse_quotes(monkeypatch):
+    """A deployment form keeps trailing spaces and quotes; spaces go, quotes are refused."""
+    for name in CACHE_ENV:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("TABAYYUN_CACHE_URL", " s3://tabayyun-cache \n")
+    monkeypatch.setenv("TABAYYUN_S3_ENDPOINT", "http://srv-captain--rustfs:9000 ")
+    settings = Settings()
+    assert (settings.cache_url, settings.s3_endpoint) == (
+        "s3://tabayyun-cache",
+        "http://srv-captain--rustfs:9000",
+    )
+    for quoted in ('"http://srv-captain--rustfs:9000"', "'http://srv-captain--rustfs:9000"):
+        monkeypatch.setenv("TABAYYUN_S3_ENDPOINT", quoted)
+        with pytest.raises(ValidationError, match="remove the quotes"):
+            Settings()
+    # A quote inside a local path is part of the path.
+    monkeypatch.delenv("TABAYYUN_S3_ENDPOINT")
+    monkeypatch.setenv("TABAYYUN_CACHE_URL", "/data/o'brien/cache")
+    assert Settings().cache_url == "/data/o'brien/cache"
+
+
 def _prod(**overrides) -> Settings:
     """A prod configuration that passes, with `overrides` applied."""
     base = {

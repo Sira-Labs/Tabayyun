@@ -15,6 +15,7 @@ from sqlalchemy import select
 from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Series
 from tabayyun.main import create_app
 from tabayyun.services import coverage, series_chart
+from tabayyun.services.cache import RunCache
 from tabayyun.services.timeconv import datetime_to_ns
 from tenancy import app_settings, org_session
 
@@ -262,3 +263,18 @@ async def test_chart_of_a_million_points(app, client):
     log.warning("chart of 1M points: %.0f ms, then %.0f ms", *(t * 1000 for t in timings))
     # Measured locally in well under 500 ms; CI runners vary, so the bound here is loose.
     assert min(timings) < 5.0
+
+
+async def test_a_store_that_fails_is_503_and_logged(db_url, fresh_schema, tmp_path, caplog):
+    """A store the API cannot use (here a bucket name S3 refuses) answers 503, never 500."""
+    fresh_schema("auto")
+    app = make_app(db_url, tmp_path)
+    async with await _client(app) as client:
+        sid = await upload(client, quality_csv())
+        app.state.run_cache = RunCache(
+            {"url": "s3://Not_A_Bucket", "s3_access_key_id": "k", "s3_secret_access_key": "s"}
+        )
+        for path in ("chart", "profile"):
+            r = await client.get(f"/api/series/{sid}/{path}")
+            assert (r.status_code, r.json()["detail"]) == (503, "cache_unavailable")
+    await app.state.engine.dispose()

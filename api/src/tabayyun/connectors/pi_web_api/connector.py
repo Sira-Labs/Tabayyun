@@ -1,4 +1,4 @@
-"""The `pi_web_api` connector (spec 022): AVEVA PI through PI Web API.
+r"""The `pi_web_api` connector (spec 022): AVEVA PI through PI Web API.
 
 External ids are PI paths: `\\SERVER\TAG` for a PI point, `\\AF\DB\Element|Attribute` for an AF
 attribute (the `|` tells them apart). Paths resolve to WebIds once per instance; a fetch
