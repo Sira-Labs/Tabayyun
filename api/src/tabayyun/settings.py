@@ -140,6 +140,18 @@ class Settings(BaseSettings):
             return timedelta(**{unit: int(m.group(1))})
         return value
 
+    @field_validator("cache_url", "s3_endpoint", "s3_region", "s3_access_key_id", mode="before")
+    @classmethod
+    def _store_text(cls, value: object) -> object:
+        """Trim the store settings and refuse quotes: a deployment form keeps both literally, and
+        the S3 client cannot build a request URL from them."""
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        if '"' in text or "'" in text:
+            raise ValueError("remove the quotes around the value")
+        return text
+
     @field_validator("master_key", "master_key_previous")
     @classmethod
     def _master_key(cls, value: SecretStr | None) -> SecretStr | None:
