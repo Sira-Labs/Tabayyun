@@ -63,10 +63,18 @@ Rules:
     inside the database URL, while base64 may contain `/` or `+`.
   - Persistent directory: path in app `/var/lib/postgresql/data`, label `tabayyun-pgdata`
   - Do not map a host port; the API reaches it as `srv-captain--tabayyun-db:5432`.
-- Check before the first real data: App Configs must show the persistent directory above.
-  Without it the data lives in the container and a restart (any Save & Update) starts an
-  empty database. CapRover cannot add persistent data to an existing app: delete and
-  recreate it with the box ticked.
+- Check before the first real data: App Configs must show the persistent directory above,
+  and on the server the service must mount it (an environment variable such as `PGDATA` does
+  not keep anything):
+  ```
+  docker service inspect srv-captain--tabayyun-db --format '{{json .Spec.TaskTemplate.ContainerSpec.Mounts}}'
+  ```
+  It must name `captain--tabayyun-pgdata`; `null` means the data lives in the container, and a
+  restart (any Save & Update, or a server reboot) starts an empty database. CapRover cannot add
+  persistent data to an existing app: delete and recreate it with the box ticked. The old
+  container's data may survive in an anonymous volume (`docker volume ls`, 64 hex
+  characters): copy it into `captain--tabayyun-pgdata` with the database stopped before
+  recreating the app, and run no `docker volume prune` until then.
 - `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` only apply when the data directory
   is created. Changing them later changes nothing in the database (the owner keeps its
   password), so leave them as they were; to change a password, `ALTER ROLE` in `psql`.
@@ -157,7 +165,8 @@ share it. The live system runs RustFS (Apache-2.0); MinIO community builds ended
      {"Effect": "Allow", "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
       "Resource": ["arn:aws:s3:::tabayyun-cache"]}]}
    ```
-3. On `tabayyun-worker` (and later the api, when charts read the cache):
+3. On `tabayyun-worker` **and** `tabayyun-api` (the api reads the cache for series charts,
+   spec 025), with identical values and no quotes around them:
 
    | Name | Value |
    |---|---|
@@ -596,6 +605,9 @@ again.
 | Run `stats.cache.error` says `access denied` | a wrong key, or its policy does not cover the bucket | The policy needs object actions on `bucket/*` **and** `s3:ListBucket` on the bucket itself |
 | Run `stats.cache.error` ends in `URL scheme is not allowed` | `http://` endpoint without `TABAYYUN_S3_ALLOW_HTTP=true` | Set it (internal endpoints only) |
 | Run `stats.cache.error` says `not found (does the bucket exist?)` | the bucket in `TABAYYUN_CACHE_URL` does not exist | Create it in the store's console, or fix the name |
+| Series chart and profile answer 503 `cache_unavailable`; API log `series.cache_read_failed` | the api cannot use the cache store; `error` names the cause as in the rows above | Give `tabayyun-api` the same `TABAYYUN_CACHE_URL` and `TABAYYUN_S3_*` values as the worker |
+| API log `series.cache_read_failed` says `401` and `account is not signed up` | the api's access key does not exist in the store | Copy `TABAYYUN_S3_ACCESS_KEY_ID` and `TABAYYUN_S3_SECRET_ACCESS_KEY` from the worker |
+| API refuses to start: `remove the quotes around the value` | a store setting was entered with quotes, e.g. `"http://…:9000"` | Enter it without quotes; CapRover keeps them literally |
 | An AWS-SDK tool (pyarrow, boto3, `aws s3`) uploading to an old MinIO fails with `411 MissingContentLength` | pre-2025 MinIO rejects the streamed checksums that newer AWS SDKs send | Tabayyun is unaffected; for the tool set `AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED` and `AWS_RESPONSE_CHECKSUM_VALIDATION=WHEN_REQUIRED`, or move to RustFS |
 | API log: `refusing to start in prod` naming `TABAYYUN_PUBLIC_URL`, `TABAYYUN_OIDC_ISSUER`, `TABAYYUN_OIDC_CLIENT_SECRET` or `TABAYYUN_ADMIN_EMAIL` | a sign-in setting missing (spec 013), or `TABAYYUN_AUTH_MODE=dev` | Set it (section 4a); `dev` mode is never allowed in prod |
 | Sign-in button answers `503` / log `auth.idp_unavailable` | the api cannot fetch `<issuer>/.well-known/openid-configuration` | Check `TABAYYUN_OIDC_ISSUER` (no trailing path beyond the realm) and that the api container reaches Keycloak |
