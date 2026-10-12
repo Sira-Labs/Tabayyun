@@ -1,21 +1,26 @@
-// Connector sources and their jobs (specs 021–024): types and API calls of the sources pages.
+// Connector sources and their jobs (specs 021–024, 026): types and API calls of the sources pages.
 import { apiGet, apiSend } from "./api";
 import type { Page, SeriesSummary } from "./types";
 
 export type HealthStatus = "ok" | "degraded" | "failing" | "unknown";
 export type JobStatus = "queued" | "running" | "succeeded" | "partial" | "failed";
-export type JobTrigger = "manual" | "poll" | "run" | "check" | "search" | "metadata";
+export type JobTrigger = "manual" | "poll" | "run" | "check" | "search" | "metadata" | "ingest";
 
 /** Connector types the pages know forms for; others are shown read-only. */
-export const CONNECTOR_TYPES = ["pi_web_api", "opc_ua", "synthetic"] as const;
+export const CONNECTOR_TYPES = ["pi_web_api", "opc_ua", "csv_dir", "synthetic"] as const;
 export type ConnectorType = (typeof CONNECTOR_TYPES)[number];
 export const TYPE_LABEL: Record<string, string> = {
   pi_web_api: "PI Web API",
   opc_ua: "OPC UA",
   synthetic: "Synthetic",
   upload: "Uploads",
-  csv_dir: "CSV directory",
+  csv_dir: "File drop (CSV, Parquet)",
 };
+
+/** Whether a source type fetches windows; a file drop (spec 026) ingests what arrives instead. */
+export function readsWindows(type: string): boolean {
+  return type !== "csv_dir";
+}
 
 export type SourceSummary = {
   id: string;
@@ -71,6 +76,27 @@ export type Job = {
   finished_at: string | null;
 };
 
+/** One file a scan read (spec 026). */
+export type ScannedFile = { path: string; status: "ingested" | "failed"; rows: number; series: number; new_series: number; error: string | null };
+
+/** One file of a file-drop source and what reading it last gave (spec 026). */
+export type SourceFile = {
+  id: string;
+  path: string;
+  size: number;
+  mtime: string;
+  status: "ingested" | "failed";
+  rows: number;
+  n_series: number;
+  n_new_series: number;
+  start_at: string | null;
+  end_at: string | null;
+  error: string | null;
+  versions: number;
+  fetch_id: string | null;
+  updated_at: string;
+};
+
 export type SearchItem = { external_id: string; name: string; unit: string | null; description: string | null };
 export type SeriesChange = { changed?: string[]; skipped?: string[]; error?: string };
 export type JobResult = {
@@ -81,6 +107,14 @@ export type JobResult = {
   failed?: number;
   series?: Record<string, SeriesChange>;
   point_errors?: Record<string, string>;
+  // A check of a file drop counts its files (a number); a scan lists those it read (spec 026).
+  files?: number | ScannedFile[];
+  bytes?: number;
+  known?: number;
+  settling?: number;
+  too_large?: string[];
+  outside_root?: string[];
+  more?: boolean;
 };
 export type JobDetail = Job & { params: Record<string, unknown> | null; result: JobResult | null };
 
@@ -93,6 +127,32 @@ export type ClientCertificate = {
 };
 
 export type FieldError = { loc: (string | number)[]; msg: string; type: string };
+
+/** A byte count in B, kB, MB or GB. */
+export function formatBytes(n: number): string {
+  if (n < 1000) return `${n} B`;
+  const units = ["kB", "MB", "GB", "TB"];
+  let value = n;
+  let unit = "B";
+  for (const u of units) {
+    if (value < 1000) break;
+    value /= 1000;
+    unit = u;
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${unit}`;
+}
+
+/** What a scan read and skipped, in words (spec 026). */
+export function scanSummary(result: JobResult): string {
+  const files = Array.isArray(result.files) ? result.files : [];
+  const failed = files.filter((f) => f.status === "failed").length;
+  const parts = [`Read ${files.length} ${files.length === 1 ? "file" : "files"}${failed ? ` (${failed} failed)` : ""}`];
+  if (result.known) parts.push(`${result.known} already read`);
+  if (result.settling) parts.push(`${result.settling} still being copied`);
+  if (result.too_large?.length) parts.push(`${result.too_large.length} too large`);
+  if (result.outside_root?.length) parts.push(`${result.outside_root.length} linked from outside the folder`);
+  return `${parts.join(", ")}.${result.more ? " More files wait for the next scan." : ""}`;
+}
 
 /** Whether a job is still waiting or working. */
 export function isActive(status: JobStatus): boolean {
@@ -115,6 +175,13 @@ export const sourcesApi = {
     apiSend<{ id: string }>("POST", `${base(id)}/fetches`, body),
   search: (id: string, query: string, limit = 100) =>
     apiSend<{ id: string }>("POST", `${base(id)}/search`, { query, limit }),
+  ingest: (id: string) => apiSend<{ id: string }>("POST", `${base(id)}/ingest`),
+  files: (id: string, status: "" | "ingested" | "failed", cursor: string | null, limit = 50) => {
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (status) q.set("status", status);
+    if (cursor) q.set("cursor", cursor);
+    return apiGet<{ items: SourceFile[]; next_cursor: string | null }>(`${base(id)}/files?${q.toString()}`);
+  },
   importMetadata: (id: string, overwrite: boolean) =>
     apiSend<{ id: string }>("POST", `${base(id)}/metadata`, { overwrite }),
   registerSeries: (id: string, points: { external_id: string; name: string; unit?: string | null }[]) =>

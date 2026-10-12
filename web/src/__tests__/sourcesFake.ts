@@ -1,12 +1,13 @@
 // Fixtures of the sources pages' tests (spec 024).
 import type { Me } from "../auth";
-import type { Job, JobDetail, SourceDetail, SourceSummary } from "../sources";
+import type { Job, JobDetail, SourceDetail, SourceFile, SourceSummary } from "../sources";
 import type { Workspace } from "../workspace";
 import { ME, WORKSPACE } from "./helpers";
 
 export const PI_ID = "aaaaaaaa-0000-0000-0000-000000000001";
 export const OPC_ID = "aaaaaaaa-0000-0000-0000-000000000002";
 export const SHA = "ab".repeat(32);
+export const DROP_ID = "aaaaaaaa-0000-0000-0000-000000000003";
 
 export const MEMBER: Me = { ...ME, role: "member" };
 export const asRole = (role: Workspace["role"]): { me: Me; workspaces: Workspace[] } => ({
@@ -71,3 +72,27 @@ export function job(overrides: Partial<JobDetail> = {}): JobDetail {
 }
 
 export const history = (...jobs: Job[]) => ({ items: jobs });
+
+/** A file-drop source (spec 026). */
+export const dropDetail = (overrides: Partial<SourceDetail> = {}): SourceDetail =>
+  detail({ id: DROP_ID, type: "csv_dir", name: "Drop", config: { path: "plant-a" }, credentials: { set: false, updated_at: null }, ...overrides });
+
+export function file(overrides: Partial<SourceFile> = {}): SourceFile {
+  return {
+    id: "f-1",
+    path: "2026/jan.csv",
+    size: 2048,
+    mtime: "2026-10-09T08:00:00Z",
+    status: "ingested",
+    rows: 1440,
+    n_series: 2,
+    n_new_series: 2,
+    start_at: "2026-01-01T00:00:00Z",
+    end_at: "2026-01-02T00:00:00Z",
+    error: null,
+    versions: 1,
+    fetch_id: "scan",
+    updated_at: "2026-10-09T08:00:02Z",
+    ...overrides,
+  };
+}
