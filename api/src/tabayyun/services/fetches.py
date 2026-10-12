@@ -49,7 +49,7 @@ from tabayyun.connectors import (
 )
 from tabayyun.connectors.plan import Call, Pacer, plan_calls, settled_end
 from tabayyun.db.models import Series, Source, SourceFetch
-from tabayyun.jobs.names import CHECK_SOURCE_TASK, FETCH_QUEUE, FETCH_WINDOW_TASK
+from tabayyun.jobs.names import CHECK_SOURCE_TASK, FETCH_QUEUE, FETCH_WINDOW_TASK, INGEST_SOURCE_TASK
 from tabayyun.services import coverage as coverage_service
 from tabayyun.services import source_metadata
 from tabayyun.services.admin import audit
@@ -66,8 +66,10 @@ KEEP_FOR = timedelta(days=30)
 INTERNAL_ERROR = "internal connector error"
 BUDGET_SPENT = "fetch budget spent"
 NO_MASTER_KEY = "credentials unavailable: TABAYYUN_MASTER_KEY is not set"
-# Triggers that read data into the cache, and the source jobs that only talk to the system.
-DATA_TRIGGERS = ("manual", "poll", "run")
+# Triggers that read data into the cache (of them, those that ask for a window), and the source
+# jobs that only talk to the system. `ingest` scans a file-drop source's folder (spec 026).
+WINDOW_TRIGGERS = ("manual", "poll", "run")
+DATA_TRIGGERS = (*WINDOW_TRIGGERS, "ingest")
 TASK_TRIGGERS = ("check", "search", "metadata")
 
 # Procrastinate's defer function with a lock: one fetch per source runs at a time.
@@ -111,7 +113,7 @@ class FetchOutcome:
 
 
 @dataclass
-class _Plan:
+class JobPlan:
     source_id: uuid.UUID
     org_id: uuid.UUID
     connector: Connector
@@ -120,9 +122,10 @@ class _Plan:
     trigger: str = "manual"
     params: dict[str, Any] | None = None
     series_ids: list[uuid.UUID] | None = None
+    workspace_id: uuid.UUID | None = None
 
 
-class _StopError(Exception):
+class StopError(Exception):
     """Ends a fetch early with an error message."""
 
     def __init__(self, message: str, *, retryable: bool) -> None:
@@ -169,8 +172,14 @@ async def create_fetch(
 
 async def enqueue(session: AsyncSession, fetch: SourceFetch) -> None:
     """Defer the fetch's job in the caller's transaction, locked to its source."""
-    # Checks, searches and metadata imports share the unretried source-task job (spec 022).
-    task = CHECK_SOURCE_TASK if fetch.trigger in TASK_TRIGGERS else FETCH_WINDOW_TASK
+    # Checks, searches and metadata imports share the unretried source-task job (spec 022); scans
+    # of a file-drop source have their own (spec 026).
+    if fetch.trigger in TASK_TRIGGERS:
+        task = CHECK_SOURCE_TASK
+    elif fetch.trigger == "ingest":
+        task = INGEST_SOURCE_TASK
+    else:
+        task = FETCH_WINDOW_TASK
     args = {"fetch_id": str(fetch.id), "org_id": str(fetch.org_id)}
     await session.execute(
         DEFER_LOCKED_SQL,
@@ -196,9 +205,9 @@ async def execute_fetch(
     started = deps.monotonic()
     outcome = FetchOutcome(status="running")
     try:
-        plan = await _prepare(factory, deps, fetch_id)
-    except _StopError as stop:
-        return await _finish(factory, deps, fetch_id, FetchOutcome("failed", error=str(stop)), fetch_log)
+        plan = await prepare(factory, deps, fetch_id)
+    except StopError as stop:
+        return await finish(factory, deps, fetch_id, FetchOutcome("failed", error=str(stop)), fetch_log)
     if plan is None:
         fetch_log.warning("fetch.skipped")
         return None
@@ -208,12 +217,12 @@ async def execute_fetch(
     try:
         for call in plan.calls:
             if deadline is not None and deps.monotonic() >= deadline:
-                raise _StopError(BUDGET_SPENT, retryable=False)
+                raise StopError(BUDGET_SPENT, retryable=False)
             await pacer.wait()
             rows = await _run_call(factory, deps, plan, fetch_id, call, outcome)
             outcome.calls += 1
             outcome.rows += rows
-    except _StopError as stop:
+    except StopError as stop:
         # Retryable: the retry continues where this one stopped. A spent budget kept what it
         # fetched. Anything else will not get better by itself.
         outcome.status = "partial" if stop.retryable or str(stop) == BUDGET_SPENT else "failed"
@@ -227,7 +236,7 @@ async def execute_fetch(
             first = next(iter(outcome.point_errors.values()))
             outcome.status = "partial"
             outcome.error = f"{len(outcome.point_errors)} point(s) failed: {first}"
-    result = await _finish(factory, deps, fetch_id, outcome, fetch_log)
+    result = await finish(factory, deps, fetch_id, outcome, fetch_log)
     fetch_log.info(
         "fetch.finished",
         status=outcome.status,
@@ -247,9 +256,9 @@ async def execute_task(
     """
     fetch_log = log.bind(fetch_id=str(fetch_id))
     try:
-        plan = await _prepare(factory, deps, fetch_id, with_calls=False)
-    except _StopError as stop:
-        return await _finish(factory, deps, fetch_id, FetchOutcome("failed", error=str(stop)), fetch_log)
+        plan = await prepare(factory, deps, fetch_id, with_calls=False)
+    except StopError as stop:
+        return await finish(factory, deps, fetch_id, FetchOutcome("failed", error=str(stop)), fetch_log)
     if plan is None:
         return None
     try:
@@ -264,10 +273,10 @@ async def execute_task(
     except Exception as exc:  # noqa: BLE001  (a connector bug must land on the fetch, not the worker)
         fetch_log.error("fetch.connector_crashed", error_type=type(exc).__name__)
         outcome = FetchOutcome("failed", error=INTERNAL_ERROR)
-    return await _finish(factory, deps, fetch_id, outcome, fetch_log)
+    return await finish(factory, deps, fetch_id, outcome, fetch_log)
 
 
-async def _search(plan: _Plan) -> FetchOutcome:
+async def _search(plan: JobPlan) -> FetchOutcome:
     """The connector's matches for the row's query, at most its limit."""
     params = plan.params or {}
     limit = int(params.get("limit", 100))
@@ -280,7 +289,7 @@ async def _search(plan: _Plan) -> FetchOutcome:
 
 
 async def _describe(
-    factory: async_sessionmaker[AsyncSession], deps: FetchDeps, plan: _Plan, fetch_id: uuid.UUID
+    factory: async_sessionmaker[AsyncSession], deps: FetchDeps, plan: JobPlan, fetch_id: uuid.UUID
 ) -> FetchOutcome:
     """Describe the row's series in chunks, then apply the metadata in one transaction."""
     async with factory() as session:
@@ -351,13 +360,13 @@ async def _describe(
     return FetchOutcome("succeeded", result=result)
 
 
-async def _prepare(
+async def prepare(
     factory: async_sessionmaker[AsyncSession],
     deps: FetchDeps,
     fetch_id: uuid.UUID,
     *,
     with_calls: bool = True,
-) -> _Plan | None:
+) -> JobPlan | None:
     """Claim the fetch and plan its calls; None when it is not queued (or partial)."""
     async with factory() as session, session.begin():
         fetch = await session.get(SourceFetch, fetch_id, with_for_update=True)
@@ -365,28 +374,28 @@ async def _prepare(
             return None
         source = await session.get(Source, fetch.source_id)
         if source is None:
-            raise _StopError("source deleted", retryable=False)
+            raise StopError("source deleted", retryable=False)
         fetch.status = "running"
         fetch.started_at = fetch.started_at or deps.clock()
         if not source.enabled and fetch.trigger in DATA_TRIGGERS:
-            raise _StopError("source disabled", retryable=False)
+            raise StopError("source disabled", retryable=False)
         try:
             credentials = await secrets.load(session, deps.keyring, org_id=source.org_id, source_id=source.id)
         except secrets.CredentialsUnavailableError:
-            raise _StopError(NO_MASTER_KEY, retryable=False) from None
+            raise StopError(NO_MASTER_KEY, retryable=False) from None
         except secrets.CredentialsError as exc:
-            raise _StopError(str(exc), retryable=False) from None
+            raise StopError(str(exc), retryable=False) from None
         try:
             connector = connectors.build(
                 source.type, source.config, credentials, deps.net, files_root=deps.files_root
             )
         except ConnectorError as exc:
-            raise _StopError(str(exc), retryable=False) from None
+            raise StopError(str(exc), retryable=False) from None
         calls: list[Call] = []
         if with_calls:
             gaps = await _gaps(session, source, fetch)
             calls = plan_calls(gaps, connector.limits().within(connectors.Limits.of(connector.config)))
-        return _Plan(
+        return JobPlan(
             source.id,
             source.org_id,
             connector,
@@ -395,6 +404,7 @@ async def _prepare(
             trigger=fetch.trigger,
             params=fetch.params,
             series_ids=fetch.series_ids,
+            workspace_id=source.workspace_id,
         )
 
 
@@ -421,7 +431,7 @@ async def _gaps(
 async def _run_call(
     factory: async_sessionmaker[AsyncSession],
     deps: FetchDeps,
-    plan: _Plan,
+    plan: JobPlan,
     fetch_id: uuid.UUID,
     call: Call,
     outcome: FetchOutcome,
@@ -433,21 +443,21 @@ async def _run_call(
     try:
         async for batch in plan.connector.fetch(call.points, call.start_ns, call.end_ns):
             if batch.series_id not in wanted:
-                raise _StopError("connector returned rows for a point it was not asked for", retryable=False)
+                raise StopError("connector returned rows for a point it was not asked for", retryable=False)
             if isinstance(batch, PointFailure):
                 failed.add(batch.series_id)
                 outcome.point_errors[str(batch.series_id)] = batch.message[:500]
                 continue
             tables[batch.series_id].append(_checked(batch.table))
     except ConnectorError as exc:
-        raise _StopError(str(exc), retryable=exc.retryable) from None
-    except _StopError:
+        raise StopError(str(exc), retryable=exc.retryable) from None
+    except StopError:
         raise
     except Exception as exc:  # noqa: BLE001  (library messages may carry URLs or credentials)
         log.error("fetch.connector_crashed", fetch_id=str(fetch_id), error_type=type(exc).__name__)
-        raise _StopError(INTERNAL_ERROR, retryable=False) from None
+        raise StopError(INTERNAL_ERROR, retryable=False) from None
     if deps.cache is None and tables:
-        raise _StopError("no cache configured", retryable=False)
+        raise StopError("no cache configured", retryable=False)
     rows = 0
     for series_id, parts in tables.items():
         if series_id in failed:
@@ -468,7 +478,7 @@ async def _run_call(
                 ingest_col=None,
             )
         except CacheError as exc:
-            raise _StopError(f"cache write failed: {exc}", retryable=True) from None
+            raise StopError(f"cache write failed: {exc}", retryable=True) from None
         rows += written.rows
         outcome.series_rows[str(series_id)] = outcome.series_rows.get(str(series_id), 0) + written.rows
     now = deps.clock()
@@ -500,14 +510,14 @@ def _checked(table: pa.Table) -> pa.Table:
     try:
         table = table.select(["ts", "value", "quality"]).cast(BATCH_SCHEMA)
     except (KeyError, pa.ArrowInvalid, pa.ArrowNotImplementedError, ValueError):
-        raise _StopError("connector returned a malformed batch", retryable=False) from None
+        raise StopError("connector returned a malformed batch", retryable=False) from None
     unknown = set(table.column("quality").unique().to_pylist()) - set(QUALITIES)
     if unknown:
-        raise _StopError("connector returned an unknown quality", retryable=False)
+        raise StopError("connector returned an unknown quality", retryable=False)
     return table
 
 
-async def _finish(
+async def finish(
     factory: async_sessionmaker[AsyncSession],
     deps: FetchDeps,
     fetch_id: uuid.UUID,
@@ -586,15 +596,20 @@ async def claim_due_sources(
 async def queue_poll(
     factory: async_sessionmaker[AsyncSession], source_id: uuid.UUID, now: datetime, *, inline: bool = False
 ) -> uuid.UUID | None:
-    """A `poll` fetch over `[now - backfill_s, now)` for one claimed source (in its org's factory)."""
+    """A `poll` fetch over `[now - backfill_s, now)` for one claimed source (in its org's factory),
+    or an `ingest` scan for a source that reads no windows (spec 026)."""
     async with factory() as session, session.begin():
         source = await session.get(Source, source_id)
         if source is None:
             return None
-        backfill = int((source.config or {}).get("backfill_s", 86_400))
-        fetch = await create_fetch(
-            session, source, trigger="poll", start=now - timedelta(seconds=backfill), end=now
-        )
+        cls = connectors.get(source.type)
+        if cls is not None and not cls.reads_windows:
+            fetch = await create_fetch(session, source, trigger="ingest", start=now, end=now)
+        else:
+            backfill = int((source.config or {}).get("backfill_s", 86_400))
+            fetch = await create_fetch(
+                session, source, trigger="poll", start=now - timedelta(seconds=backfill), end=now
+            )
         if not inline:
             await enqueue(session, fetch)
         return fetch.id

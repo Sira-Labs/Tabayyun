@@ -22,9 +22,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tabayyun import connectors, secrets
 from tabayyun.authz.scope import Scope
-from tabayyun.db.models import Series, Source, SourceFetch
+from tabayyun.db.models import Series, Source, SourceFetch, SourceFile
 from tabayyun.services import fetches
 from tabayyun.services.admin import audit
+from tabayyun.services.pagination import decode_keyset, encode_keyset
 
 MAX_WINDOW = timedelta(days=366)
 MAX_SERIES_PER_CALL = 500
@@ -357,23 +358,27 @@ async def request_fetch(
     force: bool = False,
     params: dict[str, Any] | None = None,
 ) -> SourceFetch:
-    """A queued job of a source (a fetch, check, search or metadata import); the caller defers
-    its job or runs it inline.
+    """A queued job of a source (a fetch, check, search, metadata import or, spec 026, a scan of a
+    file-drop source); the caller defers its job or runs it inline.
 
     Raises:
-        SourceError: 404, 409 `not_a_connector`, `not_supported` or `source_disabled` (fetches
-            only), 422 `invalid_window` or `unknown_series`.
+        SourceError: 404, 409 `not_a_connector`, `not_supported`, `not_fetchable` (a window of a
+            source that reads none) or `source_disabled` (fetches and scans), 422
+            `invalid_window` or `unknown_series`.
     """
     source = await get_source(session, scope, source_id)
     cls = require_connector(source)
     method = OPTIONAL_METHODS.get(trigger)
     if method is not None and not cls.supports(method):
         raise SourceError(409, "not_supported")
-    if trigger in fetches.DATA_TRIGGERS:
-        if not source.enabled:
-            raise SourceError(409, "source_disabled")
-        if end <= start or end - start > MAX_WINDOW:
-            raise SourceError(422, "invalid_window")
+    if trigger == "ingest" and cls.reads_windows:
+        raise SourceError(409, "not_supported")
+    if trigger in fetches.WINDOW_TRIGGERS and not cls.reads_windows:
+        raise SourceError(409, "not_fetchable")
+    if trigger in fetches.DATA_TRIGGERS and not source.enabled:
+        raise SourceError(409, "source_disabled")
+    if trigger in fetches.WINDOW_TRIGGERS and (end <= start or end - start > MAX_WINDOW):
+        raise SourceError(422, "invalid_window")
     if series_ids is not None:
         known = set(
             (
@@ -396,9 +401,9 @@ async def request_fetch(
         params=params,
     )
     details: dict[str, Any] = {"fetch_id": str(fetch.id), "trigger": trigger}
-    if trigger in fetches.DATA_TRIGGERS:
+    if trigger in fetches.WINDOW_TRIGGERS:
         details.update(start=start.isoformat(), end=end.isoformat(), force=force)
-    if trigger != "check":
+    if trigger not in ("check", "ingest"):
         details["series"] = None if series_ids is None else len(series_ids)
     if params:
         details.update(params)
@@ -447,3 +452,37 @@ async def list_fetches(
         .limit(limit)
     )
     return list((await session.scalars(stmt)).all())
+
+
+async def list_files(
+    session: AsyncSession,
+    scope: Scope,
+    source_id: uuid.UUID,
+    *,
+    status: str | None,
+    limit: int,
+    cursor: str | None,
+) -> tuple[list[SourceFile], str | None]:
+    """A page of the source's files, last read first (spec 026), and the next page's cursor.
+
+    Raises:
+        SourceError: 404, 422 `invalid_cursor`.
+    """
+    source = await get_source(session, scope, source_id)
+    stmt = select(SourceFile).where(SourceFile.source_id == source.id)
+    if status is not None:
+        stmt = stmt.where(SourceFile.status == status)
+    if cursor is not None:
+        try:
+            at, last_id = decode_keyset(cursor)
+        except ValueError:
+            raise SourceError(422, "invalid_cursor") from None
+        stmt = stmt.where(
+            (SourceFile.updated_at < at) | ((SourceFile.updated_at == at) & (SourceFile.id < last_id))
+        )
+    stmt = stmt.order_by(SourceFile.updated_at.desc(), SourceFile.id.desc()).limit(limit + 1)
+    rows = list((await session.scalars(stmt)).all())
+    if len(rows) <= limit:
+        return rows, None
+    page = rows[:limit]
+    return page, encode_keyset(page[-1].updated_at, page[-1].id)
