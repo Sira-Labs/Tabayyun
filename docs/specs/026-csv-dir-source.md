@@ -151,8 +151,9 @@ Index `(source_id, updated_at DESC, id DESC)`.
    6. **Store.** Each series' rows go to the raw layer of the cache, and coverage is recorded
       for the span of its rows. A later write of the same instant wins, so a changed file's
       values replace the old ones.
-   7. **Record.** The file's row is inserted or updated with its outcome in one transaction
-      with its series and coverage. A re-read changed file adds one to `versions`.
+   7. **Record.** Series are created before the cache writes. After them, the file's row is
+      inserted or updated with its outcome in one transaction with the coverage. A re-read
+      changed file adds one to `versions`.
    8. **Isolation.** A file that fails gets its error recorded and the scan goes on. An error
       outside any file (the root unset, the folder gone, the cache unwritable) ends the scan.
 5. **Outcome.** The scan's `rows` are the rows written; its `result` is
@@ -168,22 +169,22 @@ Index `(source_id, updated_at DESC, id DESC)`.
 
 ## Acceptance criteria
 
-- [ ] `csv_dir` sources save with a validated config; absolute paths and `..` are refused.
-- [ ] Check confirms the folder inside the root and counts its files; without the root setting
+- [x] `csv_dir` sources save with a validated config; absolute paths and `..` are refused.
+- [x] Check confirms the folder inside the root and counts its files; without the root setting
   it fails with the "not enabled" message.
-- [ ] A scan ingests long and wide CSV and Parquet files: series appear, the cache holds their
+- [x] A scan ingests long and wide CSV and Parquet files: series appear, the cache holds their
   rows, coverage spans them, and `source_files` records each file.
-- [ ] A rescan skips known files; a changed file is read again and its values win; a failed
+- [x] A rescan skips known files; a changed file is read again and its values win; a failed
   file does not stop the others; settling, too large, hidden and outside-root files are
   skipped.
-- [ ] Polling queues an ingest for a due `csv_dir` source; manual fetches are 409
+- [x] Polling queues an ingest for a due `csv_dir` source; manual fetches are 409
   `not_fetchable`; dataset runs do not fetch for it.
-- [ ] `POST /api/sources/{id}/ingest` and `GET /api/sources/{id}/files` work with their roles
+- [x] `POST /api/sources/{id}/ingest` and `GET /api/sources/{id}/files` work with their roles
   and keep to the caller's workspace (RLS route list).
-- [ ] The web form creates a `csv_dir` source; its page shows Check, Scan now and Files, and no
+- [x] The web form creates a `csv_dir` source; its page shows Check, Scan now and Files, and no
   Fetch, Search or Metadata.
-- [ ] Compose and CapRover docs mount a read-only drop folder and set the root.
-- [ ] `make lint` and `make test` (or the relevant subsets) pass.
+- [x] Compose and CapRover docs mount a read-only drop folder and set the root.
+- [x] `make lint` and `make test` (or the relevant subsets) pass.
 
 ## Test cases
 

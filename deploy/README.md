@@ -73,6 +73,21 @@ docker save ghcr.io/sira-labs/tabayyun-api:latest ghcr.io/sira-labs/tabayyun-web
 zstd -d < tabayyun-images.tar.zst | docker load
 ```
 
+### Data from a site without a network path
+
+A file-drop source (spec 026) reads CSV and Parquet exports that someone copies onto the
+Tabayyun host, for example from a USB drive or through a one-way data diode:
+
+1. Choose a host folder and set `TABAYYUN_DROP_DIR` in `.env` (default `deploy/drop`). The
+   worker mounts it read-only at `/data/files`; Tabayyun never moves or deletes the files.
+2. Create a source of type **File drop** whose folder is a subfolder of it, for example
+   `plant-a`, with the layout of the exports: **long** (`ts`, `series`, `value` columns) or
+   **wide** (`ts` and one column per series). Set a poll interval to scan it regularly.
+3. Copy files into `plant-a/`. A file is read once it has not changed for the settle time
+   (60 s by default); copy to a temporary name such as `jan.csv.part` and rename it when done.
+   A changed file is read again and its values replace the earlier ones.
+4. The source page lists every file read, with its rows and series, or why it failed.
+
 ## Local development
 
 `deploy/compose.dev.yaml` starts only Postgres+TimescaleDB, Keycloak and RustFS (S3 on
