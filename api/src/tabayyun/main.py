@@ -90,6 +90,7 @@ def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = No
     app.state.run_cache = RunCache.from_settings(settings)
     app.state.net_policy = NetPolicy.from_settings(settings)
     app.state.keyring = Keyring.from_settings(settings)
+    app.state.files_root = settings.files_root
     app.state.schema_revision = None
     app.state.oidc = oidc
 

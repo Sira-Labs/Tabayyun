@@ -39,6 +39,8 @@ EXPECTED_TABLES = {
     # Spec 021.
     "source_credentials",
     "source_fetches",
+    # Spec 026.
+    "source_files",
 }
 HYPERTABLES = {"findings", "metrics", "scores"}
 
@@ -257,6 +259,57 @@ def test_0009_downgrades_keeping_source_jobs(db_url, fresh_schema):
                     "window_end) VALUES (gen_random_uuid(), :org, :ws, :src, 'metadata', now(), now())"
                 ),
                 {"org": str(DEFAULT_ORG_ID), "ws": str(DEFAULT_WORKSPACE_ID), "src": source},
+            )
+    finally:
+        engine.dispose()
+    migrate.upgrade(db_url, "head", timescale="auto")
+    assert _current_revision(db_url) == migrate.head_revision()
+    migrate.check(db_url)
+
+
+def test_0010_downgrades_keeping_ingest_jobs(db_url, fresh_schema):
+    """0010 adds `source_files` and the `ingest` trigger; its downgrade drops the table and keeps
+    ingest rows (spec 026)."""
+    fresh_schema("auto")
+    engine = create_engine(db_url)
+    source = "00000000-0000-0000-0000-0000000000e2"
+    params = {"org": str(DEFAULT_ORG_ID), "ws": str(DEFAULT_WORKSPACE_ID), "src": source}
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO sources (id, org_id, workspace_id, type, name) "
+                    "VALUES (:src, :org, :ws, 'csv_dir', 'drop')"
+                ),
+                params,
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO source_fetches (id, org_id, workspace_id, source_id, trigger, window_start, "
+                    "window_end) VALUES (gen_random_uuid(), :org, :ws, :src, 'ingest', now(), now())"
+                ),
+                params,
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO source_files (id, org_id, workspace_id, source_id, path, size, mtime, "
+                    "sha256, status) VALUES (gen_random_uuid(), :org, :ws, :src, 'a.csv', 1, now(), 'x', "
+                    "'ingested')"
+                ),
+                params,
+            )
+        migrate.downgrade(db_url, "0009")
+        assert _current_revision(db_url) == "0009"
+        assert "source_files" not in inspect(engine).get_table_names()
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT trigger FROM source_fetches")).scalars().all() == ["ingest"]
+        with pytest.raises(Exception, match="ck_source_fetches_trigger"), engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO source_fetches (id, org_id, workspace_id, source_id, trigger, window_start, "
+                    "window_end) VALUES (gen_random_uuid(), :org, :ws, :src, 'ingest', now(), now())"
+                ),
+                params,
             )
     finally:
         engine.dispose()

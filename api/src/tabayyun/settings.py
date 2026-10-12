@@ -8,6 +8,7 @@ import ipaddress
 import re
 from datetime import timedelta
 from functools import lru_cache
+from pathlib import Path, PurePosixPath
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -130,6 +131,10 @@ class Settings(BaseSettings):
     chart_max_rows: int = Field(
         default=10_000_000, ge=1, description="Raw rows one chart or profile request may read (spec 025)."
     )
+    file_sources_root: str | None = Field(
+        default=None,
+        description="Folder `csv_dir` sources read under (spec 026); unset turns them off.",
+    )
 
     @field_validator("session_idle", "session_absolute", "passkey_fresh", "invitation_ttl", mode="before")
     @classmethod
@@ -181,6 +186,24 @@ class Settings(BaseSettings):
     def allowed_networks(self) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
         """`connector_allowed_networks` parsed."""
         return tuple(ipaddress.ip_network(n) for n in self.connector_allowed_networks.split(",") if n)
+
+    @field_validator("file_sources_root", mode="before")
+    @classmethod
+    def _files_root(cls, value: object) -> object:
+        """Trimmed; empty is unset; otherwise an absolute path."""
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        if not text:
+            return None
+        if not PurePosixPath(text).is_absolute():
+            raise ValueError("must be an absolute path")
+        return text
+
+    @property
+    def files_root(self) -> Path | None:
+        """`file_sources_root` resolved (it need not exist yet), or None when unset."""
+        return None if self.file_sources_root is None else Path(self.file_sources_root).resolve()
 
     @field_validator("sign_in_methods")
     @classmethod

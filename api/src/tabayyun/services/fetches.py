@@ -28,6 +28,7 @@ from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
@@ -89,6 +90,7 @@ class FetchDeps:
     cache: RunCache | None
     net: NetPolicy
     keyring: secrets.Keyring | None
+    files_root: Path | None = None
     clock: Callable[[], datetime] = utc_now
     pacer: Callable[[float], Pacer] = Pacer
     monotonic: Callable[[], float] = time.monotonic
@@ -256,8 +258,7 @@ async def execute_task(
         elif plan.trigger == "metadata":
             outcome = await _describe(factory, deps, plan, fetch_id)
         else:
-            await plan.connector.check()
-            outcome = FetchOutcome("succeeded")
+            outcome = FetchOutcome("succeeded", result=await plan.connector.check())
     except ConnectorError as exc:
         outcome = FetchOutcome("failed", error=str(exc), retryable=exc.retryable)
     except Exception as exc:  # noqa: BLE001  (a connector bug must land on the fetch, not the worker)
@@ -376,7 +377,9 @@ async def _prepare(
         except secrets.CredentialsError as exc:
             raise _StopError(str(exc), retryable=False) from None
         try:
-            connector = connectors.build(source.type, source.config, credentials, deps.net)
+            connector = connectors.build(
+                source.type, source.config, credentials, deps.net, files_root=deps.files_root
+            )
         except ConnectorError as exc:
             raise _StopError(str(exc), retryable=False) from None
         calls: list[Call] = []

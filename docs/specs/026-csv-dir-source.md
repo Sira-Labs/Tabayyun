@@ -138,10 +138,11 @@ Index `(source_id, updated_at DESC, id DESC)`.
    4. **Read.** The file becomes rows of (series id, time, value, quality):
       - Timestamps follow the upload rules (RFC 3339 text or epoch integers, `ts_unit`). A row
         without a timestamp fails the file.
-      - Values are numbers; empty cells and `NA`, `NaN`, `null` are NaN.
+      - Values are numbers; in the long layout, empty cells and `NA`, `NaN`, `null` are NaN.
       - Long layout: series ids are text, trimmed; an empty id or one longer than 256
         characters fails the file.
-      - Wide layout: each column other than the timestamp is a series named by its header. A
+      - Wide layout: each column other than the timestamp is a series named by its header. An
+        empty cell is no sample (wide exports leave cells empty where a series has none). A
         column that is not numeric fails the file.
       - A missing column fails the file and names it.
    5. **Create series.** Ids the source does not have yet become series of it (name = id, kind

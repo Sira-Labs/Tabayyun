@@ -6,6 +6,7 @@ a connector. `build(...)` validates a stored config and credentials and makes th
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -23,6 +24,7 @@ from tabayyun.connectors.base import (
     PointRef,
     RemotePoint,
 )
+from tabayyun.connectors.csv_dir import CsvDirConnector
 from tabayyun.connectors.errors import AuthError, ConnectorError, NotSupportedError, TargetRefusedError
 from tabayyun.connectors.net import NetPolicy
 from tabayyun.connectors.opc_ua import OpcUaConnector
@@ -31,6 +33,7 @@ from tabayyun.connectors.synthetic import SyntheticConnector
 
 __all__ = [
     "BATCH_SCHEMA",
+    "CsvDirConnector",
     "QUALITIES",
     "AuthError",
     "Connector",
@@ -72,9 +75,14 @@ def is_connector(source_type: str) -> bool:
 
 
 def build(
-    source_type: str, config: dict[str, Any], credentials: dict[str, Any] | None, net: NetPolicy
+    source_type: str,
+    config: dict[str, Any],
+    credentials: dict[str, Any] | None,
+    net: NetPolicy,
+    *,
+    files_root: Path | None = None,
 ) -> Connector:
-    """An instance for a stored source.
+    """An instance for a stored source; `files_root` is where file sources may read (spec 026).
 
     Raises:
         ConnectorError: the type has no connector, or the stored config or credentials no
@@ -91,9 +99,10 @@ def build(
     except ValidationError as exc:
         fields = sorted({".".join(str(p) for p in e["loc"]) for e in exc.errors()})
         raise ConnectorError(f"invalid stored settings: {', '.join(fields)}", retryable=False) from None
-    return cls(cfg, creds, net)
+    return cls(cfg, creds, net, files_root=files_root)
 
 
 register(SyntheticConnector)
 register(PiWebApiConnector)
 register(OpcUaConnector)
+register(CsvDirConnector)

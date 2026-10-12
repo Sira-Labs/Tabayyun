@@ -58,7 +58,8 @@ WORKSPACE_ROLES = ("admin", "editor", "viewer")
 SIGN_IN_METHODS = ("google", "github", "passkey")
 INVITABLE_ORG_ROLES = ("admin", "member")
 EMAIL_STATUSES = ("not_configured", "queued", "sent", "failed")
-FETCH_TRIGGERS = ("manual", "poll", "run", "check", "search", "metadata")
+FETCH_TRIGGERS = ("manual", "poll", "run", "check", "search", "metadata", "ingest")
+FILE_STATUSES = ("ingested", "failed")
 FETCH_STATUSES = ("queued", "running", "succeeded", "partial", "failed")
 
 
@@ -626,6 +627,44 @@ class SourceFetch(TenantMixin, Base):
     created_at: Mapped[datetime] = _created_at()
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SourceFile(TenantMixin, Base):
+    """One file of a `csv_dir` source (spec 026): what reading its current content gave.
+
+    One row per path; a changed file updates it. Rows outlive the scans that read them.
+    """
+
+    __tablename__ = "source_files"
+    __table_args__ = (
+        UniqueConstraint("source_id", "path"),
+        CheckConstraint(_in("status", FILE_STATUSES), name="status"),
+        Index("ix_source_files_source_updated", "source_id", text("updated_at DESC"), text("id DESC")),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sources.id", ondelete="CASCADE"), nullable=False
+    )
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    mtime: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    rows: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    n_series: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    n_new_series: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None] = mapped_column(Text)
+    versions: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    fetch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("source_fetches.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class RateLimit(Base):

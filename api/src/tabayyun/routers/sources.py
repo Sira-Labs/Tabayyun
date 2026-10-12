@@ -244,7 +244,9 @@ async def _start(
         await fetches.enqueue(session, fetch)
         return
     await session.commit()
-    deps = fetches.FetchDeps(cache=state.run_cache, net=state.net_policy, keyring=state.keyring)
+    deps = fetches.FetchDeps(
+        cache=state.run_cache, net=state.net_policy, keyring=state.keyring, files_root=state.files_root
+    )
     run = fetches.execute_task if fetch.trigger in fetches.TASK_TRIGGERS else fetches.execute_fetch
     background.add_task(run, for_org(state.session_factory, scope.org_id), deps, fetch.id)
 

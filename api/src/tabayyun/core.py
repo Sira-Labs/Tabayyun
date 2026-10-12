@@ -259,6 +259,16 @@ def read_csv(
     return ParsedCsv(table=table, ts_unit=resolved)
 
 
+def normalise_ts(table: pa.Table, name: str, unit: TsUnit) -> tuple[pa.Table, str]:
+    """The upload timestamp rules for any table (spec 026 reads files with them); see `read_csv`.
+
+    Raises:
+        ValueError: the column is neither timestamps, text nor integers, text does not parse,
+            or epoch integers give implausible dates (`TimestampUnitError`).
+    """
+    return _normalise_ts(table, name, unit)
+
+
 def _normalise_ts(table: pa.Table, name: str, unit: TsUnit) -> tuple[pa.Table, str]:
     """Timestamp text to UTC ns timestamps, epoch integers to int64 ns; returns the unit read."""
     ts = table.column(name)
