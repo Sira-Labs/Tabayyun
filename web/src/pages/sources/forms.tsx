@@ -7,10 +7,25 @@ import type { ConnectorType, FieldError } from "../../sources";
 import { inputClass, selectClass } from "../admin/ui";
 
 type FieldKind = "text" | "textarea" | "number" | "select" | "checkbox";
-type FieldSpec = { key: string; label: string; kind: FieldKind; required?: boolean; options?: string[]; hint?: string };
+type FieldSpec = {
+  key: string;
+  label: string;
+  kind: FieldKind;
+  required?: boolean;
+  options?: string[];
+  hint?: string;
+  /** Shown only while another field has this value (spec 026: the long layout's columns). */
+  when?: { key: string; value: string };
+};
 export type FieldValues = Record<string, string | boolean>;
 
 const POLL = { key: "poll_interval_s", label: "Poll interval (seconds, empty for none)", kind: "number" } as const;
+const LONG = { key: "layout", value: "long" };
+
+/** Whether a field shows for the current values. */
+export function shown(field: FieldSpec, values: FieldValues): boolean {
+  return !field.when || values[field.when.key] === field.when.value;
+}
 
 export const CONFIG_FIELDS: Record<Exclude<ConnectorType, "synthetic">, FieldSpec[]> = {
   pi_web_api: [
@@ -32,6 +47,21 @@ export const CONFIG_FIELDS: Record<Exclude<ConnectorType, "synthetic">, FieldSpe
     { key: "allow_insecure", label: "Allow an unencrypted connection (policy None)", kind: "checkbox" },
     { key: "server_certificate_sha256", label: "Server certificate SHA-256", kind: "text" },
     { key: "browse_root", label: "Browse root (optional)", kind: "text", hint: "i=85" },
+    POLL,
+  ],
+  csv_dir: [
+    { key: "path", label: "Folder (under the server's file sources folder)", kind: "text", required: true, hint: "plant-a/exports" },
+    { key: "pattern", label: "File name pattern (optional)", kind: "text", hint: "*.csv" },
+    { key: "recursive", label: "Also read subfolders", kind: "checkbox" },
+    { key: "layout", label: "Layout", kind: "select", options: ["long", "wide"] },
+    { key: "ts_column", label: "Timestamp column", kind: "text", hint: "ts" },
+    { key: "ts_unit", label: "Epoch unit", kind: "select", options: ["auto", "s", "ms", "us", "ns"] },
+    { key: "series_column", label: "Series column", kind: "text", hint: "series", when: LONG },
+    { key: "value_column", label: "Value column", kind: "text", hint: "value", when: LONG },
+    { key: "quality_column", label: "Quality column (optional)", kind: "text", when: LONG },
+    { key: "delimiter", label: "CSV delimiter", kind: "text", hint: "," },
+    { key: "settle_s", label: "Settle time (seconds a file must be unchanged)", kind: "number", hint: "60" },
+    { key: "max_file_mb", label: "Largest file (MB)", kind: "number", hint: "256" },
     POLL,
   ],
 };
@@ -103,7 +133,7 @@ export function ConfigFields({
   }
   return (
     <div className="grid gap-3 sm:grid-cols-2">
-      {CONFIG_FIELDS[type as keyof typeof CONFIG_FIELDS].map((field) => {
+      {CONFIG_FIELDS[type as keyof typeof CONFIG_FIELDS].filter((field) => shown(field, values)).map((field) => {
         const value = values[field.key];
         if (field.kind === "checkbox") {
           return (

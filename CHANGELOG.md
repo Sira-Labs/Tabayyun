@@ -57,8 +57,19 @@ All notable changes to this project are documented here. The format follows
   with gap breaks and quality runs, an ETag, and a row cap (`TABAYYUN_CHART_MAX_ROWS`).
   `GET /api/series/{id}/profile` profiles a window without bad samples and gives the operating
   band (spec 025).
+- File-drop sources (spec 026):
+  - A `csv_dir` source reads CSV and Parquet files dropped into a folder under
+    `TABAYYUN_FILE_SOURCES_ROOT`, in a long or a wide layout, for sites without a network path.
+  - Scans run on the source's poll interval or from **Scan now**
+    (`POST /api/sources/{id}/ingest`). They create the series files name, write them to the
+    cache with coverage, skip files already read, and read changed files again.
+  - `GET /api/sources/{id}/files` and the source page list every file with its rows, series and
+    error.
+  - `deploy/compose.yaml` mounts `TABAYYUN_DROP_DIR` read-only into the worker.
 
 ### Changed
+- A source check stores what it found as the job's `result`; a file drop's check counts its files
+  (spec 026).
 - A point a connector cannot read no longer fails a fetch. The other points are fetched, and
   the fetch ends `partial` with the failed points in `result.point_errors`. The `synthetic`
   connector reports unconfigured points this way instead of returning nothing (spec 022).

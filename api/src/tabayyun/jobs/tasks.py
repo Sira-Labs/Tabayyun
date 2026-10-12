@@ -1,5 +1,6 @@
 """Procrastinate tasks: run execution and the stale-run reaper (spec 002), invitation email
-(spec 014), connector fetches, checks, polling and their pruning (spec 021)."""
+(spec 014), connector fetches, checks, polling and their pruning (spec 021), and scans of
+file-drop sources (spec 026)."""
 
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from tabayyun.jobs.names import (
     CHECK_SOURCE_TASK,
     FETCH_QUEUE,
     FETCH_WINDOW_TASK,
+    INGEST_SOURCE_TASK,
     MAIL_QUEUE,
     MAINTENANCE_QUEUE,
     POLL_SOURCES_TASK,
@@ -26,7 +28,7 @@ from tabayyun.jobs.names import (
     SEND_INVITATION_TASK,
 )
 from tabayyun.mail import MailError, SmtpConfig
-from tabayyun.services import execution, fetches, rate_limits
+from tabayyun.services import execution, fetches, ingest, rate_limits
 from tabayyun.services import runs as runs_service
 from tabayyun.services.admin import invitations
 from tabayyun.settings import get_settings
@@ -123,10 +125,21 @@ async def check_source(fetch_id: str, org_id: str) -> None:
     await fetches.execute_task(factory, runtime.fetch_deps(), uuid.UUID(fetch_id))
 
 
+@app.task(queue=FETCH_QUEUE, name=INGEST_SOURCE_TASK, retry=False)
+async def ingest_source(fetch_id: str, org_id: str) -> None:
+    """Scan a file-drop source's folder (spec 026); not retried, the next poll scans again.
+
+    Deferred with the lock `source:<id>`, so one job per source runs at a time.
+    """
+    factory = for_org(runtime.session_factory(), uuid.UUID(org_id))
+    await ingest.execute_ingest(factory, runtime.fetch_deps(), uuid.UUID(fetch_id))
+
+
 @app.periodic(cron="* * * * *")
 @app.task(queue=MAINTENANCE_QUEUE, name=POLL_SOURCES_TASK, retry=False)
 async def poll_sources(timestamp: int) -> None:
-    """Every minute: a poll fetch for each enabled source whose interval has passed (spec 021)."""
+    """Every minute: a poll fetch (spec 021), or a scan for a file-drop source (spec 026), for each
+    enabled source whose interval has passed."""
     now = runs_service.utc_now()
     due = await fetches.claim_due_sources(runtime.session_factory(), now)
     for source_id, org, _workspace in due:

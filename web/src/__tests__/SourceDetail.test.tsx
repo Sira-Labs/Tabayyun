@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dialogs } from "../pages/admin/ui";
 import { json, renderApp, stubFetch } from "./helpers";
-import { OPC_ID, PI_ID, SHA, asRole, detail, history, job } from "./sourcesFake";
+import { DROP_ID, OPC_ID, PI_ID, SHA, asRole, detail, dropDetail, file, history, job } from "./sourcesFake";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -26,7 +26,7 @@ function backend(source = detail(), jobs: Record<string, ReturnType<typeof job>[
       return current;
     }
     if (url === `${base}/fetches?limit=20`) return history();
-    if (url === `${base}/check` || url === `${base}/search` || url === `${base}/metadata` || url === `${base}/fetches`)
+    if (url === `${base}/check` || url === `${base}/search` || url === `${base}/metadata` || url === `${base}/fetches` || url === `${base}/ingest`)
       return json({ id: url.split("/").pop() === "fetches" ? "fetch" : url.split("/").pop() }, 202);
     const jobMatch = /\/fetches\/([^/?]+)$/.exec(url);
     if (jobMatch) {
@@ -39,6 +39,70 @@ function backend(source = detail(), jobs: Record<string, ReturnType<typeof job>[
   };
   return { route, sent };
 }
+
+describe("SourceDetail of a file drop", () => {
+  const files = (url: string) => {
+    if (url === `/api/sources/${DROP_ID}/files?limit=50`) {
+      return { items: [file(), file({ id: "f-2", path: "bad.csv", status: "failed", rows: 0, n_series: 0, n_new_series: 0, start_at: null, end_at: null, error: "column 'value' is missing" })], next_cursor: "next" };
+    }
+    if (url === `/api/sources/${DROP_ID}/files?limit=50&cursor=next`) return { items: [file({ id: "f-3", path: "old.csv", versions: 2 })], next_cursor: null };
+    if (url === `/api/sources/${DROP_ID}/files?limit=50&status=failed`) return { items: [], next_cursor: null };
+    return undefined;
+  };
+
+  it("offers Check and Scan now instead of Fetch, Search and Metadata", async () => {
+    const scanned = job({
+      trigger: "ingest",
+      calls: 2,
+      rows: 1440,
+      status: "partial",
+      error: "1 file(s) failed: bad.csv: column 'value' is missing",
+      result: {
+        files: [
+          { path: "2026/jan.csv", status: "ingested", rows: 1440, series: 2, new_series: 2, error: null },
+          { path: "bad.csv", status: "failed", rows: 0, series: 0, new_series: 0, error: "column 'value' is missing" },
+        ],
+        known: 3,
+        settling: 1,
+        too_large: [],
+        outside_root: [],
+        more: true,
+      },
+    });
+    const checked = job({ result: { files: 4, bytes: 1_500_000 } });
+    const { route, sent } = backend(dropDetail(), { ingest: [scanned], check: [checked] }, files);
+    stubFetch(route, asRole("editor"));
+    const user = userEvent.setup();
+    renderApp(`/sources/${DROP_ID}`);
+    await user.click(await screen.findByRole("button", { name: "Check folder" }));
+    expect(await screen.findByText("The folder holds 4 matching files (1.5 MB).")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Fetch" })).toBeNull();
+    expect(screen.queryByLabelText("Find points")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Import metadata" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Scan now" }));
+    expect(
+      await screen.findByText("Read 2 files (1 failed), 3 already read, 1 still being copied. More files wait for the next scan."),
+    ).toBeTruthy();
+    expect(sent.map((s) => `${s.method} ${s.url}`)).toEqual([`POST /api/sources/${DROP_ID}/check`, `POST /api/sources/${DROP_ID}/ingest`]);
+  });
+
+  it("lists files with their errors, filters them and loads more", async () => {
+    const { route } = backend(dropDetail(), {}, files);
+    stubFetch(route, asRole("viewer"));
+    const user = userEvent.setup();
+    renderApp(`/sources/${DROP_ID}`);
+    const table = await screen.findByRole("table", { name: "The source's files, last read first" });
+    expect(within(table).getByText("2026/jan.csv")).toBeTruthy();
+    expect(within(table).getByText("column 'value' is missing")).toBeTruthy();
+    expect(within(table).getAllByText("2.0 kB")).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+    expect(await within(table).findByText("old.csv")).toBeTruthy();
+    expect(within(table).getByText("2.0 kB · version 2")).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText("File status"), "failed");
+    expect(await screen.findByText("No files read yet. Drop files into the folder, then scan.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Actions" })).toBeNull();
+  });
+});
 
 describe("SourceDetail", () => {
   it("shows viewers health and history but no actions or settings", async () => {

@@ -10,6 +10,7 @@ SEND_INVITATION_TASK = "tabayyun.send_invitation_email"
 PRUNE_RATE_LIMITS_TASK = "tabayyun.prune_rate_limits"
 FETCH_WINDOW_TASK = "tabayyun.fetch_window"
 CHECK_SOURCE_TASK = "tabayyun.check_source"
+INGEST_SOURCE_TASK = "tabayyun.ingest_source"
 POLL_SOURCES_TASK = "tabayyun.poll_sources"
 PRUNE_SOURCE_FETCHES_TASK = "tabayyun.prune_source_fetches"
 # Postgres application_name prefix of the worker's connections; the suffix after "/" is the

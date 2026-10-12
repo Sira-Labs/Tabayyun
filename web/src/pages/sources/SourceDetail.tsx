@@ -1,26 +1,30 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { ApiError } from "../../api";
 import { buttonClass } from "../../components/Brand";
 import { formatLocalTime } from "../../format";
 import { atLeast, useWorkspaceRole } from "../../hooks/useWorkspaceRole";
 import {
   TYPE_LABEL,
+  formatBytes,
   isActive,
+  readsWindows,
+  scanSummary,
   sourcesApi,
   unpinnedCertificate,
   type Job,
   type SearchItem,
   type SourceDetail as Source,
 } from "../../sources";
-import { ErrorLine, dialogs, inputClass, linkButtonClass, panelClass } from "../admin/ui";
+import { ErrorLine, dialogs, inputClass, linkButtonClass, panelClass, selectClass } from "../admin/ui";
 import { ConfigFields, CredentialsForm, FieldErrorList, configOf, valuesOf, type FieldValues } from "./forms";
 import { HealthBadge, JobBadge, JobLine, useJob } from "./parts";
 
 const CREDENTIAL_TYPES = new Set(["pi_web_api", "opc_ua"]);
 
-/** `/sources/$sourceId`: a connector source with health, actions, settings and history (spec 024). */
+/** `/sources/$sourceId`: a connector source with health, actions, settings and history (spec 024);
+ * a file drop scans its folder and lists its files instead of fetching (spec 026). */
 export function SourceDetail() {
   const { sourceId } = useParams({ from: "/_app/sources/$sourceId" });
   const role = useWorkspaceRole();
@@ -60,6 +64,7 @@ export function SourceDetail() {
       <HealthPanel source={s} />
       {s.type === "opc_ua" && <OpcUaPanel source={s} isAdmin={isAdmin} />}
       {isEditor && <Actions source={s} />}
+      {!readsWindows(s.type) && <Files sourceId={s.id} />}
       {isAdmin && <Settings source={s} />}
       {isAdmin && CREDENTIAL_TYPES.has(s.type) && <Credentials source={s} />}
       <History sourceId={s.id} />
@@ -174,30 +179,77 @@ function OpcUaPanel({ source, isAdmin }: { source: Source; isAdmin: boolean }) {
 // Actions (editors)
 
 function Actions({ source }: { source: Source }) {
+  const windows = readsWindows(source.type);
   return (
     <section aria-labelledby="actions-heading" className={`${panelClass} space-y-5`}>
       <h2 id="actions-heading" className="font-semibold">
         Actions
       </h2>
-      <CheckAction sourceId={source.id} />
-      <FetchAction sourceId={source.id} disabled={!source.enabled} />
-      <SearchAction sourceId={source.id} />
-      <MetadataAction sourceId={source.id} />
+      <CheckAction sourceId={source.id} label={windows ? "Check connection" : "Check folder"} />
+      {windows ? (
+        <>
+          <FetchAction sourceId={source.id} disabled={!source.enabled} />
+          <SearchAction sourceId={source.id} />
+          <MetadataAction sourceId={source.id} />
+        </>
+      ) : (
+        <ScanAction sourceId={source.id} disabled={!source.enabled} />
+      )}
     </section>
   );
 }
 
-function CheckAction({ sourceId }: { sourceId: string }) {
+function CheckAction({ sourceId, label }: { sourceId: string; label: string }) {
   const [jobId, setJobId] = useState<string | null>(null);
   const job = useJob(sourceId, jobId);
   const start = useMutation({ mutationFn: () => sourcesApi.check(sourceId), onSuccess: (r) => setJobId(r.id) });
+  const result = job.data?.result;
   return (
     <div className="space-y-1">
       <button type="button" className={buttonClass} disabled={start.isPending} onClick={() => start.mutate()}>
-        Check connection
+        {label}
       </button>
       <ErrorLine error={start.error} prefix="Could not start the check" />
       {jobId && <JobLine job={job.data} />}
+      {typeof result?.files === "number" && (
+        <p className="text-sm">
+          The folder holds {result.files} matching {result.files === 1 ? "file" : "files"} ({formatBytes(result.bytes ?? 0)}).
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ScanAction({ sourceId, disabled }: { sourceId: string; disabled: boolean }) {
+  const client = useQueryClient();
+  const [jobId, setJobId] = useState<string | null>(null);
+  const job = useJob(sourceId, jobId);
+  const start = useMutation({ mutationFn: () => sourcesApi.ingest(sourceId), onSuccess: (r) => setJobId(r.id) });
+  const result = job.data?.result;
+  const done = job.data !== undefined && !isActive(job.data.status);
+  const failed = Array.isArray(result?.files) ? result.files.filter((f) => f.status === "failed") : [];
+  useEffect(() => {
+    if (done) void client.invalidateQueries({ queryKey: ["sources", sourceId, "files"] });
+  }, [done, client, sourceId]);
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-semibold">Read new files</h3>
+      <button type="button" className={buttonClass} disabled={start.isPending || disabled} onClick={() => start.mutate()}>
+        Scan now
+      </button>
+      {disabled && <p className="text-sm text-slate-600 dark:text-slate-400">The source is disabled; enable it to scan.</p>}
+      <ErrorLine error={start.error} prefix="Could not start the scan" />
+      {jobId && <JobLine job={job.data} />}
+      {done && result && <p className="text-sm">{scanSummary(result)}</p>}
+      {failed.length > 0 && (
+        <ul className="list-inside list-disc text-sm text-red-700 dark:text-red-400">
+          {failed.map((f) => (
+            <li key={f.path}>
+              <span className="font-mono text-xs">{f.path}</span>: {f.error}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -537,7 +589,88 @@ function Credentials({ source }: { source: Source }) {
   );
 }
 
+// Files of a file drop (spec 026)
+
+function Files({ sourceId }: { sourceId: string }) {
+  const [status, setStatus] = useState<"" | "ingested" | "failed">("");
+  const files = useInfiniteQuery({
+    queryKey: ["sources", sourceId, "files", status],
+    queryFn: ({ pageParam }) => sourcesApi.files(sourceId, status, pageParam),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor,
+  });
+  const items = files.data?.pages.flatMap((p) => p.items) ?? [];
+  return (
+    <section aria-labelledby="files-heading" className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="files-heading" className="font-semibold">
+          Files
+        </h2>
+        <select aria-label="File status" className={selectClass} value={status} onChange={(e) => setStatus(e.target.value as typeof status)}>
+          <option value="">All files</option>
+          <option value="ingested">Read</option>
+          <option value="failed">Failed</option>
+        </select>
+      </div>
+      <ErrorLine error={files.error} prefix="Could not load the files" />
+      {files.isSuccess && items.length === 0 && (
+        <p className="text-sm text-slate-600 dark:text-slate-400">No files read yet. Drop files into the folder, then scan.</p>
+      )}
+      {items.length > 0 && (
+        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+          <table className="w-full text-left text-sm">
+            <caption className="sr-only">The source's files, last read first</caption>
+            <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              <tr>
+                <th scope="col" className="p-2">File</th>
+                <th scope="col" className="p-2">Status</th>
+                <th scope="col" className="hidden p-2 text-right sm:table-cell">Rows</th>
+                <th scope="col" className="hidden p-2 text-right sm:table-cell">Series</th>
+                <th scope="col" className="hidden p-2 md:table-cell">Data from – to</th>
+                <th scope="col" className="p-2">Last read</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((f) => (
+                <tr key={f.id} className="border-t border-slate-200 align-top dark:border-slate-800">
+                  <td className="p-2">
+                    <span className="break-all font-mono text-xs">{f.path}</span>
+                    <span className="block text-xs text-slate-600 dark:text-slate-400">
+                      {formatBytes(f.size)}
+                      {f.versions > 1 && ` · version ${f.versions}`}
+                    </span>
+                  </td>
+                  <td className="p-2">
+                    <JobBadge status={f.status === "ingested" ? "succeeded" : "failed"} />
+                    {f.error && <span className="block text-xs text-red-700 dark:text-red-400">{f.error}</span>}
+                  </td>
+                  <td className="hidden p-2 text-right tabular-nums sm:table-cell">{f.rows}</td>
+                  <td className="hidden p-2 text-right tabular-nums sm:table-cell">
+                    {f.n_series}
+                    {f.n_new_series > 0 && <span className="block text-xs text-slate-600 dark:text-slate-400">{f.n_new_series} new</span>}
+                  </td>
+                  <td className="hidden p-2 text-xs md:table-cell">
+                    {f.start_at && f.end_at ? `${formatLocalTime(f.start_at)} – ${formatLocalTime(f.end_at)}` : "—"}
+                  </td>
+                  <td className="p-2 text-xs">{formatLocalTime(f.updated_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {files.hasNextPage && (
+        <button type="button" className={linkButtonClass} disabled={files.isFetchingNextPage} onClick={() => void files.fetchNextPage()}>
+          Load more
+        </button>
+      )}
+    </section>
+  );
+}
+
 // History
+
+const TRIGGER_LABEL: Record<string, string> = { ingest: "scan" };
 
 function History({ sourceId }: { sourceId: string }) {
   const jobs = useQuery({
@@ -590,7 +723,14 @@ function JobRow({ sourceId, job, open, onToggle }: { sourceId: string; job: Job;
   return (
     <>
       <tr className="border-t border-slate-200 dark:border-slate-800">
-        <td className="p-2">{job.trigger}</td>
+        <td className="p-2">
+          {TRIGGER_LABEL[job.trigger] ?? job.trigger}
+          {job.trigger === "ingest" && job.status !== "queued" && (
+            <span className="block text-xs text-slate-600 dark:text-slate-400">
+              {job.calls} {job.calls === 1 ? "file" : "files"}
+            </span>
+          )}
+        </td>
         <td className="p-2">
           <JobBadge status={job.status} />
           {job.error && <span className="block text-xs text-red-700 dark:text-red-400">{job.error}</span>}

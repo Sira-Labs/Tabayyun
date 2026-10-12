@@ -209,6 +209,8 @@ async def _fill_gaps(
 ) -> None:
     """Fetch the gaps of members of connector sources inline, then note what is still missing.
 
+    Sources that read no windows (spec 026: file drops) are not fetched; their gaps stay missing.
+
     One `run` fetch per source, all within the budget; errors and a spent budget are noted in
     `plan.fetch_errors`, never raised.
     """
@@ -223,7 +225,7 @@ async def _fill_gaps(
         sources = {
             s.id: s
             for s in (await session.scalars(select(Source).where(Source.id.in_(list(wanted))))).all()
-            if connectors.is_connector(s.type) and s.enabled
+            if (cls := connectors.get(s.type)) is not None and cls.reads_windows and s.enabled
         }
     if not sources:
         return

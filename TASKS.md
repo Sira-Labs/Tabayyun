@@ -454,6 +454,18 @@ starts; the plan is the backlog until then.
         gained `m4_window`, `gap_breaks` and `quality_runs`.
       - Opening a 1M-point series measured 390 ms in Chromium, including 274 ms of API time.
       - The band and profile are computed per request until S10-2 stores baselines.
+- [x] **026 File-drop source** — `docs/specs/026-csv-dir-source.md` (S9-6, 12 Oct). Every
+      criterion is met.
+      - A `csv_dir` source does not read windows (`Connector.reads_windows = False`): polling
+        queues an `ingest` scan, manual fetches are 409 `not_fetchable` and dataset runs do not
+        fetch for it. A fetch would have marked windows covered before late files arrived.
+      - Files are known by path, then size and time, then SHA-256; one `source_files` row per
+        path keeps the last content read, so a file changed back to an earlier version is read
+        again. Files are never moved or deleted, so the folder mounts read-only.
+      - The wide layout drops empty cells (no sample), while the long layout keeps them as NaN
+        as uploads do.
+      - Series are created before the cache writes, and the file's row with its coverage after
+        them; a failed cache write stops the scan and leaves the file to be read again.
 - [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
       `tabayyun-api` and `tabayyun-worker` on staging; then a `synthetic` source with
       `poll_interval_s` gives staging a live, polling source for demos.

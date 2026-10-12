@@ -13,6 +13,7 @@ import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, ClassVar
 
 import pyarrow as pa
@@ -132,19 +133,30 @@ class Connector(ABC):
     # `builtins.type`: the class attribute `type` above shadows the builtin in this body.
     config_model: ClassVar[builtins.type[ConnectorConfig]] = ConnectorConfig
     credentials_model: ClassVar[builtins.type[BaseModel] | None] = None
+    # False for a source that cannot be asked for a window (spec 026: a folder files are dropped
+    # into): no manual or run fetches; polling queues an ingest instead of a fetch.
+    reads_windows: ClassVar[bool] = True
 
-    def __init__(self, config: ConnectorConfig, credentials: BaseModel | None, net: NetPolicy) -> None:
+    def __init__(
+        self,
+        config: ConnectorConfig,
+        credentials: BaseModel | None,
+        net: NetPolicy,
+        *,
+        files_root: Path | None = None,
+    ) -> None:
         self.config = config
         self.credentials = credentials
         self.net = net
+        self.files_root = files_root
 
     def limits(self) -> Limits:
         """The limits of one call; a connector may tighten the config's, never loosen them."""
         return Limits.of(self.config)
 
     @abstractmethod
-    async def check(self) -> None:
-        """Reach the system and authenticate.
+    async def check(self) -> dict[str, Any] | None:
+        """Reach the system and authenticate; what it found, if anything, becomes the job's result.
 
         Raises:
             tabayyun.connectors.errors.ConnectorError: it cannot be reached or refuses the

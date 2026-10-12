@@ -42,10 +42,14 @@ def run_cache() -> RunCache:
 
 
 def fetch_deps() -> FetchDeps:
-    """What fetches need in the worker: the cache, the network policy and the keyring (spec 021)."""
+    """What fetches need in the worker: the cache, the network policy, the keyring (spec 021) and the
+    file sources folder (spec 026)."""
     settings = get_settings()
     return FetchDeps(
-        cache=run_cache(), net=NetPolicy.from_settings(settings), keyring=Keyring.from_settings(settings)
+        cache=run_cache(),
+        net=NetPolicy.from_settings(settings),
+        keyring=Keyring.from_settings(settings),
+        files_root=settings.files_root,
     )
 
 

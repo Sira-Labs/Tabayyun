@@ -226,3 +226,14 @@ def test_rate_limits_setting(monkeypatch):
     assert Settings().rate_limits is True
     monkeypatch.setenv("TABAYYUN_RATE_LIMITS", "false")
     assert Settings().rate_limits is False
+
+
+def test_the_file_sources_root_is_absolute_or_unset(monkeypatch):
+    """Spec 026: trimmed, empty is unset, a relative path is refused."""
+    monkeypatch.setenv("TABAYYUN_FILE_SOURCES_ROOT", "  ")
+    assert Settings().files_root is None
+    monkeypatch.setenv("TABAYYUN_FILE_SOURCES_ROOT", " /data/files/../files ")
+    assert str(Settings().files_root) == "/data/files"
+    monkeypatch.setenv("TABAYYUN_FILE_SOURCES_ROOT", "data/files")
+    with pytest.raises(ValidationError, match="absolute path"):
+        Settings()

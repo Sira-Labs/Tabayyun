@@ -1,6 +1,6 @@
-"""Sources API (specs 004, 021, 022): the workspace's sources; connector sources are created,
+"""Sources API (specs 004, 021, 022, 026): the workspace's sources; connector sources are created,
 changed, given credentials and series, checked, searched, fetched and their metadata imported
-here.
+here, and file-drop sources scanned, with the files they read.
 
 Roles: viewers read, editors register series and request fetches, checks, searches and
 metadata imports, workspace admins create and change sources and their credentials.
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Query, Request, Response
 from pydantic import BaseModel, Field
@@ -24,7 +24,7 @@ from tabayyun.authz.scope import Scope
 from tabayyun.db import for_org
 from tabayyun.db.models import SERIES_KINDS, Source, SourceFetch
 from tabayyun.limits import limit
-from tabayyun.services import fetches
+from tabayyun.services import fetches, ingest
 from tabayyun.services import series as series_service
 from tabayyun.services import sources as sources_service
 from tabayyun.services.admin import audit
@@ -174,6 +174,32 @@ class FetchList(BaseModel):
     items: list[FetchOut]
 
 
+class FileOut(BaseModel):
+    """One file of a file-drop source and what reading it last gave (spec 026)."""
+
+    id: str
+    path: str
+    size: int
+    mtime: datetime
+    status: str
+    rows: int
+    n_series: int
+    n_new_series: int
+    start_at: datetime | None
+    end_at: datetime | None
+    error: str | None
+    versions: int
+    fetch_id: str | None
+    updated_at: datetime
+
+
+class FileList(BaseModel):
+    """A page of the source's files, last read first."""
+
+    items: list[FileOut]
+    next_cursor: str | None
+
+
 def _actor(request: Request, principal: Principal) -> audit.Actor:
     return audit.Actor(
         user_id=principal.user_id,
@@ -244,8 +270,15 @@ async def _start(
         await fetches.enqueue(session, fetch)
         return
     await session.commit()
-    deps = fetches.FetchDeps(cache=state.run_cache, net=state.net_policy, keyring=state.keyring)
-    run = fetches.execute_task if fetch.trigger in fetches.TASK_TRIGGERS else fetches.execute_fetch
+    deps = fetches.FetchDeps(
+        cache=state.run_cache, net=state.net_policy, keyring=state.keyring, files_root=state.files_root
+    )
+    if fetch.trigger in fetches.TASK_TRIGGERS:
+        run = fetches.execute_task
+    elif fetch.trigger == "ingest":
+        run = ingest.execute_ingest
+    else:
+        run = fetches.execute_fetch
     background.add_task(run, for_org(state.session_factory, scope.org_id), deps, fetch.id)
 
 
@@ -494,3 +527,60 @@ async def list_fetches(
     """The source's latest fetches, newest first."""
     rows = await sources_service.list_fetches(session, scope, source_id, limit_)
     return FetchList(items=[_fetch_out(f) for f in rows])
+
+
+@router.post(
+    "/{source_id}/ingest", status_code=202, response_model=FetchCreated, dependencies=[SOURCE_FETCH_LIMIT]
+)
+async def ingest_files(
+    source_id: uuid.UUID,
+    request: Request,
+    background: BackgroundTasks,
+    session: SessionDep,
+    scope: WriteScope,
+    principal: ActorDep,
+) -> FetchCreated:
+    """Scan a file-drop source's folder now (spec 026); what it read lands in its files."""
+    now = datetime.now(UTC)
+    fetch = await sources_service.request_fetch(
+        session, scope, _actor(request, principal), source_id, trigger="ingest", start=now, end=now
+    )
+    await _start(request, background, session, scope, fetch)
+    return FetchCreated(id=str(fetch.id))
+
+
+@router.get("/{source_id}/files", response_model=FileList)
+async def list_files(
+    source_id: uuid.UUID,
+    session: SessionDep,
+    scope: ReadScope,
+    status: Literal["ingested", "failed"] | None = None,
+    limit_: Annotated[int, Query(alias="limit", ge=1, le=200)] = 50,
+    cursor: Annotated[str | None, Query(max_length=200)] = None,
+) -> FileList:
+    """The files a file-drop source has read, last read first."""
+    rows, next_cursor = await sources_service.list_files(
+        session, scope, source_id, status=status, limit=limit_, cursor=cursor
+    )
+    return FileList(
+        items=[
+            FileOut(
+                id=str(f.id),
+                path=f.path,
+                size=f.size,
+                mtime=f.mtime,
+                status=f.status,
+                rows=f.rows,
+                n_series=f.n_series,
+                n_new_series=f.n_new_series,
+                start_at=f.start_at,
+                end_at=f.end_at,
+                error=f.error,
+                versions=f.versions,
+                fetch_id=None if f.fetch_id is None else str(f.fetch_id),
+                updated_at=f.updated_at,
+            )
+            for f in rows
+        ],
+        next_cursor=next_cursor,
+    )

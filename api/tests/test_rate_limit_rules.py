@@ -48,7 +48,8 @@ def test_the_bucket_table_matches_the_spec():
 
 
 def test_source_jobs_count_against_source_fetch():
-    """Checks, fetches, searches and metadata imports share the `source.fetch` bucket (specs 021, 022)."""
+    """Checks, fetches, searches, metadata imports and scans share the `source.fetch` bucket
+    (specs 021, 022, 026)."""
     from fastapi.routing import APIRoute
 
     import tabayyun.main  # noqa: F401  (imports the jobs package before the router, as the app does)
@@ -66,4 +67,5 @@ def test_source_jobs_count_against_source_fetch():
         ("POST", "/api/sources/{source_id}/fetches"),
         ("POST", "/api/sources/{source_id}/search"),
         ("POST", "/api/sources/{source_id}/metadata"),
+        ("POST", "/api/sources/{source_id}/ingest"),
     }

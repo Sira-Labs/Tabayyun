@@ -54,6 +54,35 @@ describe("SourceNew", () => {
     void OPC_ID;
   });
 
+  it("creates a file drop, with the long layout's columns only for a long layout", async () => {
+    let body: unknown;
+    stubFetch((url, init) => {
+      if (url === "/api/sources" && init?.method === "POST") {
+        body = JSON.parse(String(init.body));
+        return json({ detail: "invalid_config", errors: [] }, 422);
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+    const user = userEvent.setup();
+    renderApp("/sources/new");
+    await user.selectOptions(await screen.findByLabelText("Type"), "csv_dir");
+    await user.type(screen.getByLabelText("Name"), "Drop");
+    await user.type(screen.getByLabelText("Folder (under the server's file sources folder)"), "plant-a");
+    expect(screen.getByLabelText("Series column")).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText("Layout"), "wide");
+    expect(screen.queryByLabelText("Series column")).toBeNull();
+    await user.type(screen.getByLabelText("CSV delimiter"), ";");
+    await user.click(screen.getByLabelText("Also read subfolders"));
+    await user.click(screen.getByRole("button", { name: "Create source" }));
+    await waitFor(() =>
+      expect(body).toEqual({
+        type: "csv_dir",
+        name: "Drop",
+        config: { path: "plant-a", recursive: true, layout: "wide", ts_unit: "auto", delimiter: ";" },
+      }),
+    );
+  });
+
   it("refuses invalid synthetic JSON without a request", async () => {
     const fetch = stubFetch(() => {
       throw new Error("no request expected");

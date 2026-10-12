@@ -578,6 +578,32 @@ OPC UA status codes become qualities: `Good_LocalOverride` and `Good_Clamped` co
 `uncertain`, `Uncertain_SubstituteValue` as `estimated`, and any Bad value as `bad`, with no
 value.
 
+## Adding a file-drop source
+
+A `csv_dir` source (spec 026) reads CSV and Parquet files dropped into a folder on the server,
+for sites that Tabayyun cannot reach over the network. It needs no credentials.
+
+1. **Folder.** On the server, create the folder files will be dropped into, for example
+   `/srv/tabayyun/drop`. Give read access to the container's user only (uid 10001), for new
+   files too, rather than to every local account:
+   `setfacl -R -m u:10001:rX -m d:u:10001:rX /srv/tabayyun/drop`.
+2. **Worker.** `tabayyun-worker` → App Configs:
+   - Persistent Directories: path in app `/data/files`, "Set specific host path"
+     `/srv/tabayyun/drop`. Tabayyun only reads it.
+   - Environment variable `TABAYYUN_FILE_SOURCES_ROOT=/data/files`. Save & Update.
+   - Without the variable, checks and scans of such sources fail with "file sources are not
+     enabled on this server".
+3. **Source.** As a workspace admin, add a source of type **File drop**. Its folder is relative
+   to `/data/files` (`plant-a` reads `/srv/tabayyun/drop/plant-a`); absolute paths and `..` are
+   refused. Pick the layout: **long** (`ts`, `series`, `value`, optional quality column) or
+   **wide** (`ts` and one column per series). Set `poll_interval_s` to scan regularly.
+4. **Check folder** confirms the folder and counts its files; **Scan now** reads new files.
+   The Files panel lists each file with its rows and series, or its error.
+
+Files are read once they have not changed for `settle_s` (60 s). Hidden files and temporary
+names (`*.part`, `*.tmp`, `~$*`) are skipped, so copy to a temporary name and rename. A changed
+file is read again and its values win; a file that failed is read again only once it changes.
+
 ## Connector credentials: rotating the master key
 
 Connector credentials (spec 021) are encrypted under `TABAYYUN_MASTER_KEY`. To rotate it:
@@ -609,6 +635,9 @@ again.
 | Run `stats.cache.error` says `not found (does the bucket exist?)` | the bucket in `TABAYYUN_CACHE_URL` does not exist | Create it in the store's console, or fix the name |
 | Series chart and profile answer 503 `cache_unavailable`; API log `series.cache_read_failed` | the api cannot use the cache store; `error` names the cause as in the rows above | Give `tabayyun-api` the same `TABAYYUN_CACHE_URL` and `TABAYYUN_S3_*` values as the worker |
 | API log `series.cache_read_failed` says `401` and `account is not signed up` | the api's access key does not exist in the store | Copy `TABAYYUN_S3_ACCESS_KEY_ID` and `TABAYYUN_S3_SECRET_ACCESS_KEY` from the worker |
+| A file-drop scan or check fails: `file sources are not enabled on this server` | `TABAYYUN_FILE_SOURCES_ROOT` is not set on the worker | Set it to the folder mounted at `/data/files` and Save & Update the worker |
+| A file-drop scan fails: `folder plant-a does not exist` | the source's folder is not under the mounted folder, or the persistent directory is missing | Check the worker's persistent directory and that `<host path>/plant-a` exists |
+| A dropped file never shows up in Files | it is still within the settle time, is hidden or has a temporary name, or is larger than `max_file_mb` | The scan's result (History → Details) counts `settling` and lists `too_large` files |
 | API refuses to start: `remove the quotes around the value` | a store setting was entered with quotes, e.g. `"http://…:9000"` | Enter it without quotes; CapRover keeps them literally |
 | An AWS-SDK tool (pyarrow, boto3, `aws s3`) uploading to an old MinIO fails with `411 MissingContentLength` | pre-2025 MinIO rejects the streamed checksums that newer AWS SDKs send | Tabayyun is unaffected; for the tool set `AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED` and `AWS_RESPONSE_CHECKSUM_VALIDATION=WHEN_REQUIRED`, or move to RustFS |
 | API log: `refusing to start in prod` naming `TABAYYUN_PUBLIC_URL`, `TABAYYUN_OIDC_ISSUER`, `TABAYYUN_OIDC_CLIENT_SECRET` or `TABAYYUN_ADMIN_EMAIL` | a sign-in setting missing (spec 013), or `TABAYYUN_AUTH_MODE=dev` | Set it (section 4a); `dev` mode is never allowed in prod |

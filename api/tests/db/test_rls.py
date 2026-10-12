@@ -195,7 +195,8 @@ def _seed_memberships(owner: Engine) -> None:
 
 
 def _seed_connector_rows(owner_url: str) -> None:
-    """Spec 021: credentials and a fetch for each org's upload source (the bytes need not decrypt)."""
+    """Spec 021: credentials and a fetch for each org's upload source (the bytes need not decrypt);
+    spec 026: a file it read."""
     owner = create_engine(owner_url)
     try:
         _owner_sql(
@@ -208,6 +209,14 @@ def _seed_connector_rows(owner_url: str) -> None:
             "INSERT INTO source_fetches "
             "(id, org_id, workspace_id, source_id, trigger, window_start, window_end) "
             "SELECT gen_random_uuid(), org_id, workspace_id, id, 'manual', now() - interval '1 day', now() "
+            "FROM sources",
+        )
+        # Spec 026: a file each source has read.
+        _owner_sql(
+            owner,
+            "INSERT INTO source_files "
+            "(id, org_id, workspace_id, source_id, path, size, mtime, sha256, status) "
+            "SELECT gen_random_uuid(), org_id, workspace_id, id, 'a.csv', 1, now(), 'x', 'ingested' "
             "FROM sources",
         )
     finally:
@@ -421,6 +430,9 @@ ROUTES = [
     ("GET", "/api/sources/{source_id}/fetches/{fetch_id}", "source", None),
     # Spec 023: the OPC UA client certificate.
     ("GET", "/api/sources/{source_id}/client-certificate", "source", None),
+    # Spec 026: scans of file-drop sources and their files.
+    ("POST", "/api/sources/{source_id}/ingest", "source", None),
+    ("GET", "/api/sources/{source_id}/files", "source", None),
 ]
 READ_BACK = {
     "run": "/api/runs/{}",
