@@ -79,7 +79,9 @@ A file-drop source (spec 026) reads CSV and Parquet exports that someone copies 
 Tabayyun host, for example from a USB drive or through a one-way data diode:
 
 1. Choose a host folder and set `TABAYYUN_DROP_DIR` in `.env` (default `deploy/drop`). The
-   worker mounts it read-only at `/data/files`; Tabayyun never moves or deletes the files.
+   worker (and the api, for inline jobs) mounts it read-only at `/data/files`; Tabayyun never
+   moves or deletes the files. Let only the containers' user (uid 10001) read it:
+   `setfacl -R -m u:10001:rX -m d:u:10001:rX <folder>`.
 2. Create a source of type **File drop** whose folder is a subfolder of it, for example
    `plant-a`, with the layout of the exports: **long** (`ts`, `series`, `value` columns) or
    **wide** (`ts` and one column per series). Set a poll interval to scan it regularly.

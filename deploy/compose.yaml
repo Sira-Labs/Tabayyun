@@ -34,8 +34,11 @@ services:
       TABAYYUN_MIGRATION_DATABASE_URL: postgresql+psycopg://tabayyun:${POSTGRES_PASSWORD}@postgres:5432/tabayyun
       TABAYYUN_DATABASE_URL: postgresql+psycopg://tabayyun_app:${TABAYYUN_APP_DB_PASSWORD:?set TABAYYUN_APP_DB_PASSWORD in .env}@postgres:5432/tabayyun
       TABAYYUN_TIMESCALE: ${TABAYYUN_TIMESCALE:-auto}
+      # File-drop sources (spec 026): the worker scans them; the api too with TABAYYUN_INLINE_JOBS.
+      TABAYYUN_FILE_SOURCES_ROOT: /data/files
     volumes:
       - cache:/data/cache
+      - ${TABAYYUN_DROP_DIR:-./drop}:/data/files:ro
     depends_on:
       postgres:
         condition: service_healthy

@@ -584,7 +584,9 @@ A `csv_dir` source (spec 026) reads CSV and Parquet files dropped into a folder 
 for sites that Tabayyun cannot reach over the network. It needs no credentials.
 
 1. **Folder.** On the server, create the folder files will be dropped into, for example
-   `/srv/tabayyun/drop`, readable by the container (`chmod -R a+rX`).
+   `/srv/tabayyun/drop`. Give read access to the container's user only (uid 10001), for new
+   files too, rather than to every local account:
+   `setfacl -R -m u:10001:rX -m d:u:10001:rX /srv/tabayyun/drop`.
 2. **Worker.** `tabayyun-worker` → App Configs:
    - Persistent Directories: path in app `/data/files`, "Set specific host path"
      `/srv/tabayyun/drop`. Tabayyun only reads it.

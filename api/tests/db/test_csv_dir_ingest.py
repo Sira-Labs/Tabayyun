@@ -209,6 +209,14 @@ async def test_the_file_and_series_caps(env):
     assert [f["path"] for f in first["result"]["files"]] == ["a.csv"] and first["result"]["more"]
     second = await env.scan(sid)
     assert [f["path"] for f in second["result"]["files"]] == ["b.csv"] and not second["result"]["more"]
+    # Two new files older than the known ones: one is read, one waits, and the known ones past
+    # the cap still count as known.
+    drop(env.folder, "0.csv", LONG.replace("flow", "zero"), mtime=OLD - 2)
+    drop(env.folder, "1.csv", LONG.replace("flow", "one"), mtime=OLD - 1)
+    capped = await env.scan(sid)
+    assert [f["path"] for f in capped["result"]["files"]] == ["0.csv"]
+    assert (capped["result"]["known"], capped["result"]["more"]) == (2, True)
+    assert [f["path"] for f in (await env.scan(sid))["result"]["files"]] == ["1.csv"]
     drop(env.folder, "c.csv", LONG + "2026-01-01T00:00:00Z,third,1\n", mtime=OLD + 2)
     third = await env.scan(sid)
     [c] = third["result"]["files"]

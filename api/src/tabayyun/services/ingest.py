@@ -135,8 +135,10 @@ async def _scan(
             unchanged += 1
             continue
         if len(todo) >= scan.config.max_files_per_scan:
+            # Past the cap only the cheap check runs: files known by size and time still count
+            # as known, and any other file waits for the next scan.
             more = True
-            break
+            continue
         try:
             digest = await asyncio.to_thread(file_listing.sha256, found.full)
         except OSError:
