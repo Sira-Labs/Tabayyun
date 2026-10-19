@@ -14,10 +14,10 @@
     "test": "TZ=Asia/Riyadh vitest run"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.104.1",
-    "@tanstack/react-router": "^1.170.41",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "@tanstack/react-query": "^5.104.3",
+    "@tanstack/react-router": "^1.170.44",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "uplot": "1.6.32"
   },
   "devDependencies": {
@@ -25,17 +25,17 @@
     "@tailwindcss/vite": "^4.0.0",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
-    "@testing-library/user-event": "^14.6.7",
+    "@testing-library/user-event": "^14.6.8",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.2.0",
-    "eslint": "^10.11.0",
+    "eslint": "^10.12.0",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "jsdom": "^30.1.1",
+    "jsdom": "^30.1.3",
     "tailwindcss": "^4.0.0",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.71.0",
-    "vite": "^8.3.2",
-    "vitest": "^5.0.3"
+    "typescript-eslint": "^8.71.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5"
   }
 }
