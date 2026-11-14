@@ -11,3 +11,14 @@ export type PlotData = uPlot.AlignedData;
 export function createPlot(opts: PlotOptions, data: PlotData, target: HTMLElement): Plot {
   return new uPlot(opts, data, target);
 }
+
+/** Outer join of per-series `[x, y]` tables on x (`uPlot.join`): a series without a sample at
+ * an x gets `undefined` there, which the line passes through. */
+export function joinTables(tables: PlotData[]): PlotData {
+  return uPlot.join(tables);
+}
+
+/** The key of a cursor sync group (`uPlot.sync`): plots created with it share the cursor. */
+export function syncKey(name: string): string {
+  return uPlot.sync(name).key;
+}

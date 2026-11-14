@@ -1,5 +1,6 @@
-import { Outlet, createRootRoute, createRoute, createRouter, redirect, type RouterHistory } from "@tanstack/react-router";
+import { Outlet, createRootRoute, createRoute, createRouter, lazyRouteComponent, redirect, type RouterHistory } from "@tanstack/react-router";
 import { setUnauthorizedHandler } from "./api";
+import { validateCompareSearch } from "./compare/url";
 import { Account } from "./pages/Account";
 import { ADMIN_TABS, Admin, type AdminTab } from "./pages/admin/Admin";
 import { Layout } from "./pages/Layout";
@@ -46,6 +47,13 @@ const seriesDetailRoute = createRoute({
   validateSearch: validateSeriesPageSearch,
   component: SeriesDetail,
 });
+// The compare view loads on its first visit, which keeps it out of the app's first chunk.
+const compareRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/compare",
+  validateSearch: validateCompareSearch,
+  component: lazyRouteComponent(() => import("./pages/Compare"), "Compare"),
+});
 const sourcesRoute = createRoute({ getParentRoute: () => appRoute, path: "/sources", component: SourcesList });
 const newSourceRoute = createRoute({ getParentRoute: () => appRoute, path: "/sources/new", component: SourceNew });
 const sourceRoute = createRoute({ getParentRoute: () => appRoute, path: "/sources/$sourceId", component: SourceDetail });
@@ -74,6 +82,7 @@ export const routeTree = rootRoute.addChildren([
     runRoute,
     seriesRoute,
     seriesDetailRoute,
+    compareRoute,
     sourcesRoute,
     newSourceRoute,
     sourceRoute,
