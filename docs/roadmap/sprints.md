@@ -140,11 +140,11 @@ forecast window.
 | S8 (~26 Sep) | Keycloak | done 23 Sep: `miftachun.apps.data-and-ai-dude.ch` (one realm per product; `tabayyun` realm imported in S8-1); owner still to replace the bootstrap admin and enable OTP |
 | S8 (~26 Sep) | email | SMTP account and credentials (invitations in S8-4, alerts in S10-5) |
 | S9 (~29 Sep) | PI Web API | optional: read access to a PI Web API test server; without it the connector is tested against recorded fixtures only |
-| S13 (~8 Oct) | pilot | pilot site, contact and install date; an 8-core server for the performance run |
-| S13 (~8 Oct) | pen test | decide self-assessment only, or book an external tester (not on the forecast's calendar) |
-| S19 (~22 Oct) | enterprise SSO | Entra ID test tenant (and Okta, for SCIM preview testing) |
-| S21 (~27 Oct) | mobile | Apple and Google developer accounts, push credentials |
-| S22 (~29 Oct) | licensing | custody of the licence signing key |
+| S13 (~4 Dec) | pilot | pilot site, contact and install date; an 8-core server for the performance run |
+| S13 (~4 Dec) | pen test | decide self-assessment only, or book an external tester (not on the forecast's calendar) |
+| S19 (~2 Jan) | enterprise SSO | Entra ID test tenant (and Okta, for SCIM preview testing) |
+| S21 (~9 Jan) | mobile | Apple and Google developer accounts, push credentials |
+| S22 (~12 Jan) | licensing | custody of the licence signing key |
 
 ## Sprint 5 — landing and planning (done 21–22 Sep 2026)
 

@@ -8,6 +8,9 @@ const NS_PER_S = 1e9;
 const AXIS = "#64748b";
 const GRID = "rgba(100, 116, 139, 0.15)";
 const AXIS_SIZE = 60;
+// uPlot adds this to a labelled axis; a lane without a right axis reserves it too, so the
+// time axes of all lanes line up.
+const AXIS_LABEL_SIZE = 30;
 const MIN_WIDTH = 300;
 // Synced lanes report one drag each; the repeats arrive within this many ms.
 const SELECT_ECHO_MS = 300;
@@ -125,10 +128,10 @@ function laneOptions(lane: PlotLane, c: LaneContext): PlotOptions {
   const axes: NonNullable<PlotOptions["axes"]> = [{ stroke: AXIS, grid: { stroke: GRID } }];
   for (const a of lane.axes) {
     if (a.side === "none") continue;
-    axes.push({ scale: a.scale, side: a.side === "right" ? 1 : 3, label: a.label, size: AXIS_SIZE, stroke: AXIS, grid: { stroke: GRID, show: a.side === "left" } });
+    axes.push({ scale: a.scale, side: a.side === "right" ? 1 : 3, label: a.label, labelSize: AXIS_LABEL_SIZE, size: AXIS_SIZE, stroke: AXIS, grid: { stroke: GRID, show: a.side === "left" } });
   }
   if (c.anyRight && !lane.axes.some((a) => a.side === "right")) {
-    axes.push({ scale: lane.axes[0]?.scale ?? "y0", side: 1, size: AXIS_SIZE, stroke: AXIS, values: (_u, splits) => splits.map(() => ""), ticks: { show: false }, grid: { show: false } });
+    axes.push({ scale: lane.axes[0]?.scale ?? "y0", side: 1, size: AXIS_SIZE + AXIS_LABEL_SIZE, stroke: AXIS, values: (_u, splits) => splits.map(() => ""), ticks: { show: false }, grid: { show: false } });
   }
   return {
     width: c.width,
@@ -258,8 +261,17 @@ export default function CompareChart({ lanes, range, theme, hidden, keyCursor, l
     }
   }, [hidden, lanes]);
 
+  // Whether the plots' cursors were last placed by the keyboard: only those are cleared with it.
+  const keyOwned = useRef(false);
   useEffect(() => {
-    if (keyCursor === null) return;
+    if (keyCursor === null) {
+      if (keyOwned.current) {
+        for (const { plot } of plots.current) plot.setCursor({ left: -10, top: -10 }, false);
+        keyOwned.current = false;
+      }
+      return;
+    }
+    keyOwned.current = true;
     for (const { plot, lane } of plots.current) {
       plot.setCursor({ left: plot.valToPos(keyCursor / NS_PER_S, "x"), top: lane.height / 2 }, false);
     }

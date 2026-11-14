@@ -94,9 +94,8 @@ their link when those pages exist; `group=` in the URL already works.
     ```
   - `residual` holds null where the line breaks across skipped grid bins.
   - `band` is `loss_min·Σin` and `loss_max·Σin` from the group's params, or the
-    `tby.balance_residual` defaults, one value per residual point. Where downsampling drops
-    grid bins, a point carries the lowest lower edge and the highest upper edge of its chart
-    bin. It is null for pairs.
+    `tby.balance_residual` defaults, one value per residual point: the band of that point's
+    own grid bin. It is null for pairs.
   - `missing` lists members with no usable, finite raw sample anywhere in the window. When it
     is not empty, `ts` and `residual` are empty.
   - `window` is the window used (the default is the compare chart's); it is null, and every
@@ -260,9 +259,14 @@ above are edited to match).
   estimated samples (`Quality::is_usable`); `stats` follows the same rule, so a series
   normalises on the samples the checks judge.
 - **The residual's band has one value per point.** A balance's band moves with the input, so
-  `band` is two arrays beside `residual`. Where the chart drops grid bins, a point carries
-  the widest band of its chart bin: a residual drawn inside the band was inside it in every
-  grid bin.
+  `band` is two arrays beside `residual`, and each point carries the band of its own grid
+  bin: a point drawn outside the band was outside it, a point inside was inside. Grid bins
+  the downsampling drops are not drawn; M4 keeps each chart bin's lowest and highest
+  residual, so an excursion can only be lost where the band itself moves inside one chart
+  bin by more than the residual does. (A first version widened the band over the chart bin,
+  which could hide an excursion; found in review.)
+- **Non-finite numbers** never reach the JSON: residual and band values that overflow become
+  null, and a series whose statistics are not finite gets `stats: null`.
 - **The grid is the group's `grid` param**, so the lane shows the bins the check judged. The
   binding takes it as `auto` or a duration, as the checks' params do.
 - **Bins that start before the window** (the grid is anchored at the epoch) are drawn at the

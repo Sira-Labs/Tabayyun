@@ -8,6 +8,7 @@ page normalises with, `residual` for the members aligned on the checks' grid.
 from __future__ import annotations
 
 import asyncio
+import math
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -94,8 +95,15 @@ def check_size(found: Sequence[series_chart.Extent], start_ns: int, end_ns: int,
 
 
 def _nullable(values: Sequence[float]) -> list[float | None]:
-    """NaN becomes None (JSON has no NaN); NaN is the only value that differs from itself."""
-    return [None if v != v else float(v) for v in values]
+    """NaN and infinities become None: JSON has neither, and a sum of huge samples can overflow."""
+    return [float(v) if math.isfinite(v) else None for v in values]
+
+
+def finite_stats(stats: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The window statistics, or None when one of them is not finite (nothing to normalise with)."""
+    if stats is None or not all(math.isfinite(stats[k]) for k in ("min", "max", "mean", "sd", "first_value")):
+        return None
+    return stats
 
 
 async def series_points(
@@ -117,7 +125,7 @@ async def series_points(
         ts=[int(t) for t in out["ts"]],
         values=_nullable(out["values"]),
         n_raw=int(out["n_raw"]),
-        stats=out["stats"],
+        stats=finite_stats(out["stats"]),
     )
 
 

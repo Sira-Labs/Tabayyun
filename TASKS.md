@@ -416,7 +416,8 @@ starts; the plan is the backlog until then.
       - "Usable" is good or estimated, as `align` and the checks count it; the spec's first
         text said good or uncertain.
       - The residual endpoint returns the band as arrays beside the residual (it moves with
-        the input), and the widest band of a chart bin where points were dropped.
+        the input); each point carries the band of its own grid bin, so downsampling cannot
+        hide an excursion behind a wider band (review finding).
       - The series of a compare chart are read and downsampled concurrently: 8 × 1M points
         answer in about 430 ms instead of 1.2 s.
       - The window helpers of the series chart moved to `routers/windows.py`, shared by both.

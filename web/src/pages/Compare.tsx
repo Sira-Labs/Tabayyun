@@ -133,6 +133,9 @@ function CompareView({ state, onApply }: { state: CompareState; onApply: (next: 
   if (chart.data && chart.data !== shown) setShown(chart.data);
   const bins = useMemo(() => (shown ? binsOf(shown) : null), [shown]);
   const range = useMemo<Range | null>(() => (bins ? { from: bins.from, to: bins.to } : null), [bins]);
+  // Before a chart has loaded (or when the requested window is refused), the controls show the
+  // window asked for, so it can still be changed.
+  const controlRange = range ?? requestRange;
 
   const findings = useQueries({
     queries: state.series.map((id) => ({
@@ -273,9 +276,9 @@ function CompareView({ state, onApply }: { state: CompareState; onApply: (next: 
           />
         </div>
       )}
-      {range && (
+      {controlRange && (
         <Controls
-          range={range}
+          range={controlRange}
           layout={state.layout}
           norm={state.norm}
           onRange={(r) => go(r, state.finding)}

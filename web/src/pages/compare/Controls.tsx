@@ -36,8 +36,10 @@ export function Controls({ range, layout, norm, onRange, onReset, onBack, canGoB
   }
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    const from = nsOfInput(fromText);
-    const to = nsOfInput(toText);
+    // The inputs show minutes. A field left as shown keeps its exact endpoint, so a zoomed
+    // window of 10:00:30 to 11:00:30 does not shift by half a minute on Show.
+    const from = fromText === localInput(range.from) ? range.from : nsOfInput(fromText);
+    const to = toText === localInput(range.to) ? range.to : nsOfInput(toText);
     if (!Number.isFinite(from) || !Number.isFinite(to)) return setError("Enter both From and To.");
     if (to <= from) return setError("To must be later than From.");
     setError(null);

@@ -59,7 +59,7 @@ pub fn m4(frame: &SeriesFrame, buckets: usize) -> (Vec<i64>, Vec<f64>) {
 }
 
 /// Bin of `t` among `buckets` equal bins of `[from, to)`; the caller keeps `t` in the window.
-pub(crate) fn bin_of(t: i64, from: i64, to: i64, buckets: usize) -> usize {
+fn bin_of(t: i64, from: i64, to: i64, buckets: usize) -> usize {
     let span = (to as i128 - from as i128).max(1);
     let b = (t as i128 - from as i128) * buckets as i128 / span;
     (b.max(0) as usize).min(buckets - 1)
@@ -168,12 +168,18 @@ pub fn window_stats(frame: &SeriesFrame, from: i64, to: i64) -> Option<WindowSta
     let usable = |i: &usize| frame.values[*i].is_finite() && frame.quality[*i].is_usable();
     let first = window_range(frame, from, to).find(usable)?;
     let (mut min, mut max) = (f64::INFINITY, f64::NEG_INFINITY);
+    for i in window_range(frame, from, to).filter(usable) {
+        min = min.min(frame.values[i]);
+        max = max.max(frame.values[i]);
+    }
+    // Mean and deviations are taken on values divided by the largest magnitude, so squares of
+    // very large samples cannot overflow; an all-zero window keeps a scale of 1.
+    let scale = min.abs().max(max.abs());
+    let scale = if scale > 0.0 { scale } else { 1.0 };
     // Welford's running mean and sum of squared deviations: stable on long, offset series.
     let (mut n, mut mean, mut m2) = (0.0_f64, 0.0_f64, 0.0_f64);
     for i in window_range(frame, from, to).filter(usable) {
-        let v = frame.values[i];
-        min = min.min(v);
-        max = max.max(v);
+        let v = frame.values[i] / scale;
         n += 1.0;
         let delta = v - mean;
         mean += delta / n;
@@ -182,8 +188,8 @@ pub fn window_stats(frame: &SeriesFrame, from: i64, to: i64) -> Option<WindowSta
     Some(WindowStats {
         min,
         max,
-        mean,
-        sd: (m2 / n).max(0.0).sqrt(),
+        mean: mean * scale,
+        sd: (m2 / n).max(0.0).sqrt() * scale,
         first_ts: frame.ts[first],
         first_value: frame.values[first],
     })
@@ -251,6 +257,22 @@ pub fn quality_runs(frame: &SeriesFrame, from: i64, to: i64, buckets: usize) -> 
 mod tests {
     use super::*;
     use crate::synth::{generate, inject, Rng, SynthSpec};
+
+    #[test]
+    fn window_stats_stay_finite_on_huge_and_zero_values() {
+        let frame = |values: Vec<f64>| {
+            let ts = (0..values.len() as i64).collect();
+            SeriesFrame::with_default_quality(crate::SeriesMeta::new("s"), ts, values).unwrap()
+        };
+        // The squared deviations of ±1e200 exceed f64; the population sd is 1e200.
+        let s = window_stats(&frame(vec![1e200, -1e200]), 0, 2).unwrap();
+        assert_eq!(s.mean, 0.0);
+        assert!(s.sd.is_finite() && (s.sd / 1e200 - 1.0).abs() < 1e-12, "sd = {}", s.sd);
+        let s = window_stats(&frame(vec![0.0, 0.0, 0.0]), 0, 3).unwrap();
+        assert_eq!((s.min, s.max, s.mean, s.sd), (0.0, 0.0, 0.0, 0.0));
+        let s = window_stats(&frame(vec![1e-300, 3e-300]), 0, 2).unwrap();
+        assert!((s.mean / 2e-300 - 1.0).abs() < 1e-12 && (s.sd / 1e-300 - 1.0).abs() < 1e-12);
+    }
 
     #[test]
     fn window_stats_use_raw_usable_samples_only() {

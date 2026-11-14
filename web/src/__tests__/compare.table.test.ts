@@ -1,14 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { binIndex, binWindow, binsOf, findingsCsv, readoutAt, stepBin, tableCsv, tableRows } from "../compare/table";
+import { binIndex, binWindow, binsOf, findingsCsv, pointBin, readoutAt, stepBin, tableCsv, tableRows } from "../compare/table";
 import { H, T0, compareSeries, finding } from "./compareFake";
 
 // Four one-hour bins.
-const BINS = { from: T0, to: T0 + 4 * H, width: 4 };
+const BINS = { from: T0, to: T0 + 4 * H, width: 4, fromNs: BigInt(T0), toNs: BigInt(T0 + 4 * H) };
 const at = (h: number) => String(T0 + h * H);
 const A = compareSeries(0, { name: "F1", unit: "MW", ts: [at(0), at(0.2), at(0.5), at(2.1)], values: [5, 9, 1, 4] });
 const B = compareSeries(1, { name: 'F2, "east"', unit: null, ts: [at(0.4), at(3.9)], values: [7, null] });
 
 describe("compare table", () => {
+  it("bins points by their exact ns timestamps", () => {
+    // A one-second window in 100 bins: 10 ms after the start is the first instant of bin 1.
+    // As a number, that timestamp rounds down by 128 ns and would land in bin 0.
+    const from = "1700000000000000000";
+    const bins = binsOf({ bins: { from, to: "1700000001000000000", width_px: 100 }, series: [] })!;
+    const edge = "1700000000010000000";
+    expect(Number(edge) - Number(from)).toBeLessThan(10_000_000);
+    expect(pointBin(edge, bins)).toBe(1);
+    expect(pointBin("1700000000009999999", bins)).toBe(0);
+    expect([pointBin(from, bins), pointBin("1700000000999999999", bins), pointBin("1700000005000000000", bins)]).toEqual([0, 99, 99]);
+    const s = compareSeries(0, { ts: [from, edge], values: [1, 7] });
+    expect(tableRows([s], bins).map((r) => [r.bin, r.cells[0]])).toEqual([
+      [0, { min: 1, max: 1 }],
+      [1, { min: 7, max: 7 }],
+    ]);
+    expect(readoutAt([s], bins, 1, Number(edge))[0]).toMatchObject({ value: 7 });
+    expect(readoutAt([s], bins, 0, Number(edge))[0]).toMatchObject({ value: 1 });
+  });
+
   it("reads the bins of a chart answer", () => {
     expect(binsOf({ bins: { from: String(T0), to: String(T0 + 4 * H), width_px: 4 }, series: [] })).toEqual(BINS);
     expect(binsOf({ bins: { from: null, to: null, width_px: 1200 }, series: [] })).toBeNull();

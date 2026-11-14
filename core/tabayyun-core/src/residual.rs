@@ -11,7 +11,7 @@
 //! above it.
 
 use crate::align::{align, grid_for};
-use crate::downsample::{bin_of, gap_breaks, m4_window};
+use crate::downsample::{gap_breaks, m4_window};
 use crate::error::{Error, Result};
 use crate::frame::{SeriesFrame, SeriesMeta};
 
@@ -123,10 +123,12 @@ fn band_of(sum_in: f64, loss: (f64, f64)) -> (f64, f64) {
 /// Chart points of `r` on `buckets` equal bins of `[from, to)`, with the loss band when `loss`
 /// gives `(loss_min, loss_max)`.
 ///
-/// The residual is M4-downsampled like a series. Where that drops grid bins, the band at a
-/// point is the lowest lower edge and the highest upper edge of its chart bin, so a residual
-/// drawn inside the band was inside it in every grid bin. The line breaks where grid bins were
-/// skipped.
+/// The residual is M4-downsampled like a series, and every point that is kept carries the
+/// band of its own grid bin. A point drawn outside the band was therefore outside it in its
+/// grid bin, and a point drawn inside was inside. Grid bins that M4 drops are not drawn at
+/// all: M4 keeps each chart bin's lowest and highest residual, so an excursion is lost only
+/// when the band itself moves inside one chart bin by more than the residual does. The line
+/// breaks where grid bins were skipped.
 pub fn residual_chart(
     r: &Residual,
     from: i64,
@@ -148,28 +150,10 @@ pub fn residual_chart(
     let Some(loss) = loss else {
         return Ok(ResidualChart { ts: out_ts, residual, ..ResidualChart::default() });
     };
-    let downsampled = ts.len() < r.ts.len();
-    let mut lo_bin = vec![f64::INFINITY; buckets];
-    let mut hi_bin = vec![f64::NEG_INFINITY; buckets];
-    if downsampled {
-        for (&t, &sum_in) in r.ts.iter().zip(&r.sum_in).filter(|(t, _)| (from..to).contains(*t)) {
-            let (lo, hi) = band_of(sum_in, loss);
-            let b = bin_of(t, from, to, buckets);
-            lo_bin[b] = lo_bin[b].min(lo);
-            hi_bin[b] = hi_bin[b].max(hi);
-        }
-    }
+    // `ts` is a subset of `r.ts`, which is strictly increasing, so the search always hits.
     let (lo, hi): (Vec<f64>, Vec<f64>) = ts
         .iter()
-        .map(|&t| {
-            if downsampled {
-                let b = bin_of(t, from, to, buckets);
-                (lo_bin[b], hi_bin[b])
-            } else {
-                // `ts` is `r.ts` restricted to the window, so the search always hits.
-                r.ts.binary_search(&t).map_or((f64::NAN, f64::NAN), |i| band_of(r.sum_in[i], loss))
-            }
-        })
+        .map(|t| r.ts.binary_search(t).map_or((f64::NAN, f64::NAN), |i| band_of(r.sum_in[i], loss)))
         .unzip();
     // The band breaks where the residual does: all three share `ts` and are finite together.
     let (_, lo) = gap_breaks(&ts, &lo, max_step);
@@ -284,24 +268,37 @@ mod tests {
     }
 
     #[test]
-    fn downsampled_band_keeps_its_extremes() {
-        // The input steps from 100 to 200 halfway; 2000 grid bins on 10 chart bins.
+    fn downsampled_points_carry_the_band_of_their_own_grid_bin() {
+        // The input steps from 100 to 200 inside the fifth of ten chart bins, and the residual
+        // is 8 throughout: outside the band of 5 before the step, inside the band of 10 after
+        // it. A band widened over the chart bin would hide the violation there.
         let n = 2000;
-        let input: Vec<f64> = (0..n).map(|i| if i < n / 2 { 100.0 } else { 200.0 }).collect();
+        let step = 900;
+        let input: Vec<f64> = (0..n).map(|i| if i < step { 100.0 } else { 200.0 }).collect();
         let a = frame("in", &input);
-        let b = frame("out", &input.iter().map(|x| x * 0.98).collect::<Vec<_>>());
+        let b = frame("out", &input.iter().map(|x| x - 8.0).collect::<Vec<_>>());
         let to = n as i64 * MIN;
         let r = residual(&[&a, &b], &[1.0, -1.0], None, 0, to).unwrap();
         let chart = residual_chart(&r, 0, to, 10, Some((-0.01, 0.05))).unwrap();
         assert!(chart.ts.len() <= 40 && chart.ts.len() < n);
         assert_eq!(chart.ts.len(), chart.lo.len());
         assert_eq!(chart.ts.len(), chart.hi.len());
+        let mut in_step_bin = (0, 0);
         for i in 0..chart.ts.len() {
-            let first_half = chart.ts[i] < to / 2;
-            assert_eq!(chart.lo[i], if first_half { -1.0 } else { -2.0 }, "point {i}");
-            assert_eq!(chart.hi[i], if first_half { 5.0 } else { 10.0 }, "point {i}");
-            assert!(chart.residual[i] >= chart.lo[i] && chart.residual[i] <= chart.hi[i]);
+            let before = chart.ts[i] < step as i64 * MIN;
+            assert_eq!(chart.lo[i], if before { -1.0 } else { -2.0 }, "point {i}");
+            assert_eq!(chart.hi[i], if before { 5.0 } else { 10.0 }, "point {i}");
+            assert_eq!(chart.residual[i] > chart.hi[i], before, "point {i}");
+            if (800 * MIN..1000 * MIN).contains(&chart.ts[i]) {
+                if before {
+                    in_step_bin.0 += 1
+                } else {
+                    in_step_bin.1 += 1
+                }
+            }
         }
+        // The chart bin of the step shows both: a point outside its band and one inside.
+        assert!(in_step_bin.0 >= 1 && in_step_bin.1 >= 1, "{in_step_bin:?}");
     }
 
     #[test]

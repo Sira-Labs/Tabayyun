@@ -3,18 +3,32 @@
 import type { Finding } from "../types";
 import type { CompareChartResponse, CompareSeries } from "./api";
 
-/** The window drawn, cut into `width` equal bins; times in ns. */
-export type Bins = { from: number; to: number; width: number };
+/**
+ * The window drawn, cut into `width` equal bins; times in ns. `from` and `to` are numbers for
+ * drawing (exact to about 256 ns at today's epoch); `fromNs` and `toNs` are the exact bounds,
+ * which decide the bin a point belongs to.
+ */
+export type Bins = { from: number; to: number; width: number; fromNs: bigint; toNs: bigint };
 
 /** The bins of a chart answer, or null when it reports no window (nothing cached). */
 export function binsOf(chart: CompareChartResponse): Bins | null {
   if (chart.bins.from === null || chart.bins.to === null) return null;
-  const from = Number(chart.bins.from);
-  const to = Number(chart.bins.to);
-  return to > from && chart.bins.width_px > 0 ? { from, to, width: chart.bins.width_px } : null;
+  const fromNs = BigInt(chart.bins.from);
+  const toNs = BigInt(chart.bins.to);
+  if (toNs <= fromNs || chart.bins.width_px <= 0) return null;
+  return { from: Number(fromNs), to: Number(toNs), width: chart.bins.width_px, fromNs, toNs };
 }
 
-/** The bin a time falls in, clamped to the window. */
+/**
+ * The bin of a point, from its exact ns timestamp. A number cannot hold ns since the epoch,
+ * so a point just past a bin edge would otherwise fall back into the bin before it.
+ */
+export function pointBin(ts: string, bins: Bins): number {
+  const i = Number(((BigInt(ts) - bins.fromNs) * BigInt(bins.width)) / (bins.toNs - bins.fromNs));
+  return Math.min(bins.width - 1, Math.max(0, i));
+}
+
+/** The bin a cursor position falls in, clamped to the window; points use `pointBin`. */
 export function binIndex(ts: number, bins: Bins): number {
   const i = Math.floor(((ts - bins.from) / (bins.to - bins.from)) * bins.width);
   return Math.min(bins.width - 1, Math.max(0, i));
@@ -36,7 +50,7 @@ export function tableRows(series: CompareSeries[], bins: Bins): TableRow[] {
     s.ts.forEach((t, i) => {
       const value = s.values[i];
       if (value === null || value === undefined) return;
-      const bin = binIndex(Number(t), bins);
+      const bin = pointBin(t, bins);
       let row = rows.get(bin);
       if (!row) {
         row = { bin, ...binWindow(bin, bins), cells: series.map(() => null) };
@@ -58,7 +72,7 @@ export function readoutAt(series: CompareSeries[], bins: Bins, bin: number, curs
     s.ts.forEach((t, i) => {
       const value = s.values[i];
       const ts = Number(t);
-      if (value === null || value === undefined || binIndex(ts, bins) !== bin) return;
+      if (value === null || value === undefined || pointBin(t, bins) !== bin) return;
       if (!best || Math.abs(ts - cursor) < Math.abs(best.ts - cursor)) best = { id: s.id, ts, value };
     });
     return best;
