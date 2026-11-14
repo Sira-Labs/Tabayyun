@@ -296,9 +296,7 @@ async def _describe(
         stmt = select(Series.id, Series.external_id).where(Series.source_id == plan.source_id)
         if plan.series_ids is not None:
             stmt = stmt.where(Series.id.in_(plan.series_ids))
-        refs = [
-            PointRef(i, e) for i, e in (await session.execute(stmt.order_by(Series.external_id))).tuples()
-        ]
+        refs = [PointRef(i, e) for i, e in (await session.execute(stmt.order_by(Series.external_id)))]
     chunk = plan.connector.limits().max_points
     descriptions: list[PointDescription] = []
     for lo in range(0, len(refs), chunk):
@@ -417,7 +415,7 @@ async def _gaps(
         stmt = stmt.where(Series.id.in_(fetch.series_ids))
     start_ns, end_ns = datetime_to_ns(fetch.window_start), datetime_to_ns(fetch.window_end)
     gaps: dict[PointRef, list[tuple[int, int]]] = {}
-    for series_id, external_id in (await session.execute(stmt.order_by(Series.external_id))).tuples():
+    for series_id, external_id in await session.execute(stmt.order_by(Series.external_id)):
         if fetch.force:
             gaps[PointRef(series_id, external_id)] = [(start_ns, end_ns)]
             continue

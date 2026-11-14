@@ -74,7 +74,7 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _filtered(query: AuditQuery) -> Select[tuple[AuditEvent, User]]:
+def _filtered(query: AuditQuery) -> Select[AuditEvent, User]:
     stmt = select(AuditEvent, User).outerjoin(User, User.id == AuditEvent.actor_user_id)
     if query.workspace_ids is not None:
         stmt = stmt.where(AuditEvent.workspace_id.in_(query.workspace_ids))
@@ -98,14 +98,10 @@ async def list_events(
 ) -> tuple[list[tuple[AuditEvent, User | None]], bool]:
     """One page of events, newest first, and whether more follow. RLS keeps it to the org."""
     rows = (
-        (
-            await session.execute(
-                _filtered(query)
-                .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
-                .limit(query.limit + 1)
-            )
+        await session.execute(
+            _filtered(query)
+            .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+            .limit(query.limit + 1)
         )
-        .tuples()
-        .all()
-    )
+    ).all()
     return [(event, user) for event, user in rows[: query.limit]], len(rows) > query.limit

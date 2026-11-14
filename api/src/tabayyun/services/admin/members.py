@@ -99,7 +99,7 @@ async def list_members(
         )
     if after is not None:
         stmt = stmt.where(User.email > after)
-    rows = (await session.execute(stmt.order_by(User.email).limit(limit + 1))).tuples().all()
+    rows = (await session.execute(stmt.order_by(User.email).limit(limit + 1))).all()
     page = [_member(m, u) for m, u in rows[:limit]]
     return page, encode_cursor(page[-1].email) if len(rows) > limit else None
 
@@ -109,16 +109,12 @@ async def get_member(session: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUI
     if user_id == BOOTSTRAP_USER_ID:
         raise NotFoundError
     row = (
-        (
-            await session.execute(
-                select(OrgMembership, User)
-                .join(User, User.id == OrgMembership.user_id)
-                .where(OrgMembership.org_id == org_id, OrgMembership.user_id == user_id)
-            )
+        await session.execute(
+            select(OrgMembership, User)
+            .join(User, User.id == OrgMembership.user_id)
+            .where(OrgMembership.org_id == org_id, OrgMembership.user_id == user_id)
         )
-        .tuples()
-        .one_or_none()
-    )
+    ).one_or_none()
     if row is None:
         raise NotFoundError
     return _member(*row)

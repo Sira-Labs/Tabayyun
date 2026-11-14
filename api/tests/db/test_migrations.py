@@ -316,3 +316,37 @@ def test_0010_downgrades_keeping_ingest_jobs(db_url, fresh_schema):
     migrate.upgrade(db_url, "head", timescale="auto")
     assert _current_revision(db_url) == migrate.head_revision()
     migrate.check(db_url)
+
+
+def test_0011_replaces_the_job_fetch_function_and_downgrades(db_url, fresh_schema):
+    """0011 installs Procrastinate 3.11's `procrastinate_fetch_job_v2`; its downgrade puts the
+    3.9.0 definition back, and both fetch a queued job."""
+    fresh_schema("auto")
+    engine = create_engine(db_url)
+    source = text("SELECT prosrc FROM pg_proc WHERE proname = 'procrastinate_fetch_job_v2'")
+    fetch = text("SELECT id, status FROM procrastinate_fetch_job_v2(ARRAY['q0011']::varchar[], NULL)")
+    queue = text(
+        "INSERT INTO procrastinate_jobs (queue_name, task_name, lock) "
+        "VALUES ('q0011', 't', :lock) RETURNING id"
+    )
+    try:
+        with engine.begin() as conn:
+            assert "jobs.lock IS NULL" in conn.execute(source).scalar_one()
+            unlocked = conn.execute(queue, {"lock": None}).scalar_one()
+            assert conn.execute(fetch).one() == (unlocked, "doing")
+        migrate.downgrade(db_url, "0010")
+        assert _current_revision(db_url) == "0010"
+        with engine.begin() as conn:
+            assert "jobs.lock IS NOT NULL" in conn.execute(source).scalar_one()
+            # The first job of a lock runs; a second one with the same lock waits behind it.
+            first = conn.execute(queue, {"lock": "L"}).scalar_one()
+            conn.execute(queue, {"lock": "L"})
+            assert conn.execute(fetch).one() == (first, "doing")
+            assert conn.execute(fetch).one() == (None, None)
+        migrate.upgrade(db_url, "head", timescale="auto")
+        with engine.begin() as conn:
+            assert "jobs.lock IS NULL" in conn.execute(source).scalar_one()
+            assert conn.execute(fetch).one() == (None, None)
+    finally:
+        engine.dispose()
+        fresh_schema("auto")

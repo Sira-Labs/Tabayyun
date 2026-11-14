@@ -19,6 +19,7 @@ from typing import Any
 
 import structlog
 from sqlalchemy import func, select, tuple_
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -254,7 +255,7 @@ async def series_stats(
     latest = (
         select(Score.series_id, Score.overall, Score.computed_at)
         .where(Score.series_id.in_(series_ids), Score.layer == "raw")
-        .distinct(Score.series_id)
+        .ext(distinct_on(Score.series_id))
         .order_by(Score.series_id, Score.computed_at.desc())
     )
     runs = (
@@ -326,7 +327,7 @@ async def list_series(
         latest = (
             select(Score.series_id, Score.overall)
             .where(Score.layer == "raw")
-            .distinct(Score.series_id)
+            .ext(distinct_on(Score.series_id))
             .order_by(Score.series_id, Score.computed_at.desc())
             .subquery()
         )
@@ -362,7 +363,7 @@ async def list_units(session: AsyncSession, scope: Scope) -> list[tuple[str, int
         .group_by(key)
         .order_by(count.desc(), key)
     )
-    return [(str(unit), int(n)) for unit, n in (await session.execute(stmt)).tuples()]
+    return [(str(unit), int(n)) for unit, n in (await session.execute(stmt))]
 
 
 # Updates

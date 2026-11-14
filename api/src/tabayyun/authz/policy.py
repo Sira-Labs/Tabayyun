@@ -33,7 +33,7 @@ class ForbiddenError(Exception):
     """The principal sees the workspace, but their role does not allow the action."""
 
 
-def _active_member(principal: Principal) -> Select[tuple[str]]:
+def _active_member(principal: Principal) -> Select[str]:
     """The principal's org role, only while their user is not disabled."""
     return (
         select(OrgMembership.role)
@@ -104,9 +104,7 @@ async def workspace_roles(
                     WorkspaceMembership.user_id == principal.user_id
                 )
             )
-        )
-        .tuples()
-        .all()
+        ).all()
     )
     via_team: dict[uuid.UUID, list[WorkspaceRole]] = {}
     team_rows = await session.execute(
@@ -114,7 +112,7 @@ async def workspace_roles(
         .join(TeamMember, TeamMember.team_id == WorkspaceTeamRole.team_id)
         .where(TeamMember.user_id == principal.user_id)
     )
-    for workspace_id, team_role in team_rows.tuples():
+    for workspace_id, team_role in team_rows:
         via_team.setdefault(workspace_id, []).append(WorkspaceRole(team_role))
     workspaces = await session.scalars(
         select(Workspace).where(Workspace.org_id == principal.org_id).order_by(Workspace.name, Workspace.id)
@@ -130,7 +128,7 @@ async def workspace_roles(
     return result
 
 
-def visible_workspaces(principal: Principal) -> Select[tuple[uuid.UUID]]:
+def visible_workspaces(principal: Principal) -> Select[uuid.UUID]:
     """Ids of the workspaces in which the principal has any role (the `visible_ids()` of ADR-0007)."""
     member = _active_member(principal).exists()
     admin_roles = [role.value for role in ORG_ADMINS]

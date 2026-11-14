@@ -45,7 +45,7 @@ async def list_teams(session: AsyncSession, org_id: uuid.UUID) -> list[TeamView]
         .where(TeamMember.org_id == org_id)
         .order_by(User.email)
     )
-    for team_id, user in members.tuples():
+    for team_id, user in members:
         teams[team_id].members.append(user)
     roles = await session.execute(
         select(WorkspaceTeamRole.team_id, Workspace, WorkspaceTeamRole.role)
@@ -53,7 +53,7 @@ async def list_teams(session: AsyncSession, org_id: uuid.UUID) -> list[TeamView]
         .where(WorkspaceTeamRole.org_id == org_id)
         .order_by(Workspace.name)
     )
-    for team_id, workspace, role in roles.tuples():
+    for team_id, workspace, role in roles:
         teams[team_id].workspaces.append((workspace, role))
     return list(teams.values())
 
