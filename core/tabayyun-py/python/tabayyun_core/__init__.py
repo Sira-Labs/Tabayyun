@@ -186,7 +186,7 @@ def residual(
     from_ns: int,
     to_ns: int,
     *,
-    grid_ns: int | None = None,
+    grid: str | None = None,
     buckets: int | None = None,
     loss: tuple[float, float] | None = None,
     ts_col: str = "ts",
@@ -197,7 +197,9 @@ def residual(
 
     ``members`` lists ``(series_id, sign)`` in order: ``+1`` for inputs and a pair's first
     member, ``-1`` for outputs and the second. The members are aligned on the grid the checks
-    use, and the residual exists only in grid bins where every member has a value.
+    use, and the residual exists only in grid bins where every member has a value. ``grid``
+    is ``auto`` (the coarsest expected interval among the members, the default) or a duration
+    such as ``15m``.
 
     Returns ``grid_ns``, ``missing`` (members without a usable, finite sample in the window;
     then there is no residual), ``ts`` and ``residual``. Without ``buckets`` these are per grid
@@ -211,7 +213,7 @@ def residual(
             members,
             from_ns,
             to_ns,
-            grid_ns,
+            grid,
             buckets,
             loss,
             ts_col,

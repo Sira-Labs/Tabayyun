@@ -118,6 +118,10 @@ def test_residual_of_a_balance_and_a_pair():
     tables["b"] = _series([98.0] * n, quality=["bad"] * n)
     missing = tc.residual(tables, {}, members, 0, end, buckets=1000, loss=(-0.01, 0.05))
     assert missing["missing"] == ["b"] and missing["ts"] == [] and missing["residual"] == []
+    coarse = tc.residual(tables, {}, [("a", 1.0), ("c", -1.0)], 0, end, grid="1h")
+    assert coarse["grid_ns"] == 3600 * 10**9 and len(coarse["ts"]) == n // 60
+    with pytest.raises(ValueError, match="grid: cannot parse duration"):
+        tc.residual(tables, {}, members, 0, end, grid="soon")
     with pytest.raises(ValueError, match="no table for member x"):
         tc.residual(tables, {}, [("a", 1.0), ("x", -1.0)], 0, end)
 

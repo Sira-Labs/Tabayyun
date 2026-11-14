@@ -15,6 +15,7 @@ use tabayyun_core::downsample::{gap_breaks, m4, m4_window, quality_runs, window_
 use tabayyun_core::frame::modal_interval;
 use tabayyun_core::residual::{residual as group_residual, residual_chart};
 use tabayyun_core::synth::{generate, inject, Rng, SynthSpec};
+use tabayyun_core::time::parse_duration;
 use tabayyun_core::{
     CheckConfig, CheckContext, CheckOutput, Profile, Quality, Registry, Scorer, SeriesFrame, SeriesGroup,
     SeriesMeta, Window,
@@ -325,13 +326,14 @@ fn compare_series<'py>(
 ///
 /// `members` lists `(series_id, sign)` in order: `+1` for inputs and a pair's first member,
 /// `-1` for outputs and the second member. `tables` maps each id to its Arrow data and
-/// `metas_json` to its metadata (for the grid). Returns a dict with `grid_ns`, `missing`
+/// `metas_json` to its metadata. `grid` is `auto` (the coarsest expected interval among the
+/// members, the default) or a duration such as `15m`, as in the checks' params. Returns a dict with `grid_ns`, `missing`
 /// (members without a usable, finite sample in the window), `ts` and `residual`. Without
 /// `buckets` these are per grid bin, with `sum_in`. With `buckets` they are chart points on
 /// that many bins of the window, with the band `lo` and `hi` when `loss` gives
 /// `(loss_min, loss_max)`.
 #[pyfunction]
-#[pyo3(signature = (tables, metas_json, members, from_ns, to_ns, grid_ns=None, buckets=None, loss=None, ts_col="ts", value_col="value", quality_col=Some("quality")))]
+#[pyo3(signature = (tables, metas_json, members, from_ns, to_ns, grid=None, buckets=None, loss=None, ts_col="ts", value_col="value", quality_col=Some("quality")))]
 #[allow(clippy::too_many_arguments)]
 fn residual<'py>(
     py: Python<'py>,
@@ -340,7 +342,7 @@ fn residual<'py>(
     members: Vec<(String, f64)>,
     from_ns: i64,
     to_ns: i64,
-    grid_ns: Option<i64>,
+    grid: Option<&str>,
     buckets: Option<usize>,
     loss: Option<(f64, f64)>,
     ts_col: &str,
@@ -358,6 +360,12 @@ fn residual<'py>(
         frames.push(frame.map_err(err)?);
     }
     let signs: Vec<f64> = members.iter().map(|(_, sign)| *sign).collect();
+    let grid_ns = match grid.filter(|g| *g != "auto") {
+        Some(g) => Some(parse_duration(g).filter(|ns| *ns > 0).ok_or_else(|| {
+            PyValueError::new_err(format!("grid: cannot parse duration `{g}` (use e.g. 90s, 15m, 2h, 1d)"))
+        })?),
+        None => None,
+    };
     let (r, chart) = py.detach(move || {
         let frames: Vec<SeriesFrame> =
             frames.into_iter().map(|f| if f.is_sorted() { f } else { f.normalized().0 }).collect();
