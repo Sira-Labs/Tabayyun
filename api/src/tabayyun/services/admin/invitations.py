@@ -128,7 +128,7 @@ async def list_invitations(
             Invitation.revoked_at.is_(None),
             Invitation.expires_at > func.now(),
         )
-    rows = (await session.execute(stmt.order_by(Invitation.created_at.desc(), Invitation.id))).tuples().all()
+    rows = (await session.execute(stmt.order_by(Invitation.created_at.desc(), Invitation.id))).all()
     now = _now()
     return [InvitationView(i, u, w, status_of(i, now)) for i, u, w in rows]
 
@@ -283,18 +283,14 @@ async def _mail_of(
     """The message to send, or None when the invitation is no longer pending."""
     async with factory() as session, session.begin():
         row = (
-            (
-                await session.execute(
-                    select(Invitation, Org, User, Workspace)
-                    .join(Org, Org.id == Invitation.org_id)
-                    .outerjoin(User, User.id == Invitation.invited_by)
-                    .outerjoin(Workspace, Workspace.id == Invitation.workspace_id)
-                    .where(Invitation.id == invitation_id)
-                )
+            await session.execute(
+                select(Invitation, Org, User, Workspace)
+                .join(Org, Org.id == Invitation.org_id)
+                .outerjoin(User, User.id == Invitation.invited_by)
+                .outerjoin(Workspace, Workspace.id == Invitation.workspace_id)
+                .where(Invitation.id == invitation_id)
             )
-            .tuples()
-            .one_or_none()
-        )
+        ).one_or_none()
     if row is None:
         return None
     invitation, org, inviter, workspace = row

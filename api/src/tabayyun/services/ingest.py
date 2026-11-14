@@ -191,7 +191,7 @@ async def _known(
             stmt = select(SourceFile.path, SourceFile.size, SourceFile.mtime, SourceFile.sha256).where(
                 SourceFile.source_id == source_id, SourceFile.path.in_(paths[lo : lo + SERIES_CHUNK])
             )
-            for path, size, mtime, digest in (await session.execute(stmt)).tuples():
+            for path, size, mtime, digest in await session.execute(stmt):
                 out[path] = _Known(size, datetime_to_ns(mtime), digest)
     return out
 
@@ -326,7 +326,7 @@ async def _series(
                 Series.source_id == source, Series.external_id.in_(chunk)
             )
         )
-        ids.update(dict(rows.tuples().all()))
+        ids.update(dict(rows.all()))
     return ids, created
 
 

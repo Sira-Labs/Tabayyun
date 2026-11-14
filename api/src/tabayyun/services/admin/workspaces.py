@@ -178,9 +178,9 @@ async def get_access(session: AsyncSession, org_id: uuid.UUID, workspace_id: uui
         .order_by(User.email)
     )
     return Access(
-        members=list(members.tuples().all()),
-        teams=list(teams.tuples().all()),
-        org_admins=list(admins.tuples().all()),
+        members=list(members.all()),
+        teams=list(teams.all()),
+        org_admins=list(admins.all()),
     )
 
 
