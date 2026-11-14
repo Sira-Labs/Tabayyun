@@ -433,6 +433,8 @@ ROUTES = [
     # Spec 026: scans of file-drop sources and their files.
     ("POST", "/api/sources/{source_id}/ingest", "source", None),
     ("GET", "/api/sources/{source_id}/files", "source", None),
+    # Spec 018: the residual of a group.
+    ("GET", "/api/series-groups/{group_id}/residual", "group", None),
 ]
 READ_BACK = {
     "run": "/api/runs/{}",
@@ -523,6 +525,14 @@ async def test_other_org_gets_404_for_every_route(seed, app_for, method, templat
     assert r.status_code == 404, (method, template, r.text)
     owner_a = app_for(BOOTSTRAP_USER_ID)
     assert (await _call(owner_a, "GET", READ_BACK[kind].format(seed.a[kind]))).status_code == 200
+
+
+async def test_other_org_cannot_compare_series_by_id(seed, app_for):
+    """The compare chart takes its series ids in the query (spec 018): org A's are unknown to B."""
+    b = app_for(USER_B, ORG_B, WORKSPACE_B)
+    r = await _call(b, "GET", f"/api/compare/chart?series={seed.a['series']}&series={seed.b['series']}")
+    assert r.status_code == 404, r.text
+    assert r.json()["detail"]["unknown"] == [seed.a["series"]]
 
 
 @pytest.mark.parametrize(("method", "template", "body"), ADMIN_ROUTES)

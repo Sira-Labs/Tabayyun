@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Annotated
 
@@ -10,6 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tabayyun.authz import ReadScope, get_session
+from tabayyun.db.models import Series
 from tabayyun.routers.windows import read_or_503, window_or_422
 from tabayyun.services import compare, series_chart
 
@@ -123,10 +125,12 @@ async def get_compare_chart(
         except series_chart.WindowTooLargeError as exc:
             raise HTTPException(status_code=422, detail="window_too_large") from exc
         cache = request.app.state.run_cache
-        points = [
-            await compare.series_points(s, await read_or_503(cache, s, window), *window, width_px)
-            for s in members
-        ]
+
+        async def one(s: Series) -> compare.SeriesPoints:
+            return await compare.series_points(s, await read_or_503(cache, s, window), *window, width_px)
+
+        # The reads and the downsampling run in threads, so the series do not wait for each other.
+        points = list(await asyncio.gather(*(one(s) for s in members)))
     return CompareChartOut(
         bins=BinsOut.model_validate(
             {

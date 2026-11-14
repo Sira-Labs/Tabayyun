@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+import logging
 import math
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pyarrow as pa
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from tabayyun.db.models import DEFAULT_ORG_ID, Series
 from tabayyun.main import create_app
+from tabayyun.services import coverage
 from tabayyun.services.timeconv import datetime_to_ns
-from tenancy import app_settings
+from tenancy import app_settings, org_session
+
+log = logging.getLogger(__name__)
 
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
 NS0 = datetime_to_ns(T0)
@@ -312,3 +319,54 @@ async def test_residual_skips_incomplete_bins(client, balance):
     assert all(x == pytest.approx(202.0) for x in minutes.values())
     # The line breaks once after each run of skipped bins.
     assert body["residual"].count(None) == 2
+
+
+async def test_chart_of_eight_series_of_a_million_points(app, client):
+    """8 × 1M raw points come back on shared bins; the time is logged (spec 018)."""
+    n = 1_000_000
+    start = NS0 + 10 * 24 * HOUR
+    ts = pa.array(range(start, start + n * 10**9, 10**9), type=pa.int64()).cast(pa.timestamp("ns", tz="UTC"))
+    quality = pa.array(["good"] * n)
+    ids = []
+    for k in range(8):
+        sid = await upload(client, f"big-{k}", csv([1.0, 2.0, 3.0]))
+        async with org_session(app) as session:
+            series = await session.get(Series, uuid.UUID(sid))
+            assert series is not None
+            table = pa.table(
+                {"ts": ts, "value": pa.array([float((i + k) % 3600) for i in range(n)]), "quality": quality}
+            )
+            write = app.state.run_cache.write_series(
+                source_id=str(series.source_id),
+                series_id=sid,
+                table=table,
+                ts_col="ts",
+                value_col="value",
+                quality_col="quality",
+                ingest_col=None,
+            )
+            await coverage.record(
+                session,
+                org_id=DEFAULT_ORG_ID,
+                series_id=series.id,
+                start_ns=write.start_ns,
+                end_ns=write.end_ns,
+                rows=write.rows,
+                now=datetime.now(UTC),
+            )
+            await session.commit()
+        ids.append(sid)
+    params = [*[("series", sid) for sid in ids], ("from", str(start)), ("to", str(start + n * 10**9))]
+    timings = []
+    for _ in range(2):
+        t0 = time.perf_counter()
+        r = await client.get("/api/compare/chart", params=params)
+        timings.append(time.perf_counter() - t0)
+        assert r.status_code == 200, r.text
+    body = r.json()
+    assert [s["n_raw"] for s in body["series"]] == [n] * 8
+    assert all(0 < len(s["ts"]) <= 4 * 1200 for s in body["series"])
+    assert all(s["stats"]["min"] == 0.0 and s["stats"]["max"] == 3599.0 for s in body["series"])
+    log.warning("compare chart of 8 × 1M points: %.0f ms, then %.0f ms", *(t * 1000 for t in timings))
+    # Measured locally well under the spec's 1.5 s; CI runners vary, so the bound here is loose.
+    assert min(timings) < 15.0
