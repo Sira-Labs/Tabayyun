@@ -82,6 +82,13 @@ All notable changes to this project are documented here. The format follows
 - OPC UA connections refuse an unpinned or changed server certificate. They are unencrypted
   only with an explicit `allow_insecure`, and the client key never leaves the encrypted
   credentials (spec 023).
+- Dependencies with published advisories are updated, so the blocking audits in CI pass
+  again (they had failed on every pull request since 19 Oct):
+  - Rust: `rustls` 0.23.46, `rustls-webpki`, `quinn-proto`, `zstd` 0.13.5 with `zstd-safe`
+    7.4.1, `tokio` 1.54.1, `rustix`, and Arrow and Parquet 59.3.2 (still major 59).
+  - Python: `certifi` 2026.10.23 and `joserfc` 1.8.0.
+  - Web: `vite` 8.3.8 and, through `jsdom` and the lint plugins, `undici` 8.12.4 and `zod`
+    4.6.7, with the other minor and patch updates of the web packages.
 
 ### Fixed
 - A cache store setting with a space or quotes (for example `"http://…:9000"`) made the S3
