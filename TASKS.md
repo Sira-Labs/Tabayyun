@@ -383,13 +383,17 @@ Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, S
         snapshot test on 3.11, see the two entries below.
       - `pnpm update` raised the ranges in `web/package.json` to the installed versions, as
         Dependabot does; `jsdom` stays on 30 (31 is a major).
-- [ ] SQLAlchemy 2.1: `Select[tuple[...]]` annotations in `authz/policy.py` and
-      `services/admin/audit.py` no longer type-check (rows are typed directly), and
-      `Result.tuples()` and `select().distinct(col)` are deprecated (`services/fetches.py`,
-      `services/series.py`). Migrate, then let the python-minor group through.
-- [ ] Procrastinate 3.11: its `schema.sql` changed, so
-      `test_procrastinate_schema_snapshot_matches_installed_package` fails. Needs a new
-      Alembic revision that runs Procrastinate's own migration files (spec 002 note).
+- [x] **SQLAlchemy 2.1 and Procrastinate 3.11** (14 Nov, no spec; replaces Dependabot's
+      python-minor group #110 and `@vitejs/plugin-react` 6, #99).
+      - Statements are annotated `Select[A, B]`; rows unpack without `.tuples()`; the latest
+        score per series uses PostgreSQL's `distinct_on` extension. The floor is now
+        `sqlalchemy>=2.1`, because the annotations do not type-check on 2.0.
+      - Migration 0011 runs a copy of Procrastinate's one migration since 3.9.0. Old and new
+        workers run against either function, so deploy order does not matter. Its downgrade
+        reads the 3.9.0 function from the snapshot of 0002.
+      - The snapshot test now checks that every migration Procrastinate ships after 3.9.0 has
+        a copy here, and that the installed schema differs from the snapshot only in that
+        function.
 
 ## Later sprints
 

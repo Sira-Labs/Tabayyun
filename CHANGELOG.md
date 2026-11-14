@@ -73,6 +73,10 @@ All notable changes to this project are documented here. The format follows
 - A point a connector cannot read no longer fails a fetch. The other points are fetched, and
   the fetch ends `partial` with the failed points in `result.point_errors`. The `synthetic`
   connector reports unconfigured points this way instead of returning nothing (spec 022).
+- Dependencies: SQLAlchemy 2.1 (the API no longer uses the deprecated `Result.tuples()` and
+  `select().distinct(column)`), Procrastinate 3.11 with migration 0011, which installs its
+  faster `procrastinate_fetch_job_v2`, FastAPI 0.163, pydantic 2.14, pyarrow 26 and
+  `@vitejs/plugin-react` 6.
 
 ### Security
 - Connectors only reach addresses the network policy allows. Loopback, link-local and cloud
