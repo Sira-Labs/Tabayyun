@@ -11,8 +11,9 @@ use pyo3::types::PyDict;
 use pyo3_arrow::{PyRecordBatch, PyRecordBatchReader};
 use std::collections::BTreeMap;
 use tabayyun_core::cache::{catch_panic, Cache, StoreConfig};
-use tabayyun_core::downsample::{gap_breaks, m4, m4_window, quality_runs};
+use tabayyun_core::downsample::{gap_breaks, m4, m4_window, quality_runs, window_stats};
 use tabayyun_core::frame::modal_interval;
+use tabayyun_core::residual::{residual as group_residual, residual_chart};
 use tabayyun_core::synth::{generate, inject, Rng, SynthSpec};
 use tabayyun_core::{
     CheckConfig, CheckContext, CheckOutput, Profile, Quality, Registry, Scorer, SeriesFrame, SeriesGroup,
@@ -205,6 +206,27 @@ fn downsample_m4<'py>(
     PyRecordBatch::new(batch).into_pyarrow(py)
 }
 
+/// M4 points of a sorted frame on `buckets` bins of `[from_ns, to_ns)`, with a NaN where the
+/// line breaks across a gap, and the number of raw samples in the window.
+fn chart_points(
+    frame: &SeriesFrame,
+    from_ns: i64,
+    to_ns: i64,
+    buckets: usize,
+    expected_interval_ns: Option<i64>,
+) -> (Vec<i64>, Vec<f64>, usize) {
+    let lo = frame.ts.partition_point(|&t| t < from_ns);
+    let hi = frame.ts.partition_point(|&t| t < to_ns);
+    // The interval only sets where gaps break the line, so a sample of the window will do.
+    let interval =
+        expected_interval_ns.or_else(|| modal_interval(&frame.ts[lo..hi.max(lo).min(lo + 10_000)]));
+    let bin = ((to_ns as i128 - from_ns as i128) / buckets as i128).max(1) as i64;
+    let max_step = (2 * bin).max(interval.map_or(0, |i| i.saturating_mul(3)));
+    let (ts, values) = m4_window(frame, from_ns, to_ns, buckets);
+    let (ts, values) = gap_breaks(&ts, &values, max_step);
+    (ts, values, hi.saturating_sub(lo))
+}
+
 /// Chart points of one series over `[from_ns, to_ns)` (spec 025): M4 on `buckets` window bins
 /// with gap breaks, plus the runs of non-good quality. Returns a dict with `ts` (list of int),
 /// `values` (list of float, NaN where the line breaks), `quality` (list of `(start, end, class)`)
@@ -229,16 +251,7 @@ fn chart<'py>(
     let frame = frame_from_py(data, r#"{"id":"_"}"#, ts_col, value_col, quality_col, None)?;
     let (ts, values, runs, n_raw) = py.detach(move || {
         let frame = if frame.is_sorted() { frame } else { frame.normalized().0 };
-        let lo = frame.ts.partition_point(|&t| t < from_ns);
-        let hi = frame.ts.partition_point(|&t| t < to_ns);
-        let n_raw = hi.saturating_sub(lo);
-        // The interval only sets where gaps break the line, so a sample of the window will do.
-        let interval =
-            expected_interval_ns.or_else(|| modal_interval(&frame.ts[lo..hi.max(lo).min(lo + 10_000)]));
-        let bin = ((to_ns as i128 - from_ns as i128) / buckets as i128).max(1) as i64;
-        let max_step = (2 * bin).max(interval.map_or(0, |i| i.saturating_mul(3)));
-        let (ts, values) = m4_window(&frame, from_ns, to_ns, buckets);
-        let (ts, values) = gap_breaks(&ts, &values, max_step);
+        let (ts, values, n_raw) = chart_points(&frame, from_ns, to_ns, buckets, expected_interval_ns);
         (ts, values, quality_runs(&frame, from_ns, to_ns, buckets), n_raw)
     });
     let out = PyDict::new(py);
@@ -258,6 +271,119 @@ fn chart<'py>(
         .collect();
     out.set_item("quality", runs)?;
     out.set_item("n_raw", n_raw)?;
+    Ok(out)
+}
+
+/// One series of the compare view over `[from_ns, to_ns)` (spec 018): the chart points of
+/// [`chart`] and the statistics of the window's usable, finite raw samples. Returns a dict
+/// with `ts`, `values`, `n_raw` and `stats` (`min`, `max`, `mean`, `sd`, `first_ts`,
+/// `first_value`), which is `None` when the window holds no such sample.
+#[pyfunction]
+#[pyo3(signature = (data, from_ns, to_ns, buckets, expected_interval_ns=None, ts_col="ts", value_col="value", quality_col=Some("quality")))]
+#[allow(clippy::too_many_arguments)]
+fn compare_series<'py>(
+    py: Python<'py>,
+    data: &Bound<'_, PyAny>,
+    from_ns: i64,
+    to_ns: i64,
+    buckets: usize,
+    expected_interval_ns: Option<i64>,
+    ts_col: &str,
+    value_col: &str,
+    quality_col: Option<&str>,
+) -> PyResult<Bound<'py, PyDict>> {
+    if buckets == 0 || to_ns <= from_ns {
+        return Err(PyValueError::new_err("compare_series needs buckets > 0 and from_ns < to_ns"));
+    }
+    let frame = frame_from_py(data, r#"{"id":"_"}"#, ts_col, value_col, quality_col, None)?;
+    let (ts, values, n_raw, stats) = py.detach(move || {
+        let frame = if frame.is_sorted() { frame } else { frame.normalized().0 };
+        let (ts, values, n_raw) = chart_points(&frame, from_ns, to_ns, buckets, expected_interval_ns);
+        (ts, values, n_raw, window_stats(&frame, from_ns, to_ns))
+    });
+    let out = PyDict::new(py);
+    out.set_item("ts", ts)?;
+    out.set_item("values", values)?;
+    out.set_item("n_raw", n_raw)?;
+    match stats {
+        Some(s) => {
+            let stats = PyDict::new(py);
+            stats.set_item("min", s.min)?;
+            stats.set_item("max", s.max)?;
+            stats.set_item("mean", s.mean)?;
+            stats.set_item("sd", s.sd)?;
+            stats.set_item("first_ts", s.first_ts)?;
+            stats.set_item("first_value", s.first_value)?;
+            out.set_item("stats", stats)?;
+        }
+        None => out.set_item("stats", py.None())?,
+    }
+    Ok(out)
+}
+
+/// Residual of a balance or a pair over `[from_ns, to_ns)` (spec 018).
+///
+/// `members` lists `(series_id, sign)` in order: `+1` for inputs and a pair's first member,
+/// `-1` for outputs and the second member. `tables` maps each id to its Arrow data and
+/// `metas_json` to its metadata (for the grid). Returns a dict with `grid_ns`, `missing`
+/// (members without a usable, finite sample in the window), `ts` and `residual`. Without
+/// `buckets` these are per grid bin, with `sum_in`. With `buckets` they are chart points on
+/// that many bins of the window, with the band `lo` and `hi` when `loss` gives
+/// `(loss_min, loss_max)`.
+#[pyfunction]
+#[pyo3(signature = (tables, metas_json, members, from_ns, to_ns, grid_ns=None, buckets=None, loss=None, ts_col="ts", value_col="value", quality_col=Some("quality")))]
+#[allow(clippy::too_many_arguments)]
+fn residual<'py>(
+    py: Python<'py>,
+    tables: &Bound<'_, PyDict>,
+    metas_json: &str,
+    members: Vec<(String, f64)>,
+    from_ns: i64,
+    to_ns: i64,
+    grid_ns: Option<i64>,
+    buckets: Option<usize>,
+    loss: Option<(f64, f64)>,
+    ts_col: &str,
+    value_col: &str,
+    quality_col: Option<&str>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let mut metas: BTreeMap<String, SeriesMeta> = serde_json::from_str(metas_json).map_err(err)?;
+    let mut frames = Vec::with_capacity(members.len());
+    for (id, _) in &members {
+        let data =
+            tables.get_item(id)?.ok_or_else(|| PyValueError::new_err(format!("no table for member {id}")))?;
+        let meta = metas.remove(id).unwrap_or_else(|| SeriesMeta::new(id.clone()));
+        let batch = batch_from_py(&data)?;
+        let frame = SeriesFrame::from_record_batch_ext(meta, &batch, ts_col, value_col, quality_col, None);
+        frames.push(frame.map_err(err)?);
+    }
+    let signs: Vec<f64> = members.iter().map(|(_, sign)| *sign).collect();
+    let (r, chart) = py.detach(move || {
+        let frames: Vec<SeriesFrame> =
+            frames.into_iter().map(|f| if f.is_sorted() { f } else { f.normalized().0 }).collect();
+        let r = group_residual(&frames.iter().collect::<Vec<_>>(), &signs, grid_ns, from_ns, to_ns)
+            .map_err(err)?;
+        let chart = buckets.map(|b| residual_chart(&r, from_ns, to_ns, b, loss)).transpose().map_err(err)?;
+        Ok::<_, PyErr>((r, chart))
+    })?;
+    let out = PyDict::new(py);
+    out.set_item("grid_ns", r.grid_ns)?;
+    out.set_item("missing", r.missing)?;
+    match chart {
+        Some(c) => {
+            out.set_item("ts", c.ts)?;
+            out.set_item("residual", c.residual)?;
+            if loss.is_some() {
+                out.set_item("lo", c.lo)?;
+                out.set_item("hi", c.hi)?;
+            }
+        }
+        None => {
+            out.set_item("ts", r.ts)?;
+            out.set_item("residual", r.residual)?;
+            out.set_item("sum_in", r.sum_in)?;
+        }
+    }
     Ok(out)
 }
 
@@ -384,6 +510,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(profile, m)?)?;
     m.add_function(wrap_pyfunction!(downsample_m4, m)?)?;
     m.add_function(wrap_pyfunction!(chart, m)?)?;
+    m.add_function(wrap_pyfunction!(compare_series, m)?)?;
+    m.add_function(wrap_pyfunction!(residual, m)?)?;
     m.add_function(wrap_pyfunction!(synth, m)?)?;
     m.add_function(wrap_pyfunction!(builtin_checks, m)?)?;
     m.add_class::<PyCache>()?;

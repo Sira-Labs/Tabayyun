@@ -63,6 +63,65 @@ def test_chart_points_gaps_and_quality():
         tc.chart(table, end, start, 200)
 
 
+def _series(values, *, step=60 * 10**9, quality=None):
+    ts = pa.array([i * step for i in range(len(values))], type=pa.timestamp("ns", tz="UTC"))
+    quality = pa.array(quality or ["good"] * len(values))
+    return pa.table({"ts": ts, "value": pa.array(values, type=pa.float64()), "quality": quality})
+
+
+def test_compare_series_stats_do_not_depend_on_the_width():
+    n = 5_000
+    values = [float(i % 100) for i in range(n)]
+    quality = ["bad" if i < 10 else "good" for i in range(n)]
+    table = _series(values, quality=quality)
+    end = n * 60 * 10**9
+    wide, narrow = tc.compare_series(table, 0, end, 800), tc.compare_series(table, 0, end, 20)
+    assert set(wide) == {"ts", "values", "n_raw", "stats"}
+    assert wide["n_raw"] == narrow["n_raw"] == n
+    assert len(narrow["ts"]) < len(wide["ts"]) < n
+    assert wide["stats"] == narrow["stats"]
+    stats = wide["stats"]
+    assert (stats["min"], stats["max"]) == (0.0, 99.0)
+    assert (stats["first_ts"], stats["first_value"]) == (10 * 60 * 10**9, 10.0)
+    usable = values[10:]
+    assert stats["mean"] == pytest.approx(sum(usable) / len(usable))
+    # Only bad samples in the window: points to draw, nothing to normalise with.
+    bad = tc.compare_series(table, 0, 10 * 60 * 10**9, 50)
+    assert bad["n_raw"] == 10 and len(bad["ts"]) == 10 and bad["stats"] is None
+    with pytest.raises(ValueError):
+        tc.compare_series(table, end, 0, 50)
+
+
+def test_residual_of_a_balance_and_a_pair():
+    n = 600
+    tables = {
+        "in": _series([300.0] * n),
+        "a": _series([98.0] * n),
+        "b": _series([98.0] * n),
+        "c": _series([68.6 if 200 <= i < 400 else 98.0 for i in range(n)]),
+    }
+    members = [("in", 1.0), ("a", -1.0), ("b", -1.0), ("c", -1.0)]
+    end = n * 60 * 10**9
+    grid = tc.residual(tables, {}, members, 0, end)
+    assert set(grid) == {"grid_ns", "missing", "ts", "residual", "sum_in"}
+    assert grid["grid_ns"] == 60 * 10**9 and grid["missing"] == [] and len(grid["ts"]) == n
+    assert grid["sum_in"] == [300.0] * n
+    chart = tc.residual(tables, {}, members, 0, end, buckets=1000, loss=(-0.01, 0.05))
+    assert set(chart) == {"grid_ns", "missing", "ts", "residual", "lo", "hi"}
+    outside = [r < lo or r > hi for r, lo, hi in zip(chart["residual"], chart["lo"], chart["hi"])]
+    assert outside == [200 <= i < 400 for i in range(n)]
+
+    pair = tc.residual(tables, {}, [("a", 1.0), ("c", -1.0)], 0, end, buckets=1000)
+    assert set(pair) == {"grid_ns", "missing", "ts", "residual"}
+    assert pair["residual"][0] == 0.0 and pair["residual"][300] == pytest.approx(29.4)
+
+    tables["b"] = _series([98.0] * n, quality=["bad"] * n)
+    missing = tc.residual(tables, {}, members, 0, end, buckets=1000, loss=(-0.01, 0.05))
+    assert missing["missing"] == ["b"] and missing["ts"] == [] and missing["residual"] == []
+    with pytest.raises(ValueError, match="no table for member x"):
+        tc.residual(tables, {}, [("a", 1.0), ("x", -1.0)], 0, end)
+
+
 def test_latency_with_ingest_column():
     batch = tc.synth(n=300)
     ts = batch.column("ts")

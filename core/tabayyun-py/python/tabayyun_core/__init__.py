@@ -14,7 +14,19 @@ from tabayyun_core import _native
 
 __version__: str = _native.__version__
 
-__all__ = ["Cache", "builtin_checks", "chart", "downsample_m4", "profile", "run_checks", "run_checks_multi", "synth", "__version__"]
+__all__ = [
+    "Cache",
+    "builtin_checks",
+    "chart",
+    "compare_series",
+    "downsample_m4",
+    "profile",
+    "residual",
+    "run_checks",
+    "run_checks_multi",
+    "synth",
+    "__version__",
+]
 
 
 def builtin_checks() -> list[str]:
@@ -136,6 +148,76 @@ def chart(
     """
     return dict(
         _native.chart(data, from_ns, to_ns, buckets, expected_interval_ns, ts_col, value_col, quality_col)
+    )
+
+
+def compare_series(
+    data: Any,
+    from_ns: int,
+    to_ns: int,
+    buckets: int,
+    *,
+    expected_interval_ns: int | None = None,
+    ts_col: str = "ts",
+    value_col: str = "value",
+    quality_col: str | None = "quality",
+) -> dict[str, Any]:
+    """One series of the compare view over ``[from_ns, to_ns)`` (spec 018).
+
+    Returns the chart points of :func:`chart` (``ts``, ``values``, ``n_raw``) and ``stats``:
+    ``min``, ``max``, ``mean``, ``sd`` (population), ``first_ts`` and ``first_value`` of the
+    window's usable, finite raw samples, or ``None`` when it holds none. The statistics do not
+    depend on ``buckets``.
+    """
+    out = dict(
+        _native.compare_series(
+            data, from_ns, to_ns, buckets, expected_interval_ns, ts_col, value_col, quality_col
+        )
+    )
+    if out["stats"] is not None:
+        out["stats"] = dict(out["stats"])
+    return out
+
+
+def residual(
+    tables: dict[str, Any],
+    metas: dict[str, dict[str, Any]],
+    members: list[tuple[str, float]],
+    from_ns: int,
+    to_ns: int,
+    *,
+    grid_ns: int | None = None,
+    buckets: int | None = None,
+    loss: tuple[float, float] | None = None,
+    ts_col: str = "ts",
+    value_col: str = "value",
+    quality_col: str | None = "quality",
+) -> dict[str, Any]:
+    """Residual of a balance or a pair over ``[from_ns, to_ns)`` (spec 018).
+
+    ``members`` lists ``(series_id, sign)`` in order: ``+1`` for inputs and a pair's first
+    member, ``-1`` for outputs and the second. The members are aligned on the grid the checks
+    use, and the residual exists only in grid bins where every member has a value.
+
+    Returns ``grid_ns``, ``missing`` (members without a usable, finite sample in the window;
+    then there is no residual), ``ts`` and ``residual``. Without ``buckets`` these are per grid
+    bin, with ``sum_in``. With ``buckets`` they are chart points on that many bins of the
+    window, with the band ``lo`` and ``hi`` when ``loss`` gives ``(loss_min, loss_max)``.
+    """
+    return dict(
+        _native.residual(
+            tables,
+            json.dumps(metas),
+            members,
+            from_ns,
+            to_ns,
+            grid_ns,
+            buckets,
+            loss,
+            ts_col,
+            value_col,
+            quality_col,
+        )
     )
 
 
