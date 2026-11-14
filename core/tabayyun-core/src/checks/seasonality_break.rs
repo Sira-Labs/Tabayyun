@@ -425,12 +425,10 @@ mod tests {
     fn sparse_segment_not_judged() {
         // Week 5 is mostly missing: it is neither judged nor a finding.
         let mut f = series(6, 6, |_| "daily");
-        for i in 4 * WEEK..4 * WEEK + 5 * H {
-            f.values[i] = f64::NAN;
-        }
-        for i in 4 * WEEK + 5 * H..5 * WEEK {
+        f.values[4 * WEEK..4 * WEEK + 5 * H].fill(f64::NAN);
+        for (i, v) in f.values.iter_mut().enumerate().take(5 * WEEK).skip(4 * WEEK + 5 * H) {
             if i % 3 != 0 {
-                f.values[i] = f64::NAN;
+                *v = f64::NAN;
             }
         }
         let out = run(&f, serde_json::json!({}));

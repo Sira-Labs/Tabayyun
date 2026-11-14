@@ -512,9 +512,7 @@ mod tests {
         assert!(run(&[&a, &b, &c], serde_json::json!({"tolerance": 1.0})).findings.is_empty());
         // With only two of three present the bin still counts, but names no suspect.
         let mut c2 = sensor("pt-c", 3, 1.0, |_| 0.0);
-        for i in 600..720 {
-            c2.values[i] = f64::NAN;
-        }
+        c2.values[600..720].fill(f64::NAN);
         let out = run(&[&a, &sensor("pt-b", 2, 1.0, |_| 0.0), &c2], serde_json::json!({"tolerance": 1.0}));
         assert_eq!(out.findings.len(), 1);
         assert!(out.findings[0].evidence["suspect"].is_null());

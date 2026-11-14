@@ -86,8 +86,8 @@ mod tests {
         let mut f = base(1500);
         // Replace samples 500..1000 with a linear interpolation between the endpoints.
         let (a, b) = (f.values[500], f.values[1000]);
-        for i in 500..1000 {
-            f.values[i] = a + (b - a) * (i - 500) as f64 / 500.0;
+        for (k, v) in f.values[500..1000].iter_mut().enumerate() {
+            *v = a + (b - a) * k as f64 / 500.0;
         }
         let out = InterpolationArtifacts::default().run(&f, &ctx(&f)).unwrap();
         let fs = ids(&out, ID);
