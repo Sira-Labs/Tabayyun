@@ -373,6 +373,24 @@ Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, S
       - The value chart (S9-5) still needs the downsampled series endpoint; this view uses
         only the finding windows the API already returns.
 
+## Dependency upkeep (autonomous runs, from 14 Nov 2026)
+
+- [x] **CI audits red on every pull request** (14 Nov, no spec): `cargo audit`, `pip-audit`
+      and `pnpm audit` had failed since 19 Oct on new advisories, so nothing could merge,
+      Dependabot's pull requests included. Lockfiles updated within the declared ranges.
+      - Python takes only `certifi` and `joserfc`: the full `uv lock --upgrade` (Dependabot's
+        python-minor group) fails `mypy` on SQLAlchemy 2.1 and the Procrastinate schema
+        snapshot test on 3.11, see the two entries below.
+      - `pnpm update` raised the ranges in `web/package.json` to the installed versions, as
+        Dependabot does; `jsdom` stays on 30 (31 is a major).
+- [ ] SQLAlchemy 2.1: `Select[tuple[...]]` annotations in `authz/policy.py` and
+      `services/admin/audit.py` no longer type-check (rows are typed directly), and
+      `Result.tuples()` and `select().distinct(col)` are deprecated (`services/fetches.py`,
+      `services/series.py`). Migrate, then let the python-minor group through.
+- [ ] Procrastinate 3.11: its `schema.sql` changed, so
+      `test_procrastinate_schema_snapshot_matches_installed_package` fails. Needs a new
+      Alembic revision that runs Procrastinate's own migration files (spec 002 note).
+
 ## Later sprints
 
 - [ ] **Scores that barely move** (26 Sep, owner: backlog for S10-6): on staging, `flow-a` had
