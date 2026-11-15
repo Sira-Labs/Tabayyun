@@ -137,3 +137,40 @@ jobs:
       # Blocking at high and above (spec 015). An accepted advisory goes into
       # pnpm.auditConfig.ignoreCves in package.json with a reason and a review date.
       - run: pnpm audit --audit-level high
+
+  # The images are otherwise built only by release.yml on main, so a base image or Dockerfile
+  # change that cannot build would first show as a failed release. This job builds them on
+  # pull requests that touch what goes into an image's build, and starts the api image once.
+  images:
+    name: images
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 2 }
+      - name: Which images does this pull request touch?
+        id: changed
+        run: |
+          # HEAD is the merge of the pull request into its base, so its first parent is the base.
+          files=$(git diff --name-only HEAD^1 HEAD)
+          common='^(\.dockerignore|\.github/workflows/ci\.yml)$'
+          api='^(api/Dockerfile|api/docker-entrypoint\.sh)$'
+          web='^(web/Dockerfile|deploy/caddy/)'
+          if echo "$files" | grep -qE "$common|$api"; then echo "api=true" >> "$GITHUB_OUTPUT"; fi
+          if echo "$files" | grep -qE "$common|$web"; then echo "web=true" >> "$GITHUB_OUTPUT"; fi
+      - uses: docker/setup-buildx-action@v4
+        if: steps.changed.outputs.api == 'true' || steps.changed.outputs.web == 'true'
+      - name: Build the api image
+        if: steps.changed.outputs.api == 'true'
+        run: docker buildx build --load -f api/Dockerfile -t tabayyun-api:ci --build-arg TABAYYUN_COMMIT=${{ github.sha }} .
+      - name: The api image imports the app and the core
+        if: steps.changed.outputs.api == 'true'
+        run: |
+          docker run --rm --entrypoint python tabayyun-api:ci -c "
+          import sys, tabayyun_core
+          import tabayyun.main, tabayyun.jobs
+          print('python', sys.version.split()[0], 'core', tabayyun_core.__version__, 'checks', len(tabayyun_core.builtin_checks()))
+          "
+      - name: Build the web image
+        if: steps.changed.outputs.web == 'true'
+        run: docker buildx build --load -f web/Dockerfile -t tabayyun-web:ci --build-arg TABAYYUN_COMMIT=${{ github.sha }} .
