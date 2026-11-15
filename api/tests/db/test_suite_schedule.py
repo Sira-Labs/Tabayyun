@@ -37,6 +37,17 @@ def test_next_run_follows_the_schedule():
     assert suites.next_run(None, True, T0) is None and suites.next_run(HOURLY, False, T0) is None
 
 
+def test_the_shortest_gap_counts_every_firing_of_a_day():
+    gap = suites._shortest_gap
+    assert gap("*/5 * * * *") == timedelta(minutes=5) and gap("* * * * *") == timedelta(minutes=1)
+    assert gap("5 * * * *") == timedelta(hours=1) and gap("30 2 1 * *") == timedelta(days=1)
+    assert gap("1,6,58 0-20/2,21 * * *") == timedelta(minutes=3)  # 20:58 and 21:01
+    assert gap("58 23,0 * * *") == timedelta(hours=1)
+    assert gap("59 23 * * *") == timedelta(days=1)
+    assert gap("0 0 * * *") == gap("0 6 * * 1-5") == timedelta(days=1)
+    assert gap("59,0 * * * *") == timedelta(minutes=1)  # over the hour, and over midnight
+
+
 class Env:
     def __init__(self, app, client, dataset_id: str) -> None:
         self.app, self.client, self.dataset_id = app, client, dataset_id

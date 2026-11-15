@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
-from croniter import croniter
+from croniter import CroniterBadDateError, croniter
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.exc import IntegrityError
@@ -34,8 +34,7 @@ log = structlog.get_logger()
 MAX_NAME = 256
 # Successive firings of a schedule must be at least this far apart.
 MIN_INTERVAL = timedelta(minutes=5)
-# How many firings the interval rule looks at: enough to see "every minute" and uneven lists.
-INTERVAL_SAMPLES = 30
+DAY_MINUTES = 24 * 60
 CLAIM_DUE_SQL = text("SELECT suite_id, org_id, workspace_id FROM tabayyun_claim_due_suites(:now)")
 ACTIVE_STATUSES = ("queued", "running")
 
@@ -92,14 +91,29 @@ def validate_schedule(schedule: str | None) -> str | None:
     schedule = " ".join(schedule.split())
     if len(schedule.split(" ")) != 5 or not croniter.is_valid(schedule):
         raise SuiteError("schedule", "must be a cron expression of five fields, for example `5 * * * *`")
-    firings = croniter(schedule, datetime(2026, 1, 1, tzinfo=UTC))
-    previous = firings.get_next(datetime)
-    for _ in range(INTERVAL_SAMPLES):
-        current = firings.get_next(datetime)
-        if current - previous < MIN_INTERVAL:
-            raise SuiteError("schedule", "must not fire more often than every 5 minutes")
-        previous = current
+    try:
+        croniter(schedule, datetime(2026, 1, 1, tzinfo=UTC)).get_next(datetime)
+    except CroniterBadDateError as exc:  # fields that parse but name no date, like 31 February
+        raise SuiteError("schedule", "never fires: no date matches it") from exc
+    if _shortest_gap(schedule) < MIN_INTERVAL:
+        raise SuiteError("schedule", "must not fire more often than every 5 minutes")
     return schedule
+
+
+def _shortest_gap(schedule: str) -> timedelta:
+    """The shortest time between two firings of a valid schedule on days it fires.
+
+    Computed from every minute and hour the expression names, not from sampled firings, so a
+    close pair late in the day counts. The gap over midnight assumes the next day fires too,
+    which errs on the strict side for schedules limited to some days.
+    """
+    fields = croniter.expand(schedule)[0]
+    minutes = range(60) if "*" in fields[0] else [int(m) for m in fields[0]]
+    hours = range(24) if "*" in fields[1] else [int(h) for h in fields[1]]
+    times = sorted(h * 60 + m for h in hours for m in minutes)
+    gaps = [later - earlier for earlier, later in zip(times, times[1:], strict=False)]
+    gaps.append(times[0] + DAY_MINUTES - times[-1])
+    return timedelta(minutes=min(gaps))
 
 
 def validate_checks(checks: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -122,6 +136,9 @@ def validate_checks(checks: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
         if unknown:
             raise SuiteError("checks", f"`{check_id}` has no parameter `{unknown[0]}`")
         stored.append({"id": check_id, "enabled": bool(check.get("enabled", True)), "params": params})
+    if not any(c["enabled"] for c in stored):
+        # A run with every check off would succeed with no findings and say nothing ran.
+        raise SuiteError("checks", "at least one check must be switched on")
     try:
         # The core builds every check, enabled or not: a disabled one may be switched on later.
         core.validate_configs([{"id": c["id"], "params": c["params"] or None} for c in stored])
@@ -144,7 +161,9 @@ def thresholds(check: dict[str, Any], info: dict[str, Any]) -> list[Threshold]:
     out = []
     for param, default in info["defaults"].items():
         auto = info["auto"].get(param)
-        if param in params:
+        # A null for a parameter decided at run time is not an override: the core falls back
+        # to the metadata or baseline all the same.
+        if param in params and not (auto is not None and params[param] is None):
             out.append(Threshold(param, params[param], "override", None))
         elif auto is not None and default is None:
             out.append(Threshold(param, None, auto["source"], auto["note"]))

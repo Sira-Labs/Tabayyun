@@ -415,6 +415,13 @@ class Run(TenantMixin, Base):
         CheckConstraint(_in("trigger", RUN_TRIGGERS), name="trigger"),
         CheckConstraint(_in("status", RUN_STATUSES), name="status"),
         Index("ix_runs_workspace_id_created_at", "workspace_id", text("created_at DESC")),
+        # A suite's run history and its newest run (spec 027); most runs have no suite.
+        Index(
+            "ix_runs_suite_id_created_at",
+            "suite_id",
+            text("created_at DESC"),
+            postgresql_where=text("suite_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = _uuid_pk()

@@ -112,11 +112,15 @@ async def test_validation_422_409(admin_env, tmp_path):
             ({"schedule": "* * * * *"}, "schedule"),  # every minute
             ({"schedule": "*/4 * * * *"}, "schedule"),
             ({"schedule": "0,3 * * * *"}, "schedule"),  # three minutes apart once an hour
+            # 20:58 and 21:01, after thirty well-spaced firings of the day.
+            ({"schedule": "1,6,58 0-20/2,21 * * *"}, "schedule"),
+            ({"schedule": "0 0 31 2 *"}, "schedule"),  # parses, but there is no 31 February
             ({"checks": []}, "checks"),
             ({"checks": [{"id": "tby.nope"}]}, "checks"),
             ({"checks": [flatline, flatline]}, "checks"),
             ({"checks": [flatline | {"params": {"no_such": 1}}]}, "checks"),
             ({"checks": [flatline | {"params": {"min_run": "many"}}]}, "checks"),
+            ({"checks": [flatline | {"enabled": False}]}, "checks"),  # nothing would run
         ]:
             r = await alice.post("/api/suites", json=base | change)
             assert r.status_code == 422, (change, r.text)
@@ -125,7 +129,7 @@ async def test_validation_422_409(admin_env, tmp_path):
         assert (await alice.post("/api/suites", json=base | {"cron": "5 * * * *"})).status_code == 422
         assert (await alice.get("/api/suites")).json()["items"] == []
 
-        for schedule in ("*/5 * * * *", "0 6 * * 1-5", "30 2 1 * *"):
+        for schedule in ("*/5 * * * *", "0 6 * * 1-5", "30 2 1 * *", "58 23 * * *", "0,55 */2 * * *"):
             r = await alice.post("/api/suites", json=base | {"name": schedule, "schedule": schedule})
             assert r.status_code == 201, r.text
         suite = await _suite(alice, dataset, name="s")
@@ -175,6 +179,15 @@ async def test_thresholds_name_their_source(admin_env, tmp_path):
         assert threshold("tby.spikes", "min_scale") == (None, "baseline", True)
         assert threshold("tby.physical_range", "max") == (120.0, "override", False)
         assert threshold("tby.physical_range", "min") == (None, "metadata", True)
+        # An explicit null for a run-time parameter is still decided at run time.
+        r = await alice.patch(
+            f"/api/suites/{suite['id']}",
+            json={"checks": [{"id": "tby.physical_range", "params": {"max": None, "max_findings": 5}}]},
+        )
+        assert r.status_code == 200, r.text
+        by_id = {c["id"]: c for c in r.json()["checks"]}
+        assert threshold("tby.physical_range", "max") == (None, "metadata", True)
+        assert threshold("tby.physical_range", "max_findings") == (5, "override", False)
         catalogue = {c["id"]: c for c in (await alice.get("/api/checks/catalogue")).json()}
         for check in suite["checks"]:
             assert [t["param"] for t in check["thresholds"]] == list(catalogue[check["id"]]["defaults"])

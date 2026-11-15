@@ -375,6 +375,18 @@ def test_0012_adds_check_suites_and_downgrades(db_url, fresh_schema):
             policies = text("SELECT policyname FROM pg_policies WHERE tablename = 'check_suites'")
             assert conn.execute(policies).scalars().all() == ["tenant"]
         assert run_columns() == {"suite_id", "checks"}
+        # The foreign key is added unvalidated and validated after the commit; the history index
+        # is built concurrently. Both must be complete when the migration returns.
+        with engine.connect() as conn:
+            validated = (
+                "SELECT convalidated FROM pg_constraint WHERE conname = 'fk_runs_suite_id_check_suites'"
+            )
+            assert conn.execute(text(validated)).scalar_one() is True
+            index = (
+                "SELECT indisvalid FROM pg_index JOIN pg_class ON pg_class.oid = indexrelid "
+                "WHERE relname = 'ix_runs_suite_id_created_at'"
+            )
+            assert conn.execute(text(index)).scalar_one() is True
         migrate.downgrade(db_url, "0011")
         assert _current_revision(db_url) == "0011"
         assert "check_suites" not in inspect(engine).get_table_names() and run_columns() == set()
