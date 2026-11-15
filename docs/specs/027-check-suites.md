@@ -76,7 +76,8 @@ role. Ids of another workspace are 404.
   - `checks` is `[{id, enabled?, params?}]`. Left out, the suite gets every built-in check,
     enabled, without overrides. Checks that are not listed do not run.
   - `enabled` defaults to true.
-- `GET /api/suites?limit=&cursor=` → `{items, next_cursor}`, by name.
+- `GET /api/suites?limit=&cursor=` → `{items, next_cursor}`, newest first (the keyset of the
+  other lists; the web list sorts by name).
 - `GET /api/suites/{id}`
 - `PATCH /api/suites/{id}`: any of `name`, `dataset_id`, `schedule` (null removes it),
   `enabled`, `checks` (replaces the list).
@@ -145,21 +146,21 @@ A suite in a response:
 
 ## Acceptance criteria
 
-- [ ] The catalogue lists all 24 built-in checks with their default parameters, and every
+- [x] The catalogue lists all 24 built-in checks with their default parameters, and every
       parameter with a null default has an `auto` entry.
-- [ ] Creating, reading, listing, changing and deleting suites works with the validation of
+- [x] Creating, reading, listing, changing and deleting suites works with the validation of
       behaviour 1, and another workspace's ids are 404.
-- [ ] A scheduled suite produces a run without a user: after the scheduler tick at a due
+- [x] A scheduled suite produces a run without a user: after the scheduler tick at a due
       time there is a queued run with `trigger = "suite"` and the suite's id, and the tick
       a minute later starts none.
-- [ ] That run executes only the suite's enabled checks with the suite's parameters.
-- [ ] A suite whose previous run has not finished is skipped and fires at its next time.
-- [ ] After downtime over several firings, one run is started.
-- [ ] `thresholds` names override, default, metadata and baseline correctly.
-- [ ] `GET /api/runs?suite_id=` is the suite's run history.
-- [ ] The web pages list, create, edit, run, disable and delete suites, and show each
+- [x] That run executes only the suite's enabled checks with the suite's parameters.
+- [x] A suite whose previous run has not finished is skipped and fires at its next time.
+- [x] After downtime over several firings, one run is started.
+- [x] `thresholds` names override, default, metadata and baseline correctly.
+- [x] `GET /api/runs?suite_id=` is the suite's run history.
+- [x] The web pages list, create, edit, run, disable and delete suites, and show each
       threshold's source.
-- [ ] Writes are refused for viewers (403) and recorded in the audit log.
+- [x] Writes are refused for viewers (403) and recorded in the audit log.
 
 ## Test cases
 
@@ -178,6 +179,19 @@ A suite in a response:
 - **Web** (Vitest): `suites.list`, `suites.form` (presets, cron text, check switches and
   parameters, API errors by field), `suites.detail` (threshold sources, run now, history),
   `suites.schedule` (cron in words).
+
+## Implementation notes
+
+- The list was specified "by name"; it is newest first, on the `(created_at, id)` keyset every
+  other list uses, and the web page sorts the suites by name.
+- A parameter whose default is the text `auto` (for example `tby.flatline` `min_duration`)
+  is shown as source `default` with the value `auto`: the core resolves it from the sampling
+  interval inside the check, and the catalogue only names a source for null defaults.
+- The form sends every catalogue check with `enabled` true or false and only the parameters
+  that differ from the default, so a later change of a default reaches existing suites.
+- A check the core no longer ships is left out of a stored suite's response and of its runs.
+- The claim sets a ten-minute lease in `next_run_at` itself, so no extra column is needed and
+  a second worker's tick in the same minute claims nothing.
 
 ## Out of scope
 
