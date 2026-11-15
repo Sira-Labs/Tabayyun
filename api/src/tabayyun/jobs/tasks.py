@@ -24,11 +24,12 @@ from tabayyun.jobs.names import (
     PRUNE_SOURCE_FETCHES_TASK,
     REAP_STALE_RUNS_TASK,
     RUN_CHECKS_TASK,
+    RUN_DUE_SUITES_TASK,
     RUNS_QUEUE,
     SEND_INVITATION_TASK,
 )
 from tabayyun.mail import MailError, SmtpConfig
-from tabayyun.services import execution, fetches, ingest, rate_limits
+from tabayyun.services import execution, fetches, ingest, rate_limits, suites
 from tabayyun.services import runs as runs_service
 from tabayyun.services.admin import invitations
 from tabayyun.settings import get_settings
@@ -146,6 +147,15 @@ async def poll_sources(timestamp: int) -> None:
         await fetches.queue_poll(for_org(runtime.session_factory(), org), source_id, now)
     if due:
         log.info("sources.polled", count=len(due), tick=timestamp)
+
+
+@app.periodic(cron="* * * * *")
+@app.task(queue=MAINTENANCE_QUEUE, name=RUN_DUE_SUITES_TASK, retry=False)
+async def run_due_suites(timestamp: int) -> None:
+    """Every minute: a run for each check suite whose schedule is due (spec 027)."""
+    started = await suites.fire_due_suites(runtime.session_factory(), runs_service.utc_now())
+    if started:
+        log.info("suites.fired", count=len(started), tick=timestamp)
 
 
 @app.periodic(cron="17 * * * *")

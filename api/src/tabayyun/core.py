@@ -202,6 +202,7 @@ def run_checks_multi(
     *,
     window: tuple[int, int],
     now_ns: int,
+    configs: list[dict[str, Any]] | None = None,
     quality_col: str | None = None,
     ingest_col: str | None = None,
 ) -> MultiReport:
@@ -209,11 +210,13 @@ def run_checks_multi(
 
     Keys of `tables` and `metas` are the series ids the reports and groups use; `window` is
     the half-open `[start_ns, end_ns)` completeness and scores are measured against.
+    `configs` (`[{id, params}]`) replaces the default set: only those checks run (spec 027).
     """
     raw = tc.run_checks_multi(
         dict(tables),
         {sid: m.model_dump(exclude_none=True) for sid, m in metas.items()},
         groups,
+        configs=configs,
         now_ns=now_ns,
         window=window,
         quality_col=quality_col,
@@ -311,3 +314,13 @@ def _lenient_text_ts(ts: pa.ChunkedArray, name: str) -> pa.ChunkedArray:
         first = ts.filter(unparsed)[0].as_py()
         raise ValueError(f"column {name!r} is not a timestamp or integer column (cannot parse {first!r})")
     return combined
+
+
+def check_catalogue() -> list[dict[str, Any]]:
+    """Every built-in check with its scope, default parameters and run-time parameters."""
+    return list(tc.check_catalogue())
+
+
+def validate_configs(configs: list[dict[str, Any]]) -> None:
+    """Raise ValueError when a configured check does not exist or refuses its parameters."""
+    tc.validate_configs(configs)

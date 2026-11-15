@@ -6,7 +6,7 @@ scheduling and authorization arrive with the workspace model.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
@@ -21,6 +21,13 @@ router = APIRouter(prefix="/api/checks", tags=["checks"])
 async def list_checks() -> list[str]:
     """Ids of the built-in checks."""
     return core.builtin_checks()
+
+
+@router.get("/catalogue")
+async def check_catalogue() -> list[dict[str, Any]]:
+    """Every built-in check: its scope (`series` or `group`), default parameters, and the
+    parameters decided at run time with where they come from (spec 027)."""
+    return core.check_catalogue()
 
 
 @router.post("/run", response_model=core.CheckReport)

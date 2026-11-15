@@ -55,6 +55,9 @@ log = structlog.get_logger()
 # an import cycle, harmless while names are looked up at call time.
 
 DATASET_TRIGGER = "manual"
+# A check suite starts dataset runs too, with its own checks (spec 027).
+SUITE_TRIGGER = "suite"
+DATASET_TRIGGERS = (DATASET_TRIGGER, SUITE_TRIGGER)
 NO_CACHED_DATA = "no cached data"
 NOT_IN_DATASET = "members not in dataset"
 INGEST_COL = "ingest_ts"
@@ -84,6 +87,8 @@ class Plan:
     end_ns: int
     now_ns: int
     members: list[Member]
+    # The checks to run, `[{id, params}]`; None runs the core's default set.
+    configs: list[dict[str, Any]] | None = None
     groups: list[dict[str, Any]] = field(default_factory=list)
     groups_outside: list[dict[str, Any]] = field(default_factory=list)
     missing: dict[str, list[list[int]]] = field(default_factory=dict)
@@ -99,13 +104,30 @@ class RunFetch:
     budget_s: float
 
 
+def run_configs(checks: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """The core's configs for a run's stored checks: the enabled ones with their parameters.
+    None (a run without a suite) keeps the core's default set."""
+    if checks is None:
+        return None
+    return [{"id": c["id"], "params": c.get("params") or None} for c in checks if c.get("enabled", True)]
+
+
 # Creation (request path)
 
 
 async def create_dataset_run(
-    session: AsyncSession, scope: Scope, dataset_id: uuid.UUID, *, now: datetime
+    session: AsyncSession,
+    scope: Scope,
+    dataset_id: uuid.UUID,
+    *,
+    now: datetime,
+    suite_id: uuid.UUID | None = None,
+    checks: list[dict[str, Any]] | None = None,
 ) -> Run:
     """Queue a run of the dataset over its window resolved at `now`, in the caller's transaction.
+
+    With `suite_id` it is that suite's run and executes `checks` (the suite's list as it is
+    now) instead of the default set.
 
     Raises DatasetNotFoundError, or DatasetError when that window lies outside the core's range.
     """
@@ -118,7 +140,9 @@ async def create_dataset_run(
         org_id=scope.org_id,
         workspace_id=scope.workspace_id,
         dataset_id=dataset.id,
-        trigger=DATASET_TRIGGER,
+        suite_id=suite_id,
+        checks=checks,
+        trigger=SUITE_TRIGGER if suite_id is not None else DATASET_TRIGGER,
         status="queued",
         window_start=start,
         window_end=end,
@@ -169,6 +193,7 @@ async def _plan(session: AsyncSession, run: Run) -> Plan | None:
         end_ns=end_ns,
         now_ns=run.now_ns if run.now_ns is not None else end_ns,
         members=members,
+        configs=run_configs(run.checks),
     )
     in_dataset = {m.id for m in members}
     groups = await groups_service.groups_within(session, plan.scope, list(in_dataset))
@@ -286,6 +311,7 @@ def _check(plan: Plan, batches: dict[str, pa.RecordBatch]) -> core.MultiReport:
         plan.groups,
         window=(plan.start_ns, plan.end_ns),
         now_ns=plan.now_ns,
+        configs=plan.configs,
         quality_col="quality",
         ingest_col=INGEST_COL if has_ingest else None,
     )

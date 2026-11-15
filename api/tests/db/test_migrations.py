@@ -41,6 +41,8 @@ EXPECTED_TABLES = {
     "source_fetches",
     # Spec 026.
     "source_files",
+    # Spec 027.
+    "check_suites",
 }
 HYPERTABLES = {"findings", "metrics", "scores"}
 
@@ -347,6 +349,39 @@ def test_0011_replaces_the_job_fetch_function_and_downgrades(db_url, fresh_schem
         with engine.begin() as conn:
             assert "jobs.lock IS NULL" in conn.execute(source).scalar_one()
             assert conn.execute(fetch).one() == (None, None)
+    finally:
+        engine.dispose()
+        fresh_schema("auto")
+
+
+def test_0012_adds_check_suites_and_downgrades(db_url, fresh_schema):
+    """0012 brings `check_suites`, the runs' suite columns and the claim function, which only
+    the app role may call; its downgrade removes all three."""
+    fresh_schema("auto")
+    engine = create_engine(db_url)
+    function = text("SELECT count(*) FROM pg_proc WHERE proname = 'tabayyun_claim_due_suites'")
+
+    def run_columns() -> set[str]:
+        return {c["name"] for c in inspect(engine).get_columns("runs")} & {"suite_id", "checks"}
+
+    try:
+        with engine.connect() as conn:
+            assert conn.execute(function).scalar_one() == 1
+            may_call = (
+                "SELECT has_function_privilege(:role, 'tabayyun_claim_due_suites(timestamptz)', 'EXECUTE')"
+            )
+            assert conn.execute(text(may_call), {"role": "tabayyun_app"}).scalar_one() is True
+            assert conn.execute(text(may_call), {"role": "public"}).scalar_one() is False
+            policies = text("SELECT policyname FROM pg_policies WHERE tablename = 'check_suites'")
+            assert conn.execute(policies).scalars().all() == ["tenant"]
+        assert run_columns() == {"suite_id", "checks"}
+        migrate.downgrade(db_url, "0011")
+        assert _current_revision(db_url) == "0011"
+        assert "check_suites" not in inspect(engine).get_table_names() and run_columns() == set()
+        with engine.connect() as conn:
+            assert conn.execute(function).scalar_one() == 0
+        migrate.upgrade(db_url, "head", timescale="auto")
+        assert "check_suites" in inspect(engine).get_table_names() and run_columns() == {"suite_id", "checks"}
     finally:
         engine.dispose()
         fresh_schema("auto")

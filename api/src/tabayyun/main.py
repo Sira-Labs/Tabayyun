@@ -37,6 +37,7 @@ from tabayyun.routers import (
     runs,
     series,
     sources,
+    suites,
     workspaces,
 )
 from tabayyun.secrets import Keyring
@@ -104,7 +105,7 @@ def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = No
     # Everything else needs a principal (spec 013), also routers that do not authorize() a
     # workspace, such as the stateless check run. FastAPI resolves it once per request.
     signed_in = [Depends(get_principal)]
-    for router in (checks, runs, findings, series, sources, groups, datasets, workspaces, compare):
+    for router in (checks, runs, findings, series, sources, groups, datasets, workspaces, compare, suites):
         app.include_router(router.router, dependencies=signed_in)
     # The admin router orders its own gate: session, then passkey freshness (spec 014).
     app.include_router(admin.router)
