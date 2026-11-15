@@ -25,6 +25,91 @@ fn default_true() -> bool {
 
 pub struct Registry;
 
+/// Whether a check judges one series or the members of a group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CheckScope {
+    Series,
+    Group,
+}
+
+/// Where a parameter without a fixed default takes its value from at run time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AutoParam {
+    /// `metadata` (the series' declared limits or resolution) or `baseline` (learned from data).
+    pub source: String,
+    pub note: String,
+}
+
+/// One built-in check as a client sees it (spec 027): its default parameters and which of
+/// them are decided at run time.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CheckInfo {
+    pub id: String,
+    pub scope: CheckScope,
+    /// The check's `Default`, serialised: an object of parameter name to value.
+    pub defaults: serde_json::Value,
+    pub auto: BTreeMap<String, AutoParam>,
+}
+
+/// Parameters whose default is "decide at run time", per check: `(check, param, source, note)`.
+const AUTO_PARAMS: &[(&str, &str, &str, &str)] = &[
+    (
+        checks::flatline::ID,
+        "atol",
+        "metadata",
+        "half the series' resolution (declared, or read from the data)",
+    ),
+    (
+        checks::interpolation_artifacts::ID,
+        "atol",
+        "metadata",
+        "half the series' resolution (declared, or read from the data)",
+    ),
+    (
+        checks::non_negative::ID,
+        "tolerance",
+        "metadata",
+        "the series' resolution (declared, or read from the data)",
+    ),
+    (
+        checks::physical_range::ID,
+        "min",
+        "metadata",
+        "the series' physical minimum, else the default of its unit",
+    ),
+    (
+        checks::physical_range::ID,
+        "max",
+        "metadata",
+        "the series' physical maximum, else the default of its unit",
+    ),
+    (
+        checks::rate_of_change::ID,
+        "max_rate",
+        "baseline",
+        "`factor` times the baseline's 99.9th percentile rate",
+    ),
+    (
+        checks::spikes::ID,
+        "min_scale",
+        "baseline",
+        "the series' resolution, or the baseline's noise floor when that is larger",
+    ),
+    (
+        checks::redundant_disagreement::ID,
+        "tolerance",
+        "baseline",
+        "learned from the members' usual spread when neither tolerance is set",
+    ),
+    (
+        checks::redundant_disagreement::ID,
+        "tolerance_pct",
+        "baseline",
+        "learned from the members' usual spread when neither tolerance is set",
+    ),
+];
+
 /// Result of [`Registry::run_multi`]: one output per series id (cross-series findings land on
 /// the member they name) and the groups that could not run.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -106,6 +191,77 @@ impl Registry {
             checks::seasonality_break::ID => parse::<checks::seasonality_break::SeasonalityBreak>(id, params),
             other => Err(Error::UnknownCheck(other.to_string())),
         }
+    }
+
+    /// The default parameters of a built-in check as a JSON object, or `None` for an unknown id.
+    pub fn defaults(id: &str) -> Option<serde_json::Value> {
+        fn d<T: Default + Serialize>() -> Option<serde_json::Value> {
+            serde_json::to_value(T::default()).ok()
+        }
+        match id {
+            checks::completeness::ID => d::<checks::completeness::Completeness>(),
+            checks::staleness::ID => d::<checks::staleness::Staleness>(),
+            checks::timestamp_integrity::ID => d::<checks::timestamp_integrity::TimestampIntegrity>(),
+            checks::sampling_regularity::ID => d::<checks::sampling_regularity::SamplingRegularity>(),
+            checks::value_type::ID => d::<checks::value_type::ValueType>(),
+            checks::flatline::ID => d::<checks::flatline::Flatline>(),
+            checks::physical_range::ID => d::<checks::physical_range::PhysicalRange>(),
+            checks::non_negative::ID => d::<checks::non_negative::NonNegative>(),
+            checks::quality_flags::ID => d::<checks::quality_flags::QualityFlags>(),
+            checks::operational_range::ID => d::<checks::operational_range::OperationalRange>(),
+            checks::spikes::ID => d::<checks::spikes::Spikes>(),
+            checks::rate_of_change::ID => d::<checks::rate_of_change::RateOfChange>(),
+            checks::resolution_loss::ID => d::<checks::resolution_loss::ResolutionLoss>(),
+            checks::interpolation_artifacts::ID => {
+                d::<checks::interpolation_artifacts::InterpolationArtifacts>()
+            }
+            checks::latency::ID => d::<checks::latency::Latency>(),
+            checks::scale_shift::ID => d::<checks::scale_shift::ScaleShift>(),
+            checks::noise_level::ID => d::<checks::noise_level::NoiseLevel>(),
+            checks::level_drift::ID => d::<checks::level_drift::LevelDrift>(),
+            checks::distribution_drift::ID => d::<checks::distribution_drift::DistributionDrift>(),
+            checks::changepoint::ID => d::<checks::changepoint::Changepoint>(),
+            checks::seasonality_break::ID => d::<checks::seasonality_break::SeasonalityBreak>(),
+            checks::correlation_break::ID => d::<checks::correlation_break::CorrelationBreak>(),
+            checks::redundant_disagreement::ID => {
+                d::<checks::redundant_disagreement::RedundantDisagreement>()
+            }
+            checks::balance_residual::ID => d::<checks::balance_residual::BalanceResidual>(),
+            _ => None,
+        }
+    }
+
+    /// Every built-in check with its default parameters, single-series checks first (spec 027).
+    pub fn catalogue() -> Vec<CheckInfo> {
+        let series = Self::builtin_ids().iter().map(|id| (*id, CheckScope::Series));
+        let group = Self::cross_builtin_ids().iter().map(|id| (*id, CheckScope::Group));
+        series
+            .chain(group)
+            .map(|(id, scope)| CheckInfo {
+                id: id.to_string(),
+                scope,
+                defaults: Self::defaults(id).unwrap_or(serde_json::Value::Null),
+                auto: AUTO_PARAMS
+                    .iter()
+                    .filter(|(check, ..)| *check == id)
+                    .map(|(_, param, source, note)| {
+                        (param.to_string(), AutoParam { source: source.to_string(), note: note.to_string() })
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
+    /// Check that every configured check exists and accepts its parameters, without running it.
+    pub fn validate(configs: &[CheckConfig]) -> Result<()> {
+        for cfg in configs {
+            if Self::cross_builtin_ids().contains(&cfg.id.as_str()) {
+                Self::build_cross(&cfg.id, &cfg.params)?;
+            } else {
+                Self::build(&cfg.id, &cfg.params)?;
+            }
+        }
+        Ok(())
     }
 
     /// Default configuration: every built-in check with default parameters.
@@ -283,6 +439,60 @@ fn route(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn catalogue_covers_every_builtin_check() {
+        let catalogue = Registry::catalogue();
+        let ids: Vec<&str> = catalogue.iter().map(|c| c.id.as_str()).collect();
+        let expected: Vec<&str> =
+            Registry::builtin_ids().iter().chain(Registry::cross_builtin_ids()).copied().collect();
+        assert_eq!(ids, expected);
+        assert_eq!(catalogue.len(), 24);
+        for info in &catalogue {
+            let group = Registry::cross_builtin_ids().contains(&info.id.as_str());
+            assert_eq!(info.scope == CheckScope::Group, group, "{}", info.id);
+            // The defaults are an object, and building the check from them gives the default.
+            assert!(info.defaults.is_object(), "{}: {}", info.id, info.defaults);
+            let config = CheckConfig { id: info.id.clone(), params: info.defaults.clone(), enabled: true };
+            Registry::validate(&[config]).unwrap();
+        }
+    }
+
+    #[test]
+    fn catalogue_marks_every_auto_parameter() {
+        for info in Registry::catalogue() {
+            let defaults = info.defaults.as_object().unwrap();
+            let null: Vec<&String> = defaults.iter().filter(|(_, v)| v.is_null()).map(|(k, _)| k).collect();
+            let auto: Vec<&String> = info.auto.keys().collect();
+            assert_eq!(null, auto, "{}: parameters with a null default and auto entries differ", info.id);
+            for a in info.auto.values() {
+                assert!(a.source == "metadata" || a.source == "baseline");
+                assert!(!a.note.is_empty());
+            }
+        }
+        // The table names no check or parameter that does not exist.
+        for (check, param, ..) in AUTO_PARAMS {
+            let defaults = Registry::defaults(check).unwrap_or_else(|| panic!("unknown check {check}"));
+            assert!(defaults.get(param).is_some(), "{check} has no parameter {param}");
+        }
+    }
+
+    #[test]
+    fn validate_reports_unknown_checks_and_bad_params() {
+        let cfg = |id: &str, params: serde_json::Value| CheckConfig { id: id.into(), params, enabled: true };
+        Registry::validate(&[cfg("tby.spikes", serde_json::json!({"window": 21}))]).unwrap();
+        Registry::validate(&[cfg("tby.balance_residual", serde_json::json!({"loss_max": 0.1}))]).unwrap();
+        Registry::validate(&[cfg("tby.spikes", serde_json::Value::Null)]).unwrap();
+        let err = Registry::validate(&[cfg("tby.nope", serde_json::Value::Null)]).unwrap_err();
+        assert!(matches!(err, Error::UnknownCheck(ref id) if id == "tby.nope"), "{err}");
+        let err =
+            Registry::validate(&[cfg("tby.spikes", serde_json::json!({"window": "wide"}))]).unwrap_err();
+        assert!(matches!(err, Error::InvalidParams { ref check, .. } if check == "tby.spikes"), "{err}");
+        // A disabled check is validated too: it may be switched on later.
+        let mut off = cfg("tby.flatline", serde_json::json!({"min_run": -1}));
+        off.enabled = false;
+        assert!(Registry::validate(&[off]).is_err());
+    }
     use crate::cross::{GroupKind, GroupMember, MemberRole};
     use crate::finding::{Dimension, Finding, Severity, Window};
     use crate::frame::SeriesMeta;

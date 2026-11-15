@@ -18,6 +18,7 @@ __all__ = [
     "Cache",
     "builtin_checks",
     "chart",
+    "check_catalogue",
     "compare_series",
     "downsample_m4",
     "profile",
@@ -25,6 +26,7 @@ __all__ = [
     "run_checks",
     "run_checks_multi",
     "synth",
+    "validate_configs",
     "__version__",
 ]
 
@@ -32,6 +34,18 @@ __all__ = [
 def builtin_checks() -> list[str]:
     """Ids of the built-in checks in catalogue order."""
     return list(_native.builtin_checks())
+
+
+def check_catalogue() -> list[dict[str, Any]]:
+    """Every built-in check: ``id``, ``scope`` (``series`` or ``group``), ``defaults`` (its
+    default parameters) and ``auto`` (parameters decided at run time, with ``source`` and
+    ``note``). Single-series checks come first (spec 027)."""
+    return list(json.loads(_native.check_catalogue()))
+
+
+def validate_configs(configs: list[dict[str, Any]]) -> None:
+    """Raise ``ValueError`` when a configured check does not exist or refuses its parameters."""
+    _native.validate_configs(json.dumps(configs))
 
 
 def run_checks(
