@@ -26,6 +26,8 @@ export type Run = {
   id: string;
   /** Set on a dataset run (spec 008); absent or null on an upload run. */
   dataset_id?: string | null;
+  /** The suite that started the run (spec 027); null once that suite is deleted. */
+  suite_id?: string | null;
   trigger: string;
   status: RunStatus;
   window: NsWindow | null;
