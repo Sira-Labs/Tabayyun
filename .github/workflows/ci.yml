@@ -165,8 +165,10 @@ jobs:
         run: docker buildx build --load -f api/Dockerfile -t tabayyun-api:ci --build-arg TABAYYUN_COMMIT=${{ github.sha }} .
       - name: The api image imports the app and the core
         if: steps.changed.outputs.api == 'true'
+        # The image defaults to prod, which refuses to start without its secrets: the import
+        # check runs as `test`, for this container only.
         run: |
-          docker run --rm --entrypoint python tabayyun-api:ci -c "
+          docker run --rm -e TABAYYUN_ENV=test --entrypoint python tabayyun-api:ci -c "
           import sys, tabayyun_core
           import tabayyun.main, tabayyun.jobs
           print('python', sys.version.split()[0], 'core', tabayyun_core.__version__, 'checks', len(tabayyun_core.builtin_checks()))
