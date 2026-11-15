@@ -383,9 +383,14 @@ Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, S
         snapshot test on 3.11, see the two entries below.
       - `pnpm update` raised the ranges in `web/package.json` to the installed versions, as
         Dependabot does; `jsdom` stays on 30 (31 is a major).
-- [ ] Python 3.15 base image (Dependabot #104): the locked dependencies install and import on
-      3.15, but CI builds no image on pull requests. Add an image build for pull requests that
-      touch a Dockerfile, then take the bump.
+- [x] **Image build in CI and the Python 3.15 base image** (15 Nov, no spec; replaces
+      Dependabot #104). CI built no image on pull requests, so a base image that cannot build
+      would first have shown as a failed release.
+      - The `images` job builds the api and web images only when a pull request touches a
+        Dockerfile, the entrypoint, the Caddy config, `.dockerignore` or `ci.yml`, and starts
+        the api image once to import the app, the worker and the core.
+      - It reads the changed files from the pull request's merge commit (its first parent is
+        the base), which needs no extra action and no API token.
 - [x] **SQLAlchemy 2.1 and Procrastinate 3.11** (14 Nov, no spec; replaces Dependabot's
       python-minor group #110 and `@vitejs/plugin-react` 6, #99).
       - Statements are annotated `Select[A, B]`; rows unpack without `.tuples()`; the latest

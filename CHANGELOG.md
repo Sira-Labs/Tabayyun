@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- The api image runs on Python 3.15 (was 3.14). CI now builds the images on pull requests
+  that touch a Dockerfile and starts the api image once.
+
 ## [0.3.0] - 2026-11-15
 
 Sprint 9: connectors and the series screen. The patch releases v0.2.1 to v0.2.10 carried
