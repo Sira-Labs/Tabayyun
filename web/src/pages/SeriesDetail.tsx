@@ -2,6 +2,8 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { Suspense, lazy, useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError, api } from "../api";
+import { compareSearchOfFinding } from "../compare/findings";
+import { MAX_SERIES, searchOfState } from "../compare/url";
 import { SeverityBadge } from "../components/Badges";
 import { buttonClass } from "../components/Brand";
 import { RUG_CLASS } from "../components/chart/rug";
@@ -25,7 +27,8 @@ import {
 import { sourcesApi } from "../sources";
 import { formatStep } from "../timeline";
 import type { Finding, Series } from "../types";
-import { ErrorLine, inputClass, panelClass } from "./admin/ui";
+import { ErrorLine, inputClass, linkButtonClass, panelClass } from "./admin/ui";
+import { SeriesPicker } from "./compare/SeriesPicker";
 
 // uPlot loads with the series page, not with the app; the page starts the download as it
 // mounts, alongside its API requests, instead of after the chart data arrives.
@@ -37,14 +40,14 @@ const NS_PER_MS = 1e6;
 const BACK_DEPTH = 50;
 
 /** A datetime-local value (local time, minutes) of an ns instant. */
-function localInput(ns: number): string {
+export function localInput(ns: number): string {
   const d = new Date(ns / NS_PER_MS);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /** The ns instant of a datetime-local value, or NaN. */
-function nsOfInput(value: string): number {
+export function nsOfInput(value: string): number {
   return Date.parse(value) * NS_PER_MS;
 }
 
@@ -55,7 +58,7 @@ function rangeOf(window: { from: string; to: string } | { start: string; end: st
 }
 
 /** The request width, measured from the element; null until the first measurement. */
-function useRequestWidth() {
+export function useRequestWidth() {
   const ref = useRef<HTMLDivElement>(null);
   // Without ResizeObserver (tests, old browsers) the chart asks for 1200 px.
   const [width, setWidth] = useState<number | null>(typeof ResizeObserver === "undefined" ? 1200 : null);
@@ -138,6 +141,7 @@ export function SeriesDetail() {
   return (
     <section aria-labelledby="series-heading" className="space-y-4">
       <SeriesHeader series={s} sourceName={source.data?.name} />
+      <CompareWith seriesId={seriesId} range={urlRange} />
       <ErrorLine error={series.error} prefix="Could not load the series" />
       <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
         <div className="min-w-0 space-y-3">
@@ -191,6 +195,33 @@ export function SeriesDetail() {
         </aside>
       </div>
     </section>
+  );
+}
+
+/** "Compare with…": pick up to seven more series and open them next to this one (spec 018). */
+function CompareWith({ seriesId, range }: { seriesId: string; range: Range | null }) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="space-y-2">
+      <button type="button" className={linkButtonClass} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        Compare with…
+      </button>
+      {open && (
+        <div className={panelClass}>
+          <SeriesPicker
+            initial={[]}
+            exclude={[seriesId]}
+            min={1}
+            max={MAX_SERIES - 1}
+            submitLabel="Compare"
+            onSubmit={(ids) =>
+              void navigate({ to: "/compare", search: searchOfState({ series: [seriesId, ...ids], range, layout: "auto", norm: "raw" }) })
+            }
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -405,11 +436,23 @@ function FindingsList({ findings, selected, loading, onPick }: FindingsListProps
                 </span>
                 <span>{f.summary}</span>
               </button>
+              <CompareLink finding={f} />
             </li>
           ))}
         </ul>
       )}
     </section>
+  );
+}
+
+/** A link to the compare view of a finding that involves several series, or nothing. */
+function CompareLink({ finding }: { finding: Finding }) {
+  const search = compareSearchOfFinding(finding);
+  if (!search) return null;
+  return (
+    <Link to="/compare" search={search} className="mb-2 ml-2 inline-block text-sm text-sky-800 underline underline-offset-2 dark:text-sky-300">
+      Compare the series involved
+    </Link>
   );
 }
 

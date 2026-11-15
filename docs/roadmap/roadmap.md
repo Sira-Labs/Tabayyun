@@ -40,6 +40,12 @@ Progress log:
   ADR-0014, found by the live end-to-end check), web runs list, upload form and run report
   on persisted runs with Vitest in CI (005). Sprints 1–6 took three days, so the sprint plan
   was re-baselined from weekly sprints to scope sprints with a rolling forecast.
+- **2026-10-06 – 11-15** sprint 9 (planned for 18–24 Oct): connector framework with encrypted,
+  write-only credentials (spec 021), PI Web API and OPC UA connectors (022, 023, ADR-0018),
+  sources pages and the series catalogue (024), the series page with its M4 chart (025), the
+  file-drop source for air-gapped sites (026) and the compare view with the residual lane
+  (018), released as v0.3.0. Six stories merged by 12 Oct; the seventh followed on 15 Nov,
+  after the dependency audits were green again (SQLAlchemy 2.1, Procrastinate 3.11).
 
 Goal: a self-hosted install that ingests from Parquet/CSV, PI Web API and OPC UA, runs the
 30 checks on a schedule, scores series, shows findings in a dashboard, lets a user correct a

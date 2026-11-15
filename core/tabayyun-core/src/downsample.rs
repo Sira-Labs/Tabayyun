@@ -148,6 +148,53 @@ pub fn gap_breaks(ts: &[i64], values: &[f64], max_step: i64) -> (Vec<i64>, Vec<f
     (out_ts, out_values)
 }
 
+/// Statistics of the usable, finite samples of a window (spec 018), which the compare view
+/// normalises with. They come from the raw samples, so they do not depend on the chart width.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WindowStats {
+    pub min: f64,
+    pub max: f64,
+    pub mean: f64,
+    /// Population standard deviation.
+    pub sd: f64,
+    /// The earliest usable, finite sample.
+    pub first_ts: i64,
+    pub first_value: f64,
+}
+
+/// Statistics of the usable, finite samples of a sorted frame inside `[from, to)`, or `None`
+/// when the window holds none (it may still hold bad-quality samples, which charts draw).
+pub fn window_stats(frame: &SeriesFrame, from: i64, to: i64) -> Option<WindowStats> {
+    let usable = |i: &usize| frame.values[*i].is_finite() && frame.quality[*i].is_usable();
+    let first = window_range(frame, from, to).find(usable)?;
+    let (mut min, mut max) = (f64::INFINITY, f64::NEG_INFINITY);
+    for i in window_range(frame, from, to).filter(usable) {
+        min = min.min(frame.values[i]);
+        max = max.max(frame.values[i]);
+    }
+    // Mean and deviations are taken on values divided by the largest magnitude, so squares of
+    // very large samples cannot overflow; an all-zero window keeps a scale of 1.
+    let scale = min.abs().max(max.abs());
+    let scale = if scale > 0.0 { scale } else { 1.0 };
+    // Welford's running mean and sum of squared deviations: stable on long, offset series.
+    let (mut n, mut mean, mut m2) = (0.0_f64, 0.0_f64, 0.0_f64);
+    for i in window_range(frame, from, to).filter(usable) {
+        let v = frame.values[i] / scale;
+        n += 1.0;
+        let delta = v - mean;
+        mean += delta / n;
+        m2 += delta * (v - mean);
+    }
+    Some(WindowStats {
+        min,
+        max,
+        mean: mean * scale,
+        sd: (m2 / n).max(0.0).sqrt() * scale,
+        first_ts: frame.ts[first],
+        first_value: frame.values[first],
+    })
+}
+
 /// A run of samples of one non-good quality class, `[start, end)` in ns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QualityRun {
@@ -210,6 +257,41 @@ pub fn quality_runs(frame: &SeriesFrame, from: i64, to: i64, buckets: usize) -> 
 mod tests {
     use super::*;
     use crate::synth::{generate, inject, Rng, SynthSpec};
+
+    #[test]
+    fn window_stats_stay_finite_on_huge_and_zero_values() {
+        let frame = |values: Vec<f64>| {
+            let ts = (0..values.len() as i64).collect();
+            SeriesFrame::with_default_quality(crate::SeriesMeta::new("s"), ts, values).unwrap()
+        };
+        // The squared deviations of ±1e200 exceed f64; the population sd is 1e200.
+        let s = window_stats(&frame(vec![1e200, -1e200]), 0, 2).unwrap();
+        assert_eq!(s.mean, 0.0);
+        assert!(s.sd.is_finite() && (s.sd / 1e200 - 1.0).abs() < 1e-12, "sd = {}", s.sd);
+        let s = window_stats(&frame(vec![0.0, 0.0, 0.0]), 0, 3).unwrap();
+        assert_eq!((s.min, s.max, s.mean, s.sd), (0.0, 0.0, 0.0, 0.0));
+        let s = window_stats(&frame(vec![1e-300, 3e-300]), 0, 2).unwrap();
+        assert!((s.mean / 2e-300 - 1.0).abs() < 1e-12 && (s.sd / 1e-300 - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn window_stats_use_raw_usable_samples_only() {
+        let ts: Vec<i64> = (0..8).collect();
+        let values = vec![100.0, 2.0, 4.0, f64::NAN, 4.0, 5.0, 5.0, 900.0];
+        let mut f = SeriesFrame::with_default_quality(crate::SeriesMeta::new("s"), ts, values).unwrap();
+        f.quality[0] = Quality::Bad; // the earliest sample does not count
+        f.quality[1] = Quality::Estimated; // estimated values do
+        f.quality[5] = Quality::Uncertain;
+        // Window [0, 7): usable finite samples are 2, 4, 4, 5.
+        let s = window_stats(&f, 0, 7).unwrap();
+        assert_eq!((s.min, s.max, s.mean), (2.0, 5.0, 3.75));
+        assert!((s.sd - 1.0897247358851685).abs() < 1e-12);
+        assert_eq!((s.first_ts, s.first_value), (1, 2.0));
+        // Only a bad sample in the window: no statistics, although a chart has a point.
+        assert_eq!(window_stats(&f, 0, 1), None);
+        assert_eq!(window_stats(&f, 3, 4), None);
+        assert_eq!(window_stats(&f, 20, 30), None);
+    }
 
     #[test]
     fn keeps_extremes_and_bounds_size() {

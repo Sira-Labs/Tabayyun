@@ -383,6 +383,9 @@ Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, S
         snapshot test on 3.11, see the two entries below.
       - `pnpm update` raised the ranges in `web/package.json` to the installed versions, as
         Dependabot does; `jsdom` stays on 30 (31 is a major).
+- [ ] Python 3.15 base image (Dependabot #104): the locked dependencies install and import on
+      3.15, but CI builds no image on pull requests. Add an image build for pull requests that
+      touch a Dockerfile, then take the bump.
 - [x] **SQLAlchemy 2.1 and Procrastinate 3.11** (14 Nov, no spec; replaces Dependabot's
       python-minor group #110 and `@vitejs/plugin-react` 6, #99).
       - Statements are annotated `Select[A, B]`; rows unpack without `.tuples()`; the latest
@@ -407,9 +410,23 @@ Owner prerequisites before sprint 8 starts (Google OAuth client, Keycloak app, S
 Stories S9-1 onwards in `docs/roadmap/sprints.md` become specs 018+ when their sprint
 starts; the plan is the backlog until then.
 
-- [ ] **018 Compare view** — `docs/specs/018-compare-view.md` (S9-7), drafted early on request
-      (23 Sep) with `docs/research/06-multi-series-comparison.md`; needs S9-5's chart endpoint.
-      The other sprint 9 stories take 019+. Approved 24 Sep; scatter stays in sprint 10 (S10-7).
+- [x] **018 Compare view** — `docs/specs/018-compare-view.md` (S9-7, 15 Nov; closes sprint 9,
+      released as v0.3.0). Every criterion is met; the group-page and dataset entry points
+      wait for those pages, which the web app does not have yet (spec edited).
+      - "Usable" is good or estimated, as `align` and the checks count it; the spec's first
+        text said good or uncertain.
+      - The residual endpoint returns the band as arrays beside the residual (it moves with
+        the input); each point carries the band of its own grid bin, so downsampling cannot
+        hide an excursion behind a wider band (review finding).
+      - The series of a compare chart are read and downsampled concurrently: 8 × 1M points
+        answer in about 430 ms instead of 1.2 s.
+      - The window helpers of the series chart moved to `routers/windows.py`, shared by both.
+      - Normalisation refuses per series, not per mode; `layout=lanes` stays one lane per
+        series in a normalised mode; arrows step the cursor here (they pan on the series page).
+      - Measured in Chromium: a window change repaints in 0.8 to 1.5 s for 8 × 1M points; the
+        cold first load takes 1.3 to 1.7 s.
+      - Follow-ups: a data extent in the chart response (for "All" and presets), member names
+        on a pair's residual lane, links from group and dataset pages once they exist.
 - [x] **021 Connector framework** — `docs/specs/021-connector-framework.md` (S9-1, 6 Oct).
       Every criterion is met; staging needs `TABAYYUN_MASTER_KEY` only to store credentials
       (the synthetic connector takes none).

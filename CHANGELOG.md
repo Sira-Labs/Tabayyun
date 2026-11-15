@@ -6,7 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-15
+
+Sprint 9: connectors and the series screen. The patch releases v0.2.1 to v0.2.10 carried
+these changes to staging as they merged.
+
 ### Added
+- Compare view (spec 018):
+  - `/compare` shows 2 to 8 series on one time axis, with the whole view in the URL: one plot
+    with two axes for up to two units, stacked lanes that share cursor and zoom for more.
+  - Values can be shown raw, scaled to their range, as z-scores or as an index, computed from
+    the window's raw samples; the readout keeps raw values and units.
+  - Balances and pairs get a residual lane (inputs minus outputs, or A − B) with the loss
+    band. Cross-series findings are shaded across all lanes, and a selected finding draws its
+    suspect thicker and labelled.
+  - A table view with CSV export, a keyboard cursor with a spoken readout, and links from
+    findings and the series page ("Compare with…").
+  - `GET /api/compare/chart` returns M4 points of the series on identical bins with each
+    series' window statistics; `GET /api/series-groups/{id}/residual` returns the residual
+    and its band. The core gained `residual`, `residual_chart` and `window_stats`.
 - Connector framework (spec 021):
   - Connector sources are created and changed, enabled or disabled, given credentials, given
     series, checked and fetched under `/api/sources`, with a fetch history.
@@ -191,5 +209,6 @@ Sprint 8: sign-in, tenants and the first security baseline pass.
 - A dataset window lying wholly outside 1677–2262, fixed or resolved at a run's `now`, is a
   422 instead of a run that fails in the worker.
 
-[Unreleased]: https://github.com/Sira-Labs/Tabayyun/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Sira-Labs/Tabayyun/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Sira-Labs/Tabayyun/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Sira-Labs/Tabayyun/releases/tag/v0.2.0

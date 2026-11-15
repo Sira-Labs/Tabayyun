@@ -43,10 +43,14 @@ losses report goes out.
 | `finding` | finding id; selects it: shaded, suspect emphasised, window centred on it |
 
 Entry points (links that build the URL):
-- a series group's page: all members, up to 8;
-- a dataset: its first 8 series, with a note naming the rest;
-- a finding: the finding's series plus `members` or `partner` from its evidence;
-- a series page: "Compare with…", which picks up to 7 more series from the catalogue.
+- a finding (on the series page and in the run report): the finding's series plus `members`
+  or `partner` from its evidence, with `group` and the finding selected;
+- a series page: "Compare with…", which picks up to 7 more series from the catalogue;
+- the navigation: `/compare` without series offers the same picker.
+
+Not built yet, because the web app has no page for either: a series group's page (all
+members, up to 8) and a dataset (its first 8 series, with a note naming the rest). They get
+their link when those pages exist; `group=` in the URL already works.
 
 ### API
 
@@ -59,18 +63,23 @@ Entry points (links that build the URL):
                stats: {min, max, mean, sd, first: {ts, value}} | null}]}
     ```
   - `ts` values are ns strings. `n_raw` is the number of raw points in the window.
+  - Without `from` and `to`, the window is the last 7 days of the members' data; `bins`
+    reports the window used. `from` and `to` are null when no member has data at all.
+  - A window whose series together hold more rows than `TABAYYUN_CHART_MAX_ROWS` is a 422
+    `window_too_large`, as for the series chart.
   - Chart points are M4 of every finite raw sample in `[from, to)`, whatever its quality, so
     bad-quality stretches stay visible (S9-5 marks them in its quality rug).
-  - `stats` is computed on the raw, usable (good or uncertain quality), finite samples in
-    `[from, to)`, before downsampling. `sd` is the population standard deviation. `first` is
+  - `stats` is computed on the raw, usable (good or estimated quality, as the checks count
+    them), finite samples in `[from, to)`, before downsampling. `sd` is the population standard deviation. `first` is
     the earliest such sample. `stats` is null when the window holds none, which can happen
     while chart points exist (every finite sample is bad).
   - It reuses S9-5's M4 kernel and cache reads, one call instead of eight.
 - `GET /api/series-groups/{id}/residual?from=&to=&width_px=`
   - For a `balance` group, or any group with exactly two members.
   - The members are aligned on spec 008's grid: each member's value in a grid bin is the
-    mean of its usable (good or uncertain), finite raw samples there, NaN when there are
-    none (the same `align` as the checks).
+    mean of its usable (good or estimated), finite raw samples there, NaN when there are
+    none (the same `align` as the checks). The grid is the group's `grid` param, as for
+    `tby.balance_residual`: `auto` (the coarsest expected interval) or a duration.
   - The residual r = Σin − Σout (balance) or A − B (pair) is computed only for grid bins
     where every member has a value, as `tby.balance_residual` does. Incomplete bins are
     skipped and do not suppress the others. The result is then M4-downsampled on the same
@@ -78,22 +87,32 @@ Entry points (links that build the URL):
   - Response:
     ```
     {kind: "balance" | "pair", grid_ns,
+     window: {from, to} | null,
      ts, residual,
-     band: {lo, hi} | null,
+     band: {lo: [..], hi: [..]} | null,
      missing: [series_id]}
     ```
+  - `residual` holds null where the line breaks across skipped grid bins.
   - `band` is `loss_min·Σin` and `loss_max·Σin` from the group's params, or the
-    `tby.balance_residual` defaults, as per-bin minimum and maximum. It is null for pairs.
+    `tby.balance_residual` defaults, one value per residual point: the band of that point's
+    own grid bin. It is null for pairs.
   - `missing` lists members with no usable, finite raw sample anywhere in the window. When it
     is not empty, `ts` and `residual` are empty.
+  - `window` is the window used (the default is the compare chart's); it is null, and every
+    member is `missing`, when no member has data at all.
+  - A group of another kind with three or more members is a 422, as is a balance whose
+    `loss_min` is not below its `loss_max`.
 - Findings for the view come from the existing `GET /api/findings?series_id=…&since=&until=`,
   one call per series. Cross-series findings are attached to a member (specs 009–011), so
   these calls return them too.
 
 ### Core
 
-`tabayyun_core.residual(tables, metas, roles, grid, window)` returns the aligned residual per
-grid bin, plus Σin per bin for the band. It is pure, and uses the same `align` as the checks.
+`tabayyun_core.residual(tables, metas, members, from_ns, to_ns, grid=…)` returns the aligned
+residual per grid bin, plus Σin per bin for the band; `members` lists each series with its
+sign (+1 for inputs and a pair's first member, −1 otherwise). With `buckets` it returns the
+chart points instead, and with `loss` their band. It is pure, and uses the same `align` as
+the checks. `tabayyun_core.compare_series` returns one series' chart points and `stats`.
 
 ## Behaviour
 
@@ -168,29 +187,29 @@ grid bin, plus Σin per bin for the band. It is pure, and uses the same `align` 
 
 ## Acceptance criteria
 
-- [ ] `GET /api/compare/chart` returns 2–8 series on identical bins, M4 per series.
-- [ ] `GET /api/compare/chart` answers 422 outside 2–8 series and 404 for unknown ids.
-- [ ] For a synthetic balance (1 in, 3 out, one outlet 30 % low for 6 h),
+- [x] `GET /api/compare/chart` returns 2–8 series on identical bins, M4 per series.
+- [x] `GET /api/compare/chart` answers 422 outside 2–8 series and 404 for unknown ids.
+- [x] For a synthetic balance (1 in, 3 out, one outlet 30 % low for 6 h),
       `GET /api/series-groups/{id}/residual` returns a residual that leaves the band exactly
       over those 6 h.
-- [ ] For a pair, the residual is A − B, with no band.
-- [ ] A missing member is listed in `missing`.
-- [ ] Opening a `tby.balance_residual` finding shows all members and the residual lane, and
+- [x] For a pair, the residual is A − B, with no band.
+- [x] A missing member is listed in `missing`.
+- [x] Opening a `tby.balance_residual` finding shows all members and the residual lane, and
       draws the suspect thicker and labelled.
-- [ ] Opening a `tby.correlation_break` finding shows the pair.
-- [ ] Three units give stacked lanes that share cursor and zoom; two units give two axes on one
+- [x] Opening a `tby.correlation_break` finding shows the pair.
+- [x] Three units give stacked lanes that share cursor and zoom; two units give two axes on one
       plot.
-- [ ] `range`, `z` and `index` normalise as specified, from the raw-window `stats` rather than
+- [x] `range`, `z` and `index` normalise as specified, from the raw-window `stats` rather than
       from the downsampled points. The result is identical at two chart widths. `index` is
       refused with a reason for a series starting at 0 or changing sign. The readout keeps raw
       values and units.
-- [ ] Every series colour reaches 3:1 against the light and dark chart backgrounds (unit test
+- [x] Every series colour reaches 3:1 against the light and dark chart backgrounds (unit test
       over the palette).
-- [ ] Series 5–8 are dashed.
-- [ ] The table view and keyboard cursor work without a mouse.
-- [ ] 8 series of 1M raw points each render under 1.5 s after the first load (S9-5's 500 ms
-      budget per series, shared).
-- [ ] The URL alone restores the view: series, window, layout, norm and selected finding.
+- [x] Series 5–8 are dashed.
+- [x] The table view and keyboard cursor work without a mouse.
+- [x] 8 series of 1M raw points each render under 1.5 s after the first load (S9-5's 500 ms
+      budget per series, shared). Measured: see the implementation notes.
+- [x] The URL alone restores the view: series, window, layout, norm and selected finding.
 
 ## Test cases
 
@@ -229,3 +248,59 @@ grid bin, plus Σin per bin for the band. It is pure, and uses the same `align` 
 - More than 8 series (small multiples): with fleet baselines, S20.
 - Saving a comparison as a named view, and sharing it outside the workspace: S12 sharing.
 - Editing groups from the compare view: the groups page, S9-4.
+
+## Implementation notes
+
+Written on 15 Nov 2026, with the reasons for what differs from the first text (the sections
+above are edited to match).
+
+- **Usable means good or estimated.** The first text said "good or uncertain". The residual
+  must count samples as `tby.balance_residual` does, and the core's `align` uses good and
+  estimated samples (`Quality::is_usable`); `stats` follows the same rule, so a series
+  normalises on the samples the checks judge.
+- **The residual's band has one value per point.** A balance's band moves with the input, so
+  `band` is two arrays beside `residual`, and each point carries the band of its own grid
+  bin: a point drawn outside the band was outside it, a point inside was inside. Grid bins
+  the downsampling drops are not drawn; M4 keeps each chart bin's lowest and highest
+  residual, so an excursion can only be lost where the band itself moves inside one chart
+  bin by more than the residual does. (A first version widened the band over the chart bin,
+  which could hide an excursion; found in review.)
+- **Non-finite numbers** never reach the JSON: residual and band values that overflow become
+  null, and a series whose statistics are not finite gets `stats: null`.
+- **The grid is the group's `grid` param**, so the lane shows the bins the check judged. The
+  binding takes it as `auto` or a duration, as the checks' params do.
+- **Bins that start before the window** (the grid is anchored at the epoch) are drawn at the
+  window's start.
+- **Row limit.** Both endpoints refuse a window whose series together exceed
+  `TABAYYUN_CHART_MAX_ROWS` (422 `window_too_large`), like the series chart.
+- **Tenancy.** Series ids come in the query, so the chart answers 404 with the ids the
+  caller's workspace does not have; the residual route joined the cross-tenant route test.
+- **Normalisation refuses per series.** A series a mode cannot show (hi = lo, sd = 0, an index
+  base ≤ 0 or a sign change, no usable samples) is hidden with its reason in the legend, and
+  the others are drawn.
+- **`layout=lanes` with a normalised mode** keeps one lane per series, each on the
+  dimensionless axis: the lanes are what the user asked for, the axis what the mode needs.
+- **Keyboard.** Arrow keys step the cursor through the bins that hold data (Shift steps ten),
+  plus and minus zoom, Home resets, Escape clears. The series page pans with the arrows; here
+  the spec asks for a cursor.
+- **Table.** The page shows at most 500 bins; the CSV holds all of them.
+- **`finding=` without a window** reads the finding first and centres on it. Links built from
+  a finding carry the window.
+- **Palette.** Okabe-Ito, with orange `#c18600`, sky blue `#4a9bc8` and yellow `#9e962c` on
+  the light background and `#666666` for black on the dark one, the smallest changes that
+  reach 3:1. Series toggles are local state, not part of the URL.
+- **A pair's lane** is labelled "A − B", in the group's member order.
+- **Speed (criterion "8 × 1M under 1.5 s after the first load").** Measured in this container
+  (4 cores) on 14 Nov 2026, 8 series of 1 000 000 points each in a local cache:
+  - The API test answers the compare chart in 1 614 ms on the first call and 427 ms on the
+    second. The series are read and downsampled in threads at the same time; one after the
+    other the same request took about 1.2 s.
+  - In Chromium against the built app and the local API, changing the window of the open
+    page repaints in 821 to 1 497 ms (median 1 198 ms over five changes).
+  - Opening the page cold, including the app shell, takes 1 254 to 1 701 ms (median 1 591 ms
+    over six loads), so the first load does not meet the budget; the criterion asks for the
+    loads after it.
+- **Checked in Chromium** against the API with the `seed.py` data: the balance finding of
+  `out-2` opens the four feeders with the residual lane, the suspect drawn thicker and
+  labelled, the residual above the band over the finding's window, no console error and no
+  failed request. The z-score mode and the table view open from the same URL.

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { useEffect, useId, useRef, useState } from "react";
 import { ApiError, api } from "../api";
+import { compareSearchOfFinding } from "../compare/findings";
 import { ScoreTile, SeverityBadge, StatusBadge } from "../components/Badges";
 import { Evidence } from "../components/Evidence";
 import { FindingsTimeline } from "../components/FindingsTimeline";
@@ -29,6 +30,8 @@ type RowProps = { finding: Finding; open: boolean; onToggle: () => void; focus: 
 function FindingRow({ finding, open, onToggle, focus }: RowProps) {
   const panelId = useId();
   const button = useRef<HTMLButtonElement>(null);
+  // A finding about several series opens next to them in the compare view (spec 018).
+  const compare = compareSearchOfFinding(finding);
   // Scroll to and focus the row the timeline asked for; the parent has already opened it.
   useEffect(() => {
     if (focus?.id !== finding.id) return;
@@ -70,6 +73,11 @@ function FindingRow({ finding, open, onToggle, focus }: RowProps) {
       </button>
       <div id={panelId} hidden={!open} className="bg-slate-50 px-3 pb-3 pt-1 dark:bg-slate-950">
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400">Evidence</h3>
+        {compare && (
+          <Link to="/compare" search={compare} className="mb-2 inline-block text-sm text-sky-800 underline underline-offset-2 dark:text-sky-300">
+            Compare the series involved
+          </Link>
+        )}
         <Evidence value={finding.evidence} />
       </div>
     </li>

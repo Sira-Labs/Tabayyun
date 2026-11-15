@@ -6,12 +6,14 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tabayyun.authz import ReadScope, WriteScope, get_session
 from tabayyun.db.models import SeriesGroup
+from tabayyun.routers.windows import read_or_503, window_or_422
+from tabayyun.services import compare, series_chart
 from tabayyun.services import groups as groups_service
 
 router = APIRouter(prefix="/api/series-groups", tags=["series-groups"])
@@ -177,6 +179,88 @@ async def get_group(
     if group is None:
         raise HTTPException(status_code=404, detail="series group not found")
     return await _out(session, group)
+
+
+class BandOut(BaseModel):
+    """The loss band of a balance at each residual point."""
+
+    lo: list[float | None]
+    hi: list[float | None]
+
+
+class ResidualOut(BaseModel):
+    """`GET /api/series-groups/{id}/residual`: chart points of the group's residual."""
+
+    kind: Literal["balance", "pair"]
+    grid_ns: int
+    window: dict[str, str] | None
+    ts: list[str]
+    residual: list[float | None] = Field(description="null where the line breaks across skipped bins")
+    band: BandOut | None
+    missing: list[str]
+
+
+@router.get("/{group_id}/residual", response_model=ResidualOut)
+async def get_residual(
+    group_id: str,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    scope: ReadScope,
+    from_: Annotated[str | None, Query(alias="from")] = None,
+    to: str | None = None,
+    width_px: Annotated[int, Query(ge=100, le=4000)] = 1200,
+) -> ResidualOut:
+    """Inputs minus outputs of a balance, or A − B of a two-member group, on the checks' grid
+    and downsampled to the chart's bins (spec 018). Default window: the last 7 days of the
+    members' data.
+
+    422 for a group of another kind with three or more members, and for `window_too_large`.
+    """
+    group = await groups_service.get_group(session, scope, _parse_id(group_id))
+    if group is None:
+        raise HTTPException(status_code=404, detail="series group not found")
+    members = (await groups_service.members_of(session, [group.id]))[group.id]
+    try:
+        kind = compare.residual_kind(group, members)
+    except compare.NoResidualError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    series, _ = await compare.series_by_id(session, scope, [m.series_id for m in members])
+    found = await compare.extents(session, series)
+    window = window_or_422(from_, to) or compare.default_window(found)
+    balance = kind == "balance"
+    if window is None:
+        return ResidualOut(
+            kind=kind,
+            grid_ns=0,
+            window=None,
+            ts=[],
+            residual=[],
+            band=BandOut(lo=[], hi=[]) if balance else None,
+            missing=[str(m.series_id) for m in members],
+        )
+    try:
+        compare.check_size(found, *window, request.app.state.settings.chart_max_rows)
+    except series_chart.WindowTooLargeError as exc:
+        raise HTTPException(status_code=422, detail="window_too_large") from exc
+    cache = request.app.state.run_cache
+    batches = {}
+    for s in series:
+        batch = await read_or_503(cache, s, window)
+        if batch is not None:
+            batches[str(s.id)] = batch
+    try:
+        out = await compare.group_residual(group, members, series, batches, *window, width_px)
+    except compare.NoResidualError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return ResidualOut(
+        kind=out.kind,
+        grid_ns=out.grid_ns,
+        window={"from": str(window[0]), "to": str(window[1])},
+        ts=[str(t) for t in out.ts],
+        residual=out.residual,
+        band=BandOut(lo=out.lo, hi=out.hi) if out.lo is not None and out.hi is not None else None,
+        missing=out.missing,
+    )
 
 
 @router.patch("/{group_id}", response_model=GroupOut)
