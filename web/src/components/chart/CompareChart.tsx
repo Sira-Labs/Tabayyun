@@ -204,8 +204,17 @@ export default function CompareChart({ lanes, range, theme, hidden, keyCursor, l
   const lastSelect = useRef({ key: "", at: 0 });
   const syncName = useId();
 
+  // Whether the plots' cursors were last placed by the keyboard: only those are cleared with it.
+  const keyOwned = useRef(false);
+
   useEffect(() => {
-    handlers.current = { onSelect, onBack, onCursor };
+    // uPlot calls this hook for pointer movement only (the keyboard cursor is set without
+    // firing hooks), so the pointer takes the cursor over from the keyboard here.
+    const fromPointer = (ts: number | null) => {
+      keyOwned.current = false;
+      onCursor(ts);
+    };
+    handlers.current = { onSelect, onBack, onCursor: fromPointer };
     hiddenNow.current = hidden;
   });
 
@@ -261,8 +270,6 @@ export default function CompareChart({ lanes, range, theme, hidden, keyCursor, l
     }
   }, [hidden, lanes]);
 
-  // Whether the plots' cursors were last placed by the keyboard: only those are cleared with it.
-  const keyOwned = useRef(false);
   useEffect(() => {
     if (keyCursor === null) {
       if (keyOwned.current) {

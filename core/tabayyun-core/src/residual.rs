@@ -150,14 +150,21 @@ pub fn residual_chart(
     let Some(loss) = loss else {
         return Ok(ResidualChart { ts: out_ts, residual, ..ResidualChart::default() });
     };
-    // `ts` is a subset of `r.ts`, which is strictly increasing, so the search always hits.
-    let (lo, hi): (Vec<f64>, Vec<f64>) = ts
-        .iter()
-        .map(|t| r.ts.binary_search(t).map_or((f64::NAN, f64::NAN), |i| band_of(r.sum_in[i], loss)))
-        .unzip();
-    // The band breaks where the residual does: all three share `ts` and are finite together.
-    let (_, lo) = gap_breaks(&ts, &lo, max_step);
-    let (_, hi) = gap_breaks(&ts, &hi, max_step);
+    // The band breaks exactly where the residual does, whatever the band's own values are
+    // (an overflowing input makes an edge NaN), so the arrays always have the same length.
+    let breaks_after =
+        |i: usize| i + 1 < ts.len() && ts[i + 1].saturating_sub(ts[i]) > max_step && !values[i].is_nan();
+    let (mut lo, mut hi) = (Vec::with_capacity(out_ts.len()), Vec::with_capacity(out_ts.len()));
+    for (i, t) in ts.iter().enumerate() {
+        // `ts` is a subset of `r.ts`, which is strictly increasing, so the search always hits.
+        let (l, h) = r.ts.binary_search(t).map_or((f64::NAN, f64::NAN), |k| band_of(r.sum_in[k], loss));
+        lo.push(l);
+        hi.push(h);
+        if breaks_after(i) {
+            lo.push(f64::NAN);
+            hi.push(f64::NAN);
+        }
+    }
     Ok(ResidualChart { ts: out_ts, residual, lo, hi })
 }
 
@@ -299,6 +306,25 @@ mod tests {
         }
         // The chart bin of the step shows both: a point outside its band and one inside.
         assert!(in_step_bin.0 >= 1 && in_step_bin.1 >= 1, "{in_step_bin:?}");
+    }
+
+    #[test]
+    fn band_arrays_keep_the_residuals_length_when_an_edge_is_not_finite() {
+        // An input sum that overflowed makes the band's lower edge NaN (0 × inf) at the first
+        // point; the gap after it must still be inserted in every array.
+        let r = Residual {
+            grid_ns: 1,
+            ts: vec![0, 4],
+            residual: vec![0.0, 0.0],
+            sum_in: vec![f64::INFINITY, 2.0],
+            missing: Vec::new(),
+        };
+        let chart = residual_chart(&r, 0, 5, 100, Some((0.0, 0.05))).unwrap();
+        assert_eq!(chart.ts, vec![0, 1, 4]);
+        assert_eq!((chart.residual.len(), chart.lo.len(), chart.hi.len()), (3, 3, 3));
+        assert!(chart.lo[0].is_nan() && chart.lo[1].is_nan() && chart.hi[1].is_nan());
+        assert_eq!((chart.lo[2], chart.hi[2]), (0.0, 0.1));
+        assert!(chart.residual[1].is_nan());
     }
 
     #[test]
