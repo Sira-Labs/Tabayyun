@@ -261,6 +261,33 @@ describe("suites.form (edit)", () => {
     expect(sent[0]?.body).toEqual({ dataset_id: DATASET_ID, schedule: "a b c d e" });
   });
 
+  it("does not send untouched fields back over a change made elsewhere while the form was open", async () => {
+    const sent: Sent[] = [];
+    let name = "Alpha";
+    const route = (url: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (url === "/api/checks/catalogue") return CATALOGUE;
+      if (url === "/api/datasets?limit=100") return DATASETS;
+      if (method !== "GET") {
+        sent.push({ method, url, body: bodyOf(init) });
+        return suite({ name });
+      }
+      if (url === `/api/suites/${SUITE_ID}`) return suite({ name });
+      throw new Error(`unexpected ${method} ${url}`);
+    };
+    stubFetch(route, asRole("editor"));
+    const user = userEvent.setup();
+    const { client } = renderApp(`/suites/${SUITE_ID}/edit`);
+    expect(((await screen.findByLabelText("Name")) as HTMLInputElement).value).toBe("Alpha");
+    // Someone else renames the suite, and the cached copy is refetched under the open form.
+    name = "Beta";
+    await client.refetchQueries({ queryKey: ["suites", SUITE_ID, "detail"] });
+    await user.click(screen.getByLabelText(/^Enabled/));
+    await user.click(screen.getByRole("button", { name: "Save suite" }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.body).toEqual({ enabled: false });
+  });
+
   it("keeps viewers out", async () => {
     stubFetch(() => suite(), asRole("viewer"));
     renderApp(`/suites/${SUITE_ID}/edit`);
@@ -281,6 +308,27 @@ describe("suite form logic", () => {
     const draft = draftOf(CATALOGUE, stored);
     expect(draft.range?.values).toEqual({ min: "-5", max: "", mode: "operational", ignore: "[1,2]" });
     expect(checksOf(CATALOGUE, draft)).toEqual({ checks: [...stored, { id: "drift", enabled: false, params: {} }], errors: {} });
+  });
+
+  it("keeps a stored switch that equals its default as an override", () => {
+    const stored = [{ id: "spike", enabled: true, params: { two_sided: true } }];
+    const draft = draftOf(CATALOGUE, stored);
+    expect(checksOf(CATALOGUE, draft).checks[0]).toEqual(stored[0]);
+    // A switch the suite never set stays out while it equals the default.
+    expect(checksOf(CATALOGUE, draftOf(CATALOGUE, null)).checks[0]?.params).toEqual({});
+  });
+
+  it("leaves out a bad value of a check that is off, without an error, and keeps it in the draft", () => {
+    const draft = draftOf(CATALOGUE, null);
+    const spike = draft.spike as { enabled: boolean; values: Record<string, string | boolean> };
+    spike.values.threshold = "six";
+    spike.values.window = "30";
+    spike.enabled = false;
+    const off = checksOf(CATALOGUE, draft);
+    expect(off.errors).toEqual({});
+    expect(off.checks[0]).toEqual({ id: "spike", enabled: false, params: { window: 30 } });
+    spike.enabled = true;
+    expect(Object.keys(checksOf(CATALOGUE, draft).errors)).toEqual(["spike.threshold"]);
   });
 
   it("names the parameters that do not hold a value of their kind", () => {

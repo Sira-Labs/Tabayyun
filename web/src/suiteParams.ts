@@ -15,8 +15,9 @@ export function paramKind(defaultValue: unknown): ParamKind {
 }
 
 /** One check in the form: its switch, and per parameter the input's text (empty = use the
- * default) or the checkbox's state. */
-export type CheckDraft = { enabled: boolean; values: Record<string, string | boolean> };
+ * default) or the checkbox's state. `pinned` names the switches the stored suite sets
+ * explicitly: they stay overrides even where they equal the default. */
+export type CheckDraft = { enabled: boolean; values: Record<string, string | boolean>; pinned?: string[] };
 export type ChecksDraft = Record<string, CheckDraft>;
 
 /** The text an input shows for a stored or default value. */
@@ -32,12 +33,15 @@ export function draftOf(catalogue: CatalogueCheck[], checks: SuiteCheckInput[] |
   for (const info of catalogue) {
     const stored = checks?.find((c) => c.id === info.id);
     const values: Record<string, string | boolean> = {};
+    const pinned: string[] = [];
     for (const [param, defaultValue] of Object.entries(info.defaults)) {
       const override = stored?.params[param];
-      if (paramKind(defaultValue) === "boolean") values[param] = typeof override === "boolean" ? override : defaultValue === true;
-      else values[param] = valueText(override);
+      if (paramKind(defaultValue) === "boolean") {
+        values[param] = typeof override === "boolean" ? override : defaultValue === true;
+        if (typeof override === "boolean") pinned.push(param);
+      } else values[param] = valueText(override);
     }
-    draft[info.id] = { enabled: checks === null ? true : (stored?.enabled ?? false), values };
+    draft[info.id] = { enabled: checks === null ? true : (stored?.enabled ?? false), values, pinned };
   }
   return draft;
 }
@@ -46,18 +50,22 @@ export function draftOf(catalogue: CatalogueCheck[], checks: SuiteCheckInput[] |
 export const paramKey = (checkId: string, param: string) => `${checkId}.${param}`;
 
 /** The checks the API gets, in the catalogue's order, with only the parameters that were set;
- * `errors` names the inputs that do not hold a value of their kind. */
+ * `errors` names the inputs that do not hold a value of their kind. A check that is off hides
+ * its inputs, so a value of the wrong kind there is left out and does not block saving; the
+ * draft keeps it for when the check is switched on again. */
 export function checksOf(catalogue: CatalogueCheck[], draft: ChecksDraft): { checks: SuiteCheckInput[]; errors: Record<string, string> } {
   const checks: SuiteCheckInput[] = [];
   const errors: Record<string, string> = {};
   for (const info of catalogue) {
     const entry = draft[info.id];
+    const on = entry?.enabled ?? false;
     const params: Record<string, unknown> = {};
     for (const [param, defaultValue] of Object.entries(info.defaults)) {
       const value = entry?.values[param];
       const kind = paramKind(defaultValue);
       if (kind === "boolean") {
-        if (typeof value === "boolean" && value !== defaultValue) params[param] = value;
+        const explicit = value !== defaultValue || (entry?.pinned ?? []).includes(param);
+        if (typeof value === "boolean" && explicit) params[param] = value;
         continue;
       }
       const text = typeof value === "string" ? value.trim() : "";
@@ -66,16 +74,16 @@ export function checksOf(catalogue: CatalogueCheck[], draft: ChecksDraft): { che
       else if (kind === "number") {
         const n = Number(text);
         if (Number.isFinite(n)) params[param] = n;
-        else errors[paramKey(info.id, param)] = "Enter a number.";
+        else if (on) errors[paramKey(info.id, param)] = "Enter a number.";
       } else {
         try {
           params[param] = JSON.parse(text) as unknown;
         } catch {
-          errors[paramKey(info.id, param)] = "Enter a number or valid JSON (text in double quotes).";
+          if (on) errors[paramKey(info.id, param)] = "Enter a number or valid JSON (text in double quotes).";
         }
       }
     }
-    checks.push({ id: info.id, enabled: entry?.enabled ?? false, params });
+    checks.push({ id: info.id, enabled: on, params });
   }
   return { checks, errors };
 }

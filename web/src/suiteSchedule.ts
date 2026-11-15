@@ -33,11 +33,13 @@ function int(field: string, min: number, max: number): number | null {
   return n >= min && n <= max ? n : null;
 }
 
-/** The step of an "every n" field, or null. */
-function stepOf(field: string): number | null {
+// The step of a "star slash n" field when n divides `cycle` (60 minutes, 24 hours). Cron
+// restarts a step at the top of the hour or day, so only then are the firings evenly n apart:
+// a step of 7 hours fires at 21:00 and again at 00:00.
+function stepOf(field: string, cycle: number): number | null {
   const match = /^\*\/(\d+)$/.exec(field);
   const n = match ? Number(match[1]) : 0;
-  return n >= 1 ? n : null;
+  return n >= 1 && cycle % n === 0 ? n : null;
 }
 
 /** One weekday as 0 (Sunday) to 6, from a number (7 is Sunday too) or a three-letter name. */
@@ -84,13 +86,13 @@ export function describeCron(expr: string | null | undefined): string {
   const m = int(minute, 0, 59);
 
   if (everyDay && hour === "*") {
-    const step = minute === "*" ? 1 : stepOf(minute);
+    const step = minute === "*" ? 1 : stepOf(minute, 60);
     if (step !== null) return step === 1 ? "Every minute" : `Every ${step} minutes`;
     return m === null ? text : `Every hour at :${pad(m)}`;
   }
   if (m === null) return text;
   if (everyDay) {
-    const step = stepOf(hour);
+    const step = stepOf(hour, 24);
     if (step !== null) return step === 1 ? `Every hour at :${pad(m)}` : `Every ${step} hours at :${pad(m)}`;
   }
   const h = int(hour, 0, 23);

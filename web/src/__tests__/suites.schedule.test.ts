@@ -16,6 +16,10 @@ describe("describeCron", () => {
     ["15 6 * * 1,3,5", "Mondays, Wednesdays and Fridays at 06:15 UTC"],
     ["5 */6 * * *", "Every 6 hours at :05"],
     ["0 */1 * * *", "Every hour at :00"],
+    // A step that does not divide the hour or the day is uneven at the wrap: not "every N".
+    ["*/7 * * * *", "*/7 * * * *"],
+    ["0 */7 * * *", "0 */7 * * *"],
+    ["0 */8 * * *", "Every 8 hours at :00"],
     ["0 2 1 * *", "Day 1 of every month at 02:00 UTC"],
     ["  0   6 * * *  ", "Every day at 06:00 UTC"],
   ])("puts %s into words", (expr, words) => {
