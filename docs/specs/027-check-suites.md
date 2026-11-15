@@ -117,10 +117,11 @@ A suite in a response:
 1. **Validation** (422 with the field named):
    - `name`: 1 to 256 characters, unique in the workspace (409 on a clash);
    - `dataset_id`: a dataset of the workspace;
-   - `schedule`: five cron fields that parse; successive firings must be at least five
-     minutes apart;
-   - `checks`: at least one, each id a built-in check and listed once, `params` an object
-     whose keys are parameters of that check and whose values the core accepts.
+   - `schedule`: five cron fields that parse and name a date that exists; successive firings
+     must be at least five minutes apart, judged on every minute and hour the expression names;
+   - `checks`: at least one and at least one switched on, each id a built-in check and listed
+     once, `params` an object whose keys are parameters of that check and whose values the
+     core accepts.
 2. **Next run.** `next_run_at` is the first firing of the schedule after now, in UTC. It is
    computed when the suite is created, when `schedule` or `enabled` changes, and after each
    firing. It is null without a schedule or while the suite is disabled.
@@ -192,6 +193,14 @@ A suite in a response:
 - A check the core no longer ships is left out of a stored suite's response and of its runs.
 - The claim sets a ten-minute lease in `next_run_at` itself, so no extra column is needed and
   a second worker's tick in the same minute claims nothing.
+
+- From the review: a suite with every check off is refused (its runs would succeed and say
+  nothing); a null given for a run-time parameter is shown with its run-time source, not as an
+  override; `runs` gets a partial index on `(suite_id, created_at desc)` for the history. The
+  migration adds the runs' foreign key unvalidated and validates it, and builds that index
+  concurrently, after its transaction has committed, so writers to `runs` are not blocked.
+- The edit form compares against the suite as it was when the form opened, so a refetch
+  under the open form cannot send untouched fields back over someone else's change.
 
 ## Out of scope
 
