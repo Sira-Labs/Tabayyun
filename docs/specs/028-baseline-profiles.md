@@ -105,7 +105,9 @@ baseline the panel says so and, for editors, offers to compute one.
    holds of the series, ending at its last covered instant (not at the time of the job, so an
    uploaded history gets a baseline too). When the coverage says the window holds more than
    `TABAYYUN_BASELINE_MAX_ROWS` rows (default 5 000 000), the window is halved (14 days, 7
-   days, … one day) until it fits; if one day does not fit, no baseline is computed. Left out
+   days, … one day) until it fits; if one day does not fit, no baseline is computed. The
+   coverage only estimates: when the window that was read holds more rows than the limit,
+   no baseline is computed either. Left out
    are samples of bad quality, and samples inside the window of a finding of the series that
    is `open` and `critical`. Excluded windows are recorded.
 2. **Too little to learn from.** With fewer than 50 samples left, no baseline is stored and
@@ -174,6 +176,20 @@ baseline the panel says so and, for editors, offers to compute one.
 - `stats.baselines` is present on every dataset run, empty when no series had a baseline.
 - The retry test of migration 0013 (spec 027) upgraded to `head`; it now names 0013, so later
   migrations do not run inside it.
+
+- From the review:
+  - Computations of one series can overlap (a queued job and a refresh from the page). A
+    result is stored only if no version was stored since its inputs were read; otherwise it
+    is computed again, at most three times, so an older result never lands on a newer one.
+  - The row limit is also checked on the rows that were read, because coverage spreads a
+    write's rows evenly and underestimates a dense burst.
+  - A critical finding at one instant is left out also when it sits on the window's first
+    sample.
+  - `tby.spikes` takes the resolution from the stored baseline when the series declares
+    none (it read it from the window under test, where the spike itself raises it), so the
+    floor the page shows is the floor the check uses.
+  - The panel is keyed by series, so a refresh in progress does not carry over to another
+    series' page.
 
 ## Out of scope
 

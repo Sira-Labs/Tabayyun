@@ -35,6 +35,8 @@ All notable changes to this project are documented here. The format follows
 - Dataset runs judge a series against its stored baseline once it has one, no longer against
   the window they are checking. Rate-of-change, spike, noise, drift and resolution findings of
   a series can change with its first baseline. Upload runs are unchanged.
+- `tby.spikes` takes the resolution for its scale floor from the baseline when the series
+  declares none, no longer from the window under test.
 - The api image runs on Python 3.15 (was 3.14) and its build stage on Rust 1.100. CI now
   builds the images on pull requests that touch a Dockerfile and starts the api image once.
 
