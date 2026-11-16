@@ -103,8 +103,15 @@ impl Check for Spikes {
         // Scale floor: the series' robust noise sigma or its resolution, whichever is larger.
         // A 21-sample MAD underestimates the scale often enough that, without the floor,
         // ordinary noise is flagged at a few tenths of a percent.
+        // With a stored baseline both come from it (spec 028): the resolution read from the
+        // window under test would grow with the very spike it should catch.
         let floor = self.min_scale.unwrap_or_else(|| {
-            let res = frame.meta.resolution.or_else(|| resolution(&f.values)).unwrap_or(0.0);
+            let res = frame
+                .meta
+                .resolution
+                .or_else(|| ctx.profile.as_ref().and_then(|p| p.resolution))
+                .or_else(|| resolution(&f.values))
+                .unwrap_or(0.0);
             let noise = match &ctx.profile {
                 Some(p) => p.noise_mad,
                 None => Profile::compute(&f).noise_mad,
@@ -252,6 +259,25 @@ mod tests {
             .iter()
             .flat_map(|x| x.evidence["ts"].as_array().unwrap().iter().map(|v| v.as_i64().unwrap()))
             .collect()
+    }
+
+    #[test]
+    fn floor_uses_the_stored_baselines_resolution() {
+        // A flat signal with one value of 10: read from this window alone the resolution is
+        // 10, the floor hides the spike. A stored baseline that knows steps of 1 shows it.
+        let ts: Vec<i64> = (0..100).map(|i| i * crate::time::NS_PER_MIN).collect();
+        let mut values = vec![0.0; 100];
+        values[50] = 10.0;
+        let f = SeriesFrame::with_default_quality(crate::SeriesMeta::new("s"), ts, values).unwrap();
+        assert!(ids(&Spikes::default().run(&f, &ctx(&f)).unwrap(), ID).is_empty());
+        let stored = Profile { resolution: Some(1.0), noise_mad: Some(0.0), ..Default::default() };
+        let out = Spikes::default().run(&f, &ctx(&f).with_profile(stored.clone())).unwrap();
+        assert_eq!(listed_ts(&out), vec![f.ts[50]]);
+        // The series' declared resolution still wins over the stored one.
+        let mut declared = f.clone();
+        declared.meta.resolution = Some(20.0);
+        let out = Spikes::default().run(&declared, &ctx(&declared).with_profile(stored)).unwrap();
+        assert!(ids(&out, ID).is_empty());
     }
 
     #[test]
