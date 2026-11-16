@@ -90,29 +90,16 @@ def upgrade() -> None:
         ["suite_id"],
         ["id"],
         ondelete="SET NULL",
-        # Validated below, outside this transaction: a validating ADD CONSTRAINT would scan
+        # Validated in 0013, outside a transaction: a validating ADD CONSTRAINT would scan
         # `runs` while the lock of the column changes blocks its writers.
         postgresql_not_valid=True,
     )
     op.execute(CLAIM_FUNCTION)
-    # `runs` can be large. With the schema change committed, the scan of the validation and the
-    # index build run without blocking writes to it.
-    with op.get_context().autocommit_block():
-        op.execute("ALTER TABLE runs VALIDATE CONSTRAINT fk_runs_suite_id_check_suites")
-        op.create_index(
-            "ix_runs_suite_id_created_at",
-            "runs",
-            ["suite_id", sa.text("created_at DESC")],
-            postgresql_where=sa.text("suite_id IS NOT NULL"),
-            postgresql_concurrently=True,
-            if_not_exists=True,
-        )
 
 
 def downgrade() -> None:
     """Drop the function, the run columns and the table. Suite runs stay, as plain runs."""
     op.execute("DROP FUNCTION tabayyun_claim_due_suites(timestamptz)")
-    op.drop_index("ix_runs_suite_id_created_at", table_name="runs", if_exists=True)
     op.drop_constraint(op.f("fk_runs_suite_id_check_suites"), "runs", type_="foreignkey")
     op.drop_column("runs", "checks")
     op.drop_column("runs", "suite_id")
