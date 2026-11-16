@@ -193,7 +193,7 @@ export function SeriesDetail() {
         <aside className="space-y-4">
           {s && <MetadataPanel series={s} />}
           <ProfilePanel profile={profile.data} error={profile.error} />
-          <BaselinePanel seriesId={seriesId} />
+          <BaselinePanel key={seriesId} seriesId={seriesId} />
         </aside>
       </div>
     </section>
