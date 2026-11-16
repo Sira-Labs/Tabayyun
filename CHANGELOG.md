@@ -20,10 +20,23 @@ All notable changes to this project are documented here. The format follows
     carry `suite_id` and `trigger = "suite"`. Changes are written to the audit log.
   - The core gained the check catalogue and `validate` for check configurations; migration
     0012 adds `check_suites` and the runs' suite columns, 0013 the index for a suite's history.
+- Baseline profiles (spec 028):
+  - Every series with cached data gets a baseline: the profile of its trailing 28 days,
+    without bad-quality samples and without the windows of its open critical findings.
+    Baselines are stored with a version; the newest 30 are kept.
+  - The worker refreshes each series about once a day (an hourly task queues those that are
+    due, one job at a time); editors can refresh one at once.
+  - The series page shows the baseline: version, window, what was used and left out, and the
+    thresholds it gives the checks with the change against the version before.
+  - `GET /api/series/{id}/baselines` and `POST /api/series/{id}/baselines`; dataset runs name
+    the versions they used in `stats.baselines`. Migration 0014 adds `series_baselines`.
 
 ### Changed
-- The api image runs on Python 3.15 (was 3.14). CI now builds the images on pull requests
-  that touch a Dockerfile and starts the api image once.
+- Dataset runs judge a series against its stored baseline once it has one, no longer against
+  the window they are checking. Rate-of-change, spike, noise, drift and resolution findings of
+  a series can change with its first baseline. Upload runs are unchanged.
+- The api image runs on Python 3.15 (was 3.14) and its build stage on Rust 1.100. CI now
+  builds the images on pull requests that touch a Dockerfile and starts the api image once.
 
 ## [0.3.0] - 2026-11-15
 

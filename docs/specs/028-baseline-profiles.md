@@ -95,8 +95,8 @@ to learn it from. `band` is the operating band of spec 025 for this profile.
 ### Web
 
 The series page gets a "Baseline" panel: version, when and why it was computed, its window,
-how many samples it used and how many it left out, and a table of the learned thresholds with
-the value of the version before and the change. Editors get "Refresh baseline". Without a
+how many samples it used and how many it left out, and the learned thresholds, each with the
+value of the version before and the change. Editors get "Refresh baseline". Without a
 baseline the panel says so and, for editors, offers to compute one.
 
 ## Behaviour
@@ -127,25 +127,25 @@ baseline the panel says so and, for editors, offers to compute one.
 
 ## Acceptance criteria
 
-- [ ] A stored profile from which a field was removed still loads in the core.
-- [ ] `profile_series` stores version 1 for a series with cached data, with the trailing 28
+- [x] A stored profile from which a field was removed still loads in the core.
+- [x] `profile_series` stores version 1 for a series with cached data, with the trailing 28
       days as its window, and nothing for a series with fewer than 50 usable samples.
-- [ ] Bad-quality samples and the windows of open critical findings are left out and
+- [x] Bad-quality samples and the windows of open critical findings are left out and
       recorded; a resolved or non-critical finding is not left out.
-- [ ] A second job without new data stores no new version; with new data it stores version 2;
+- [x] A second job without new data stores no new version; with new data it stores version 2;
       only the newest 30 are kept.
-- [ ] The hourly task queues each series with coverage once in 24 hours, in every org, and
+- [x] The hourly task queues each series with coverage once in 24 hours, in every org, and
       the jobs carry the shared lock.
-- [ ] A dataset run uses the stored baseline: with a baseline whose `rate_p999` is tiny, a
+- [x] A dataset run uses the stored baseline: with a baseline whose `rate_p999` is tiny, a
       window of ordinary data gives rate-of-change findings that the same run without a
       baseline does not; `stats.baselines` names the version.
-- [ ] `GET …/baselines` returns versions newest first with thresholds and band; the learned
+- [x] `GET …/baselines` returns versions newest first with thresholds and band; the learned
       thresholds differ between two versions computed from different data.
-- [ ] `POST …/baselines` is refused for viewers (403), is 409 `no_data` without cached data,
+- [x] `POST …/baselines` is refused for viewers (403), is 409 `no_data` without cached data,
       and is audited.
-- [ ] The series page shows the baseline panel with the change against the previous version,
+- [x] The series page shows the baseline panel with the change against the previous version,
       and "Refresh baseline" leads to a new version on the page.
-- [ ] Another org's series gives 404 on both routes.
+- [x] Another org's series gives 404 on both routes.
 
 ## Test cases
 
@@ -160,6 +160,20 @@ baseline the panel says so and, for editors, offers to compute one.
   and downgrades; the claim function is callable by the app role only.
 - **Web** (Vitest): `series.baseline` (panel with and without a baseline, change against the
   previous version, refresh for editors only, a new version appears after a refresh).
+
+## Implementation notes
+
+- The thresholds are a list, not a table: the panel sits in the series page's narrow side
+  column, and a six-column table hid the previous value and the change behind a sideways
+  scroll (seen in the browser check).
+- A refresh that changes nothing stores no version, so the panel waits 60 seconds and then
+  says that nothing changed or that there is too little usable data; the job's own outcome is
+  not reported back to the page.
+- The declared resolution of the series wins over the learned one in the spike floor, as in
+  the check, so that threshold can change with a metadata edit, without a new version.
+- `stats.baselines` is present on every dataset run, empty when no series had a baseline.
+- The retry test of migration 0013 (spec 027) upgraded to `head`; it now names 0013, so later
+  migrations do not run inside it.
 
 ## Out of scope
 
