@@ -196,9 +196,12 @@ A suite in a response:
 
 - From the review: a suite with every check off is refused (its runs would succeed and say
   nothing); a null given for a run-time parameter is shown with its run-time source, not as an
-  override; `runs` gets a partial index on `(suite_id, created_at desc)` for the history. The
-  migration adds the runs' foreign key unvalidated and validates it, and builds that index
-  concurrently, after its transaction has committed, so writers to `runs` are not blocked.
+  override; `runs` gets a partial index on `(suite_id, created_at desc)` for the history.
+  Migration 0012 adds the runs' foreign key unvalidated; migration 0013 validates it and
+  builds that index concurrently, outside a transaction, so writers to `runs` are not
+  blocked. Every step of 0013 can be repeated, so an interrupted upgrade is run again.
+- A switch the stored suite sets explicitly stays an override where it equals the default,
+  and the form offers "use the default" for it.
 - The edit form compares against the suite as it was when the form opened, so a refetch
   under the open form cannot send untouched fields back over someone else's change.
 

@@ -527,6 +527,8 @@ starts; the plan is the backlog until then.
       - The list is newest first (the keyset of the other lists), sorted by name in the web
         page (spec edited).
       - There is no web page to create datasets yet: the form offers those the API has.
+      - Migration 0013 validates the runs' foreign key and builds the history index outside a
+        transaction and can be run again after an interruption (review finding).
       - Not exercised here: the worker's periodic tick against a live queue on staging; the
         tick function, the claim and the task registration are covered by tests.
 - [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
