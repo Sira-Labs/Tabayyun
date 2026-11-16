@@ -398,3 +398,26 @@ async def test_an_older_computation_does_not_land_on_a_newer_one(lab, monkeypatc
     monkeypatch.setattr(baselines.series_chart, "read_window", always_behind)
     assert await lab.compute(sid) == baselines.Outcome("superseded")
     assert [r.version for r in await lab.rows(sid)] == [1 + baselines.MAX_ATTEMPTS]
+
+
+async def test_a_store_between_the_reads_of_the_inputs_is_noticed(lab, monkeypatch):
+    """The inputs are read statement by statement. A newer baseline stored after the version
+    was read but before the extent leaves the computation with a stale extent: its result must
+    not be stored as the newest version."""
+    sid = await lab.series("flow", _rows(1440))
+    real_extent = baselines.series_chart.extent
+    calls = 0
+
+    async def stale_extent(session, series_id, *args):
+        nonlocal calls
+        calls += 1
+        ext = await real_extent(session, series_id, *args)  # day one only
+        if calls == 1:
+            await lab.series("flow", _rows(1440, start=T0 + timedelta(days=1), scale=4.0))
+            assert await lab.compute(sid, trigger="manual") == baselines.Outcome("stored", 1)
+        return ext
+
+    monkeypatch.setattr(baselines.series_chart, "extent", stale_extent)
+    assert await lab.compute(sid) == baselines.Outcome("unchanged", 1)
+    [row] = await lab.rows(sid)
+    assert (row.version, row.trigger, row.n_samples) == (1, "manual", 2 * 1440)

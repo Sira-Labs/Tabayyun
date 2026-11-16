@@ -123,6 +123,9 @@ async def _inputs(session: AsyncSession, series_id: uuid.UUID, max_rows: int) ->
     series = await session.get(Series, series_id)
     if series is None:
         return Outcome("gone")
+    # Read first: a store that commits while the rest is being read (each statement sees what
+    # is committed by then) must leave this version behind, so the stale result is not stored.
+    current = await latest(session, series.id)
     ext = await series_chart.extent(session, series.id)
     if ext is None:
         return Outcome("no_data")
@@ -130,7 +133,6 @@ async def _inputs(session: AsyncSession, series_id: uuid.UUID, max_rows: int) ->
     if window is None:
         return Outcome("too_large")
     windows = await _open_critical_windows(session, series.id, *window)
-    current = await latest(session, series.id)
     session.expunge(series)
     return _Inputs(
         series=series,
@@ -294,11 +296,15 @@ def _spike_floor(
 ) -> tuple[float | None, str]:
     resolution = series.resolution if series.resolution is not None else _number(profile.get("resolution"))
     noise = _number(profile.get("noise_mad"))
-    if resolution is None and noise is None:
-        return None, "the baseline has neither a resolution nor a noise floor"
-    floor = max(resolution or 0.0, noise or 0.0)
-    return floor, (
-        f"the larger of the resolution ({(resolution or 0.0):.6g}) and the noise floor ({(noise or 0.0):.6g})"
+    if resolution is None:
+        # A constant baseline has no step to read a resolution from. The check then reads it
+        # from the window it is checking, which this page cannot know: no number is shown.
+        known = "" if noise is None else f" (noise floor {noise:.6g})"
+        return None, f"no resolution in the baseline: the check reads it from the window it checks{known}"
+    floor = max(resolution, noise or 0.0)
+    return (
+        floor,
+        f"the larger of the resolution ({resolution:.6g}) and the noise floor ({(noise or 0.0):.6g})",
     )
 
 

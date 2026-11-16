@@ -188,6 +188,10 @@ baseline the panel says so and, for editors, offers to compute one.
   - `tby.spikes` takes the resolution from the stored baseline when the series declares
     none (it read it from the window under test, where the spike itself raises it), so the
     floor the page shows is the floor the check uses.
+  - The version is read before the extent and the exclusions, so a store that commits
+    between those reads is noticed as well.
+  - Without any resolution (a constant baseline, none declared) the page shows no spike
+    floor: the check reads the resolution from the window it checks.
   - The panel is keyed by series, so a refresh in progress does not carry over to another
     series' page.
 
