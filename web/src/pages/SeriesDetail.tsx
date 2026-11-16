@@ -29,6 +29,7 @@ import { formatStep } from "../timeline";
 import type { Finding, Series } from "../types";
 import { ErrorLine, inputClass, linkButtonClass, panelClass } from "./admin/ui";
 import { SeriesPicker } from "./compare/SeriesPicker";
+import { BaselinePanel } from "./series/BaselinePanel";
 
 // uPlot loads with the series page, not with the app; the page starts the download as it
 // mounts, alongside its API requests, instead of after the chart data arrives.
@@ -192,6 +193,7 @@ export function SeriesDetail() {
         <aside className="space-y-4">
           {s && <MetadataPanel series={s} />}
           <ProfilePanel profile={profile.data} error={profile.error} />
+          <BaselinePanel seriesId={seriesId} />
         </aside>
       </div>
     </section>
