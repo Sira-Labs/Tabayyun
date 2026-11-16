@@ -9,6 +9,12 @@ import { FormDataStatus, SuiteForm, useSuiteFormData } from "./SuiteForm";
 /** `/suites/:id/edit`: change a suite (editors, spec 027). Only what changed is sent. */
 export function SuiteEdit() {
   const { suiteId } = useParams({ from: "/_app/suites/$suiteId/edit" });
+  // Keyed by suite: the snapshot below belongs to one suite and must not outlive a change of
+  // the route's id, or one suite's values would be saved to another.
+  return <SuiteEditBody key={suiteId} suiteId={suiteId} />;
+}
+
+function SuiteEditBody({ suiteId }: { suiteId: string }) {
   const role = useWorkspaceRole();
   const navigate = useNavigate();
   const client = useQueryClient();

@@ -288,6 +288,21 @@ describe("suites.form (edit)", () => {
     expect(sent[0]?.body).toEqual({ enabled: false });
   });
 
+  it("offers the way back to the default for a switch the suite sets explicitly", async () => {
+    const stored = suite();
+    const spike = { ...(stored.checks[0] as (typeof stored.checks)[number]), params: { two_sided: true } };
+    const { route, sent } = backend(() => suite(), suite({ checks: [spike, ...stored.checks.slice(1)] }));
+    stubFetch(route, asRole("editor"));
+    const user = userEvent.setup();
+    renderApp(`/suites/${SUITE_ID}/edit`);
+    await user.click(await screen.findByRole("button", { name: "spike: two_sided: use the default" }));
+    expect(screen.queryByRole("button", { name: "spike: two_sided: use the default" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Save suite" }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    const body = sent[0]?.body as { checks: { id: string; params: unknown }[] };
+    expect(body.checks.find((c) => c.id === "spike")?.params).toEqual({});
+  });
+
   it("keeps viewers out", async () => {
     stubFetch(() => suite(), asRole("viewer"));
     renderApp(`/suites/${SUITE_ID}/edit`);

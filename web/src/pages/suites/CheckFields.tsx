@@ -9,12 +9,14 @@ type ParamProps = {
   param: string;
   value: string | boolean | undefined;
   error: string | undefined;
+  /** A switch the stored suite sets explicitly, with the way back to "use the default". */
+  onReset?: () => void;
   onChange: (value: string | boolean) => void;
 };
 
 /** One parameter: a checkbox for a switch, else an input whose placeholder is the default (or
  * where the value comes from at run time); empty means "use the default". */
-function ParamField({ check, param, value, error, onChange }: ParamProps) {
+function ParamField({ check, param, value, error, onReset, onChange }: ParamProps) {
   const defaultValue = check.defaults[param];
   const kind = paramKind(defaultValue);
   const auto = check.auto[param];
@@ -22,11 +24,18 @@ function ParamField({ check, param, value, error, onChange }: ParamProps) {
   const errorId = `error-${check.id}-${param}`;
   if (kind === "boolean") {
     return (
-      <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" aria-label={name} checked={value === true} onChange={(e) => onChange(e.target.checked)} />
-        <span className="font-mono text-xs">{param}</span>
-        <span className={`text-xs ${mutedClass}`}>(default {defaultValue ? "on" : "off"})</span>
-      </label>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <label className="flex items-center gap-2">
+          <input type="checkbox" aria-label={name} checked={value === true} onChange={(e) => onChange(e.target.checked)} />
+          <span className="font-mono text-xs">{param}</span>
+          <span className={`text-xs ${mutedClass}`}>(default {defaultValue ? "on" : "off"})</span>
+        </label>
+        {onReset && (
+          <button type="button" className="text-xs underline underline-offset-2" aria-label={`${name}: use the default`} onClick={onReset}>
+            set by this suite · use the default
+          </button>
+        )}
+      </div>
     );
   }
   const placeholder = auto ? `from ${auto.source}` : valueText(defaultValue);
@@ -84,6 +93,16 @@ function CheckField({ check, draft, errors, onChange }: CheckProps) {
               param={param}
               value={draft.values[param]}
               error={errors[paramKey(check.id, param)]}
+              onReset={
+                draft.pinned?.includes(param)
+                  ? () =>
+                      onChange({
+                        ...draft,
+                        values: { ...draft.values, [param]: check.defaults[param] === true },
+                        pinned: draft.pinned?.filter((p) => p !== param),
+                      })
+                  : undefined
+              }
               onChange={(value) => onChange({ ...draft, values: { ...draft.values, [param]: value } })}
             />
           ))}
