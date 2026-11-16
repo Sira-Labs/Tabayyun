@@ -1,4 +1,5 @@
-"""Execute a queued run of either kind: an upload (spec 002) or a dataset run (spec 008).
+"""Execute a queued run of either kind: an upload (spec 002) or a dataset run (spec 008),
+started by a person or by a check suite (spec 027).
 
 The job carries only the run id; the run's trigger says which executor it needs.
 """
@@ -24,7 +25,7 @@ async def execute(
     """Run the executor matching the run's trigger. Never raises; failures land on the run."""
     async with factory() as session:
         trigger = (await session.execute(select(Run.trigger).where(Run.id == run_id))).scalar_one_or_none()
-    if trigger == dataset_runs.DATASET_TRIGGER:
+    if trigger in dataset_runs.DATASET_TRIGGERS:
         await dataset_runs.execute_dataset_run(factory, run_id, cache, run_fetch)
     else:
         await runs.execute_run(factory, run_id, cache)

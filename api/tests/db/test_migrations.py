@@ -41,6 +41,8 @@ EXPECTED_TABLES = {
     "source_fetches",
     # Spec 026.
     "source_files",
+    # Spec 027.
+    "check_suites",
 }
 HYPERTABLES = {"findings", "metrics", "scores"}
 
@@ -347,6 +349,91 @@ def test_0011_replaces_the_job_fetch_function_and_downgrades(db_url, fresh_schem
         with engine.begin() as conn:
             assert "jobs.lock IS NULL" in conn.execute(source).scalar_one()
             assert conn.execute(fetch).one() == (None, None)
+    finally:
+        engine.dispose()
+        fresh_schema("auto")
+
+
+def test_0013_can_be_run_again_after_an_interrupted_index_build(db_url, fresh_schema):
+    """0013 works outside a transaction, so an interrupted upgrade leaves the database at 0012
+    with part of the work done, at worst an invalid index. Running it again completes it."""
+    fresh_schema("auto")
+    engine = create_engine(db_url)
+    state = text(
+        "SELECT indisvalid, (SELECT convalidated FROM pg_constraint "
+        "WHERE conname = 'fk_runs_suite_id_check_suites') "
+        "FROM pg_index JOIN pg_class ON pg_class.oid = indexrelid "
+        "WHERE relname = 'ix_runs_suite_id_created_at'"
+    )
+    try:
+        migrate.downgrade(db_url, "0012")
+        with engine.connect() as conn:
+            assert conn.execute(state).first() is None
+        # The build was cancelled: an index of that name exists and is invalid.
+        with engine.begin() as conn:
+            conn.execute(text("CREATE INDEX ix_runs_suite_id_created_at ON runs (suite_id)"))
+            conn.execute(
+                text(
+                    "UPDATE pg_index SET indisvalid = false "
+                    "WHERE indexrelid = 'ix_runs_suite_id_created_at'::regclass"
+                )
+            )
+        migrate.upgrade(db_url, "head", timescale="auto")
+        with engine.connect() as conn:
+            assert conn.execute(state).one() == (True, True)
+            definition = "SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_runs_suite_id_created_at'"
+            assert "created_at DESC" in conn.execute(text(definition)).scalar_one()
+        # Complete already: stamped back to 0012, the same steps change nothing and do not fail.
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE alembic_version SET version_num = '0012'"))
+        migrate.upgrade(db_url, "head", timescale="auto")
+        with engine.connect() as conn:
+            assert conn.execute(state).one() == (True, True)
+    finally:
+        engine.dispose()
+        fresh_schema("auto")
+
+
+def test_0012_adds_check_suites_and_downgrades(db_url, fresh_schema):
+    """0012 brings `check_suites`, the runs' suite columns and the claim function, which only
+    the app role may call; its downgrade removes all three."""
+    fresh_schema("auto")
+    engine = create_engine(db_url)
+    function = text("SELECT count(*) FROM pg_proc WHERE proname = 'tabayyun_claim_due_suites'")
+
+    def run_columns() -> set[str]:
+        return {c["name"] for c in inspect(engine).get_columns("runs")} & {"suite_id", "checks"}
+
+    try:
+        with engine.connect() as conn:
+            assert conn.execute(function).scalar_one() == 1
+            may_call = (
+                "SELECT has_function_privilege(:role, 'tabayyun_claim_due_suites(timestamptz)', 'EXECUTE')"
+            )
+            assert conn.execute(text(may_call), {"role": "tabayyun_app"}).scalar_one() is True
+            assert conn.execute(text(may_call), {"role": "public"}).scalar_one() is False
+            policies = text("SELECT policyname FROM pg_policies WHERE tablename = 'check_suites'")
+            assert conn.execute(policies).scalars().all() == ["tenant"]
+        assert run_columns() == {"suite_id", "checks"}
+        # 0012 adds the foreign key unvalidated; 0013 validates it and builds the history index
+        # concurrently. Both must be complete at head.
+        with engine.connect() as conn:
+            validated = (
+                "SELECT convalidated FROM pg_constraint WHERE conname = 'fk_runs_suite_id_check_suites'"
+            )
+            assert conn.execute(text(validated)).scalar_one() is True
+            index = (
+                "SELECT indisvalid FROM pg_index JOIN pg_class ON pg_class.oid = indexrelid "
+                "WHERE relname = 'ix_runs_suite_id_created_at'"
+            )
+            assert conn.execute(text(index)).scalar_one() is True
+        migrate.downgrade(db_url, "0011")
+        assert _current_revision(db_url) == "0011"
+        assert "check_suites" not in inspect(engine).get_table_names() and run_columns() == set()
+        with engine.connect() as conn:
+            assert conn.execute(function).scalar_one() == 0
+        migrate.upgrade(db_url, "head", timescale="auto")
+        assert "check_suites" in inspect(engine).get_table_names() and run_columns() == {"suite_id", "checks"}
     finally:
         engine.dispose()
         fresh_schema("auto")

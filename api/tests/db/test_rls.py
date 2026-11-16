@@ -96,6 +96,10 @@ async def _seed_org(app: Any, prefix: str) -> dict[str, str]:
         assert dataset.status_code == 201, dataset.text
         source = await c.post("/api/sources", json={"type": "synthetic", "name": f"{prefix}-synthetic"})
         assert source.status_code == 201, source.text
+        suite = await c.post(
+            "/api/suites", json={"name": f"{prefix}-suite", "dataset_id": dataset.json()["id"]}
+        )
+        assert suite.status_code == 201, suite.text
     return {
         "source": source.json()["id"],
         "run": run["id"],
@@ -103,6 +107,7 @@ async def _seed_org(app: Any, prefix: str) -> dict[str, str]:
         "finding": finding,
         "group": group.json()["id"],
         "dataset": dataset.json()["id"],
+        "suite": suite.json()["id"],
     }
 
 
@@ -435,6 +440,11 @@ ROUTES = [
     ("GET", "/api/sources/{source_id}/files", "source", None),
     # Spec 018: the residual of a group.
     ("GET", "/api/series-groups/{group_id}/residual", "group", None),
+    # Spec 027: check suites.
+    ("GET", "/api/suites/{suite_id}", "suite", None),
+    ("PATCH", "/api/suites/{suite_id}", "suite", {"name": "renamed"}),
+    ("DELETE", "/api/suites/{suite_id}", "suite", None),
+    ("POST", "/api/suites/{suite_id}/runs", "suite", None),
 ]
 READ_BACK = {
     "run": "/api/runs/{}",
@@ -443,6 +453,7 @@ READ_BACK = {
     "group": "/api/series-groups/{}",
     "dataset": "/api/datasets/{}",
     "source": "/api/sources/{}",
+    "suite": "/api/suites/{}",
 }
 # Scoped to the signed-in user, not to a tenant: `test_auth_flow.py` checks that another user's
 # session gives 404 (spec 013).
@@ -472,7 +483,15 @@ ADMIN_IDS = {
     "workspace_id": DEFAULT_WORKSPACE_ID,
     "invitation_id": INVITATION_A,
 }
-LISTS = ["/api/runs", "/api/findings", "/api/series", "/api/sources", "/api/series-groups", "/api/datasets"]
+LISTS = [
+    "/api/runs",
+    "/api/findings",
+    "/api/series",
+    "/api/sources",
+    "/api/series-groups",
+    "/api/datasets",
+    "/api/suites",
+]
 
 
 def _url(template: str, value: str) -> str:
@@ -554,7 +573,7 @@ async def test_other_org_gets_404_for_every_admin_route(seed, app_for, method, t
             open_a = "SELECT revoked_at IS NULL FROM invitations WHERE id = :i"
             assert conn.execute(text(open_a), {"i": INVITATION_A}).scalar() is True
             # Only the seeded events: the refused request wrote none in org B.
-            seeded = "('org.renamed', 'source.created')"
+            seeded = "('org.renamed', 'source.created', 'suite.created')"
             assert (
                 conn.execute(
                     text(f"SELECT count(*) FROM audit_events WHERE org_id = :o AND action NOT IN {seeded}"),  # noqa: S608

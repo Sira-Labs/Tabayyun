@@ -510,6 +510,27 @@ starts; the plan is the backlog until then.
         as uploads do.
       - Series are created before the cache writes, and the file's row with its coverage after
         them; a failed cache write stops the scan and leaves the file to be read again.
+- [x] **027 Check suites** — `docs/specs/027-check-suites.md` (S10-1, 15 Nov; first story of
+      sprint 10). Every criterion is met.
+      - A suite's run is a dataset run with `trigger = "suite"` and a copy of the suite's
+        checks, so the executor, the report and the cache are the ones of spec 008, and a later
+        change to the suite does not change a queued run.
+      - Schedules are five-field cron in UTC (`croniter`), at least five minutes apart; time
+        zones and "on new data" wait for S10-5.
+      - The scheduler claims due suites across orgs through a SECURITY DEFINER function, as
+        source polling does; the claim sets a ten-minute lease in `next_run_at`, so a lost
+        worker's suite fires again without an extra column.
+      - A busy suite is skipped, and after downtime one run is started: `next_run_at` is always
+        the first firing after now.
+      - Thresholds name `baseline` where the core learns the value at run time; the number
+        itself appears with the stored baselines of S10-2.
+      - The list is newest first (the keyset of the other lists), sorted by name in the web
+        page (spec edited).
+      - There is no web page to create datasets yet: the form offers those the API has.
+      - Migration 0013 validates the runs' foreign key and builds the history index outside a
+        transaction and can be run again after an interruption (review finding).
+      - Not exercised here: the worker's periodic tick against a live queue on staging; the
+        tick function, the claim and the task registration are covered by tests.
 - [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
       `tabayyun-api` and `tabayyun-worker` on staging; then a `synthetic` source with
       `poll_interval_s` gives staging a live, polling source for demos.

@@ -13,6 +13,7 @@ CHECK_SOURCE_TASK = "tabayyun.check_source"
 INGEST_SOURCE_TASK = "tabayyun.ingest_source"
 POLL_SOURCES_TASK = "tabayyun.poll_sources"
 PRUNE_SOURCE_FETCHES_TASK = "tabayyun.prune_source_fetches"
+RUN_DUE_SUITES_TASK = "tabayyun.run_due_suites"
 # Postgres application_name prefix of the worker's connections; the suffix after "/" is the
 # commit it runs, which /api/version lists (see `worker_application_name`).
 WORKER_APPLICATION_NAME = "tabayyun-worker"

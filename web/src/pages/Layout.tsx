@@ -77,6 +77,9 @@ export function Layout() {
             <Link to="/sources" className={navClass} activeProps={{ className: navActive }}>
               Sources
             </Link>
+            <Link to="/suites" className={navClass} activeProps={{ className: navActive }}>
+              Suites
+            </Link>
             {isAdmin && (
               <Link to="/admin" className={navClass} activeProps={{ className: navActive }}>
                 Admin

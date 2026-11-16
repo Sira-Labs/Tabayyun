@@ -199,15 +199,22 @@ def decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
 
 
 async def list_runs(
-    session: AsyncSession, scope: Scope, *, limit: int, cursor: str | None
+    session: AsyncSession,
+    scope: Scope,
+    *,
+    limit: int,
+    cursor: str | None,
+    suite_id: uuid.UUID | None = None,
 ) -> tuple[list[Run], str | None]:
-    """Newest first, keyset-paginated on `(created_at desc, id desc)`."""
+    """Newest first, keyset-paginated on `(created_at desc, id desc)`; optionally one suite's runs."""
     stmt = (
         select(Run)
         .where(Run.workspace_id == scope.workspace_id)
         .order_by(Run.created_at.desc(), Run.id.desc())
         .limit(limit + 1)
     )
+    if suite_id is not None:
+        stmt = stmt.where(Run.suite_id == suite_id)
     if cursor:
         created_at, run_id = decode_cursor(cursor)
         stmt = stmt.where(tuple_(Run.created_at, Run.id) < (created_at, run_id))
@@ -231,6 +238,7 @@ def run_to_dict(run: Run) -> dict[str, Any]:
     return {
         "id": str(run.id),
         "dataset_id": None if run.dataset_id is None else str(run.dataset_id),
+        "suite_id": None if run.suite_id is None else str(run.suite_id),
         "trigger": run.trigger,
         "status": run.status,
         "window": window,

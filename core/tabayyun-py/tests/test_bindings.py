@@ -194,3 +194,21 @@ def test_run_checks_multi_window_and_errors():
         tc.run_checks_multi({"a": batch}, window=(5, 5))
     with pytest.raises(ValueError, match="invalid group"):
         tc.run_checks_multi({"a": batch}, groups=[{"id": "g", "name": "G", "kind": "balance", "members": [{"series_id": "a", "role": "input"}]}])
+
+
+def test_check_catalogue_and_validate_configs():
+    catalogue = tc.check_catalogue()
+    assert [c["id"] for c in catalogue][:21] == tc.builtin_checks()
+    assert len(catalogue) == 24 and {c["scope"] for c in catalogue[21:]} == {"group"}
+    by_id = {c["id"]: c for c in catalogue}
+    spikes = by_id["tby.spikes"]
+    assert spikes["scope"] == "series" and spikes["defaults"]["min_scale"] is None
+    assert spikes["auto"]["min_scale"]["source"] == "baseline"
+    assert by_id["tby.physical_range"]["auto"]["min"]["source"] == "metadata"
+    assert by_id["tby.balance_residual"]["defaults"]["loss_max"] == 0.05
+
+    tc.validate_configs([{"id": "tby.spikes", "params": {"window": 21}}, {"id": "tby.balance_residual"}])
+    with pytest.raises(ValueError, match="unknown check id: tby.nope"):
+        tc.validate_configs([{"id": "tby.nope"}])
+    with pytest.raises(ValueError, match="invalid parameters for tby.spikes"):
+        tc.validate_configs([{"id": "tby.spikes", "params": {"window": "wide"}}])

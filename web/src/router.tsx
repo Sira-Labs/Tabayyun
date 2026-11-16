@@ -57,6 +57,27 @@ const compareRoute = createRoute({
 const sourcesRoute = createRoute({ getParentRoute: () => appRoute, path: "/sources", component: SourcesList });
 const newSourceRoute = createRoute({ getParentRoute: () => appRoute, path: "/sources/new", component: SourceNew });
 const sourceRoute = createRoute({ getParentRoute: () => appRoute, path: "/sources/$sourceId", component: SourceDetail });
+// The suites pages load on their first visit, like the compare view.
+const suitesRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/suites",
+  component: lazyRouteComponent(() => import("./pages/suites/SuitesList"), "SuitesList"),
+});
+const newSuiteRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/suites/new",
+  component: lazyRouteComponent(() => import("./pages/suites/SuiteNew"), "SuiteNew"),
+});
+const suiteRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/suites/$suiteId",
+  component: lazyRouteComponent(() => import("./pages/suites/SuiteDetail"), "SuiteDetail"),
+});
+const editSuiteRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/suites/$suiteId/edit",
+  component: lazyRouteComponent(() => import("./pages/suites/SuiteEdit"), "SuiteEdit"),
+});
 const accountRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings/account", component: Account });
 const adminRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -86,6 +107,10 @@ export const routeTree = rootRoute.addChildren([
     sourcesRoute,
     newSourceRoute,
     sourceRoute,
+    suitesRoute,
+    newSuiteRoute,
+    suiteRoute,
+    editSuiteRoute,
     accountRoute,
     adminRoute,
   ]),

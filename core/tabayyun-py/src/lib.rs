@@ -511,6 +511,20 @@ fn builtin_checks() -> Vec<String> {
     Registry::builtin_ids().iter().map(|s| s.to_string()).collect()
 }
 
+/// Every built-in check with its scope, default parameters and run-time parameters, as JSON
+/// (spec 027).
+#[pyfunction]
+fn check_catalogue() -> PyResult<String> {
+    serde_json::to_string(&Registry::catalogue()).map_err(err)
+}
+
+/// Raise `ValueError` when a configured check does not exist or refuses its parameters.
+#[pyfunction]
+fn validate_configs(configs_json: &str) -> PyResult<()> {
+    let configs: Vec<CheckConfig> = serde_json::from_str(configs_json).map_err(err)?;
+    Registry::validate(&configs).map_err(err)
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_checks, m)?)?;
@@ -522,6 +536,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(residual, m)?)?;
     m.add_function(wrap_pyfunction!(synth, m)?)?;
     m.add_function(wrap_pyfunction!(builtin_checks, m)?)?;
+    m.add_function(wrap_pyfunction!(check_catalogue, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_configs, m)?)?;
     m.add_class::<PyCache>()?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())

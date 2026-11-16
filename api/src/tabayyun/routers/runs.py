@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tabayyun import core
 from tabayyun.authz import ReadScope, Scope, WriteScope, get_session
 from tabayyun.db import for_org
+from tabayyun.db.models import Run
 from tabayyun.services import dataset_runs, fetches
 from tabayyun.services import runs as runs_service
 from tabayyun.services import series as series_service
@@ -42,6 +43,7 @@ class RunOut(BaseModel):
 
     id: str
     dataset_id: str | None
+    suite_id: str | None
     trigger: str
     status: str
     window: dict[str, int] | None
@@ -100,6 +102,14 @@ async def _create_dataset_run(
         raise HTTPException(
             status_code=422, detail=[{"loc": ["body", "now"], "msg": exc.message, "type": "value_error"}]
         ) from exc
+    return await dispatch_dataset_run(request, background, session, scope, run)
+
+
+async def dispatch_dataset_run(
+    request: Request, background: BackgroundTasks, session: AsyncSession, scope: Scope, run: Run
+) -> RunCreated:
+    """Hand a queued dataset run to the worker, or run it after the response with inline jobs.
+    A suite's "Run now" (spec 027) starts its run the same way."""
     if request.app.state.settings.inline_jobs:
         await session.commit()
         state = request.app.state
@@ -229,10 +239,13 @@ async def list_runs(
     scope: ReadScope,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: str | None = None,
+    suite_id: uuid.UUID | None = None,
 ) -> RunList:
-    """Runs newest first with a keyset cursor."""
+    """Runs newest first with a keyset cursor; `suite_id` gives one suite's history (spec 027)."""
     try:
-        runs, next_cursor = await runs_service.list_runs(session, scope, limit=limit, cursor=cursor)
+        runs, next_cursor = await runs_service.list_runs(
+            session, scope, limit=limit, cursor=cursor, suite_id=suite_id
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return RunList(items=[RunOut(**runs_service.run_to_dict(r)) for r in runs], next_cursor=next_cursor)

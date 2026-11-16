@@ -331,6 +331,35 @@ class Dataset(TenantMixin, Base):
     created_at: Mapped[datetime] = _created_at()
 
 
+class CheckSuite(TenantMixin, Base):
+    """A dataset, the checks to run on it and optionally a cron schedule (spec 027)."""
+
+    __tablename__ = "check_suites"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name"),
+        # The scheduler's claim: enabled suites by the time they are due.
+        Index("ix_check_suites_next_run_at", "next_run_at", postgresql_where=text("enabled")),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    # A deleted dataset leaves the suite, which then waits for a new one.
+    dataset_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("datasets.id", ondelete="SET NULL")
+    )
+    # Five-field cron in UTC; null means the suite only runs on request.
+    schedule: Mapped[str | None] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    # `[{id, enabled, params}]` in the order given.
+    checks: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, server_default="[]")
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class DatasetSeries(OrgMixin, Base):
     __tablename__ = "dataset_series"
 
@@ -386,6 +415,13 @@ class Run(TenantMixin, Base):
         CheckConstraint(_in("trigger", RUN_TRIGGERS), name="trigger"),
         CheckConstraint(_in("status", RUN_STATUSES), name="status"),
         Index("ix_runs_workspace_id_created_at", "workspace_id", text("created_at DESC")),
+        # A suite's run history and its newest run (spec 027); most runs have no suite.
+        Index(
+            "ix_runs_suite_id_created_at",
+            "suite_id",
+            text("created_at DESC"),
+            postgresql_where=text("suite_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = _uuid_pk()
@@ -393,6 +429,12 @@ class Run(TenantMixin, Base):
     dataset_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("datasets.id", ondelete="SET NULL")
     )
+    # The suite that started the run and its checks as they were then (spec 027); a deleted
+    # suite keeps its past runs.
+    suite_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("check_suites.id", ondelete="SET NULL")
+    )
+    checks: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
     trigger: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="queued")
     window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

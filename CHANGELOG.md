@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Check suites (spec 027):
+  - A suite names a dataset, a cron schedule (UTC, at most every five minutes) and the checks
+    to run with their parameters. The worker starts a run for every due suite each minute; a
+    suite whose previous run has not finished waits for its next time, and downtime is
+    followed by one run.
+  - `/suites` lists the suites with schedule in words, next and last run; a suite's page
+    shows every threshold with where it comes from (override, default, the series' metadata
+    or its baseline), "Run now", enable or disable, delete, and the run history.
+  - `/api/suites` (create, read, list, change, delete, `POST …/runs`), `GET
+    /api/checks/catalogue` with every check's defaults, and `GET /api/runs?suite_id=`. Runs
+    carry `suite_id` and `trigger = "suite"`. Changes are written to the audit log.
+  - The core gained the check catalogue and `validate` for check configurations; migration
+    0012 adds `check_suites` and the runs' suite columns, 0013 the index for a suite's history.
+
 ### Changed
 - The api image runs on Python 3.15 (was 3.14). CI now builds the images on pull requests
   that touch a Dockerfile and starts the api image once.
