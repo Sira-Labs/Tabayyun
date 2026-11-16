@@ -6,7 +6,10 @@
 use crate::frame::{modal_interval, SeriesFrame};
 use serde::{Deserialize, Serialize};
 
+/// Stored as JSON between runs (spec 028): a field missing from an older stored profile
+/// deserialises as its default, so adding a statistic does not invalidate stored baselines.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct Profile {
     pub series_id: String,
     pub n_samples: usize,
@@ -287,6 +290,27 @@ mod tests {
         let total: usize = runs.iter().map(|(s, e)| e - s).sum();
         assert!(total <= v.len());
         assert!(linear_fraction(&v, 6, 1e-9) <= 1.0);
+    }
+
+    #[test]
+    fn profile_deserialises_with_missing_fields() {
+        let ts: Vec<i64> = (0..200).map(|i| i * NS_PER_MIN).collect();
+        let values: Vec<f64> = (0..200).map(|i| (i % 7) as f64).collect();
+        let full =
+            Profile::compute(&SeriesFrame::with_default_quality(SeriesMeta::new("s"), ts, values).unwrap());
+        let mut json = serde_json::to_value(&full).unwrap();
+        let fields = json.as_object_mut().unwrap();
+        fields.remove("noise_mad");
+        fields.remove("quantiles");
+        fields.remove("constant_fraction");
+        let loaded: Profile = serde_json::from_value(json).unwrap();
+        assert_eq!(loaded.noise_mad, None);
+        assert!(loaded.quantiles.is_empty());
+        assert_eq!(loaded.constant_fraction, 0.0);
+        assert_eq!(loaded.rate_p999, full.rate_p999);
+        assert_eq!(loaded.n_samples, 200);
+        let empty: Profile = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty, Profile::default());
     }
 
     #[test]

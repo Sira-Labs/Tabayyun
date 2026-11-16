@@ -179,6 +179,28 @@ def test_run_checks_multi():
     assert out["reports"]["pt-a"]["profile"]["expected_interval_ns"] == 60_000_000_000
 
 
+def test_run_checks_multi_uses_given_profiles():
+    """A series with a stored baseline is judged against it, the others against themselves."""
+    tables = {sid: tc.synth(n=1440, seed=seed) for sid, seed in (("pt-a", 1), ("pt-b", 2))}
+    configs = [{"id": "tby.rate_of_change"}]
+    own = tc.run_checks_multi(tables, configs=configs, quality_col="quality")["reports"]
+    assert all(r["findings"] == [] for r in own.values())
+    # A baseline that knows only tiny rates: ordinary steps of pt-a now exceed 3 x p99.9.
+    calm = dict(own["pt-a"]["profile"], rate_p999=own["pt-a"]["profile"]["rate_p999"] / 1000)
+    out = tc.run_checks_multi(
+        tables, configs=configs, quality_col="quality", profiles={"pt-a": calm, "pt-gone": calm}
+    )["reports"]
+    assert {f["check_id"] for f in out["pt-a"]["findings"]} == {"tby.rate_of_change"}
+    assert out["pt-a"]["profile"]["rate_p999"] == calm["rate_p999"]
+    assert out["pt-b"] == own["pt-b"]
+    # A stored profile written before a field existed still loads.
+    old = {k: v for k, v in calm.items() if k not in ("noise_mad", "quantiles")}
+    again = tc.run_checks_multi(tables, configs=configs, quality_col="quality", profiles={"pt-a": old})
+    assert again["reports"]["pt-a"]["findings"] == out["pt-a"]["findings"]
+    with pytest.raises(ValueError):
+        tc.run_checks_multi(tables, quality_col="quality", profiles={"pt-a": {"n_samples": "many"}})
+
+
 def test_run_checks_multi_window_and_errors():
     batch = tc.synth(n=60)
     start = batch.column("ts")[0].value

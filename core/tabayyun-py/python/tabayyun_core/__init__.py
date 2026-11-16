@@ -98,6 +98,7 @@ def run_checks_multi(
     value_col: str = "value",
     quality_col: str | None = None,
     ingest_col: str | None = None,
+    profiles: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run checks on several series and cross-series checks on their groups (spec 008).
 
@@ -107,6 +108,10 @@ def run_checks_multi(
     ``window`` is ``(start_ns, end_ns)``; without it the window spans the data. Returns
     ``{"reports": {series_id: report}, "groups_skipped": [{"group_id", "reason", "missing"}]}``
     where each report has the shape :func:`run_checks` returns.
+
+    ``profiles`` maps series id to a stored baseline profile (as :func:`profile` returns it):
+    a series listed there is checked against it, any other against the profile of its own
+    data (spec 028). The report's ``profile`` is the one that was used.
     """
     return json.loads(
         _native.run_checks_multi(
@@ -121,6 +126,7 @@ def run_checks_multi(
             value_col,
             quality_col,
             ingest_col,
+            None if profiles is None else json.dumps(profiles),
         )
     )
 
