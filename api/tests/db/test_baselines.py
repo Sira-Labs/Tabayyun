@@ -327,3 +327,74 @@ async def test_dataset_run_uses_the_stored_baseline(lab):
     judged, checks = await run()
     assert judged["stats"]["baselines"] == {str(sid): 1}
     assert "tby.rate_of_change" in checks
+
+
+async def test_point_finding_at_the_first_sample_is_left_out(lab):
+    """A critical finding at one instant has an empty window; at the baseline's first sample it
+    still leaves that sample out."""
+    rows = _rows(1440)
+    rows[0][1] = 400.0  # the first sample alone is above the physical maximum
+    run = await _upload(lab.client, "pressure", rows, physical_max=200)
+    sid = uuid.UUID(run["series"][0]["id"])
+    # Make it a finding at exactly that instant, as point checks report them.
+    lab.env.sql(
+        "UPDATE findings SET window_start = :t, window_end = :t "
+        "WHERE series_id = :s AND severity = 'critical'",
+        t=T0,
+        s=sid,
+    )
+    assert lab.env.scalar(
+        "SELECT count(*) FROM findings WHERE series_id = :s AND window_end = :t", s=sid, t=T0
+    )
+    assert (await lab.compute(sid)).status == "stored"
+    [row] = await lab.rows(sid)
+    t0 = datetime_to_ns(T0)
+    assert row.excluded == {"bad": 0, "findings": 1, "windows": [[t0, t0 + 1]]}
+    assert row.n_samples == 1439 and row.profile["max"] < 70
+
+
+async def test_rows_read_are_bounded_not_only_estimated(lab):
+    """Coverage spreads a write's rows evenly over its span: a dense burst inside a long write
+    makes a window look smaller than it is. The limit holds for the rows that were read."""
+    sparse = _rows(30, step=timedelta(days=1))  # one sample a day for 30 days...
+    burst = _rows(2000, start=T0 + timedelta(days=29, hours=1), step=timedelta(seconds=1))
+    sid = await lab.series("bursty", sorted(sparse + burst, key=lambda r: r[0]))
+    # ...so 2030 rows over 30 days look like about 68 for the last day, which holds 2001.
+    assert await lab.compute(sid, max_rows=1900) == baselines.Outcome("too_large")
+    assert await lab.rows(sid) == []
+    assert (await lab.compute(sid, max_rows=2500)).status == "stored"
+
+
+async def test_an_older_computation_does_not_land_on_a_newer_one(lab, monkeypatch):
+    """A refresh that finishes while another computation of the series is reading: the slower
+    one notices the new version and computes again from the newer state."""
+    sid = await lab.series("flow", _rows(1440))
+    real_read = baselines.series_chart.read_window
+    calls = 0
+
+    async def slow_read(cache, series, start_ns, end_ns):
+        nonlocal calls
+        calls += 1
+        batch = await real_read(cache, series, start_ns, end_ns)
+        if calls == 1:
+            # While the first computation holds day one in memory, day two arrives and a
+            # refresh from the page stores version 1 from both days.
+            await lab.series("flow", _rows(1440, start=T0 + timedelta(days=1), scale=4.0))
+            assert await lab.compute(sid, trigger="manual") == baselines.Outcome("stored", 1)
+        return batch
+
+    monkeypatch.setattr(baselines.series_chart, "read_window", slow_read)
+    # Its day-one result is not stored on top: it reads again, and finds nothing new to store.
+    assert await lab.compute(sid) == baselines.Outcome("unchanged", 1)
+    [row] = await lab.rows(sid)
+    assert (row.version, row.trigger, row.n_samples) == (1, "manual", 2 * 1440)
+
+    # Stores that keep arriving: it gives up after a few attempts and leaves the newest alone.
+    async def always_behind(cache, series, start_ns, end_ns):
+        batch = await real_read(cache, series, start_ns, end_ns)
+        lab.env.sql("UPDATE series_baselines SET version = version + 1 WHERE series_id = :s", s=sid)
+        return batch
+
+    monkeypatch.setattr(baselines.series_chart, "read_window", always_behind)
+    assert await lab.compute(sid) == baselines.Outcome("superseded")
+    assert [r.version for r in await lab.rows(sid)] == [1 + baselines.MAX_ATTEMPTS]

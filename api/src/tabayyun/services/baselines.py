@@ -44,7 +44,10 @@ JOB_LOCK = "baselines"
 CLAIM_SQL = text("SELECT series_id, org_id FROM tabayyun_claim_series_for_baseline(:now, :limit)")
 
 Trigger = Literal["schedule", "manual"]
-Status = Literal["stored", "unchanged", "gone", "no_data", "too_large", "too_few"]
+# A computation whose inputs went stale this often is given up; the next refresh tries again.
+MAX_ATTEMPTS = 3
+
+Status = Literal["stored", "unchanged", "gone", "no_data", "too_large", "too_few", "superseded"]
 
 
 @dataclass(frozen=True)
@@ -63,6 +66,8 @@ class _Inputs:
     start_ns: int
     end_ns: int
     windows: list[tuple[int, int]]
+    # The current version when the inputs were read (0: none), to notice a store in between.
+    seen_version: int
 
 
 def fit_window(ext: series_chart.Extent, max_rows: int) -> tuple[int, int] | None:
@@ -104,12 +109,14 @@ async def _open_critical_windows(
             Finding.status == "open",
             Finding.severity == "critical",
             Finding.window_start < ns_to_datetime_ceil(end_ns),
-            Finding.window_end > ns_to_datetime(start_ns),
+            # `>=`: a finding at one instant has an empty window, also at the window's start.
+            Finding.window_end >= ns_to_datetime(start_ns),
         )
         .order_by(Finding.window_start, Finding.window_end)
     )
-    # A finding at one instant has an empty window: leave out that sample.
-    return [(s, max(e, s + 1)) for s, e in ((datetime_to_ns(a), datetime_to_ns(b)) for a, b in rows)]
+    # The empty window of a finding at one instant leaves out that sample.
+    windows = [(s, max(e, s + 1)) for s, e in ((datetime_to_ns(a), datetime_to_ns(b)) for a, b in rows)]
+    return [(s, e) for s, e in windows if e > start_ns]
 
 
 async def _inputs(session: AsyncSession, series_id: uuid.UUID, max_rows: int) -> _Inputs | Outcome:
@@ -123,8 +130,15 @@ async def _inputs(session: AsyncSession, series_id: uuid.UUID, max_rows: int) ->
     if window is None:
         return Outcome("too_large")
     windows = await _open_critical_windows(session, series.id, *window)
+    current = await latest(session, series.id)
     session.expunge(series)
-    return _Inputs(series=series, start_ns=window[0], end_ns=window[1], windows=windows)
+    return _Inputs(
+        series=series,
+        start_ns=window[0],
+        end_ns=window[1],
+        windows=windows,
+        seen_version=0 if current is None else current.version,
+    )
 
 
 async def compute_baseline(
@@ -138,22 +152,49 @@ async def compute_baseline(
     """Compute the series' baseline and store it as a new version when it differs from the
     current one. `factory` is the org's.
 
+    Computations of one series may overlap (a queued job and a refresh from the page). A
+    result is stored only if no version was stored since its inputs were read; otherwise it is
+    computed again from the newer state, so an older computation never lands on top of a
+    newer one.
+
     Raises:
         CacheError: the store cannot be read; nothing is stored.
     """
     job_log = log.bind(series_id=str(series_id), trigger=trigger)
+    for _ in range(MAX_ATTEMPTS):
+        outcome = await _attempt(factory, cache, series_id, trigger=trigger, max_rows=max_rows)
+        if outcome is not None:
+            if outcome.status == "stored":
+                job_log.info("baseline.stored", version=outcome.version)
+            else:
+                job_log.info("baseline.skipped", reason=outcome.status, version=outcome.version)
+            return outcome
+    job_log.warning("baseline.skipped", reason="superseded", attempts=MAX_ATTEMPTS)
+    return Outcome("superseded")
+
+
+async def _attempt(
+    factory: async_sessionmaker[AsyncSession],
+    cache: RunCache,
+    series_id: uuid.UUID,
+    *,
+    trigger: Trigger,
+    max_rows: int,
+) -> Outcome | None:
+    """One computation from freshly read inputs; None when a version was stored meanwhile."""
     async with factory() as session, session.begin():
         inputs = await _inputs(session, series_id, max_rows)
     if isinstance(inputs, Outcome):
-        job_log.info("baseline.skipped", reason=inputs.status)
         return inputs
     batch = await series_chart.read_window(cache, inputs.series, inputs.start_ns, inputs.end_ns)
     if batch is None:
-        job_log.info("baseline.skipped", reason="no_data")
         return Outcome("no_data")
+    # The window was sized from coverage, which spreads a range's rows evenly; a dense burst
+    # can hold more. The limit is on what is profiled, so it is checked on the rows themselves.
+    if batch.num_rows > max_rows:
+        return Outcome("too_large")
     kept, n_bad, n_findings = usable(batch, inputs.windows)
     if kept.num_rows < MIN_SAMPLES:
-        job_log.info("baseline.skipped", reason="too_few", usable=kept.num_rows)
         return Outcome("too_few")
     profile: dict[str, Any] = await asyncio.to_thread(
         tabayyun_core.profile, kept, {"id": str(series_id)}, quality_col="quality"
@@ -161,20 +202,21 @@ async def compute_baseline(
     excluded = {"bad": n_bad, "findings": n_findings, "windows": [list(w) for w in inputs.windows]}
     window_start, window_end = ns_to_datetime(inputs.start_ns), ns_to_datetime_ceil(inputs.end_ns)
     async with factory() as session, session.begin():
-        # The series row is the lock that keeps version numbers of concurrent jobs apart.
+        # The series row is the lock that orders the stores of overlapping computations.
         series = await session.get(Series, series_id, with_for_update=True)
         if series is None:
             return Outcome("gone")
         current = await latest(session, series_id)
+        if (0 if current is None else current.version) != inputs.seen_version:
+            return None
         if (
             current is not None
             and current.profile == profile
             and current.excluded == excluded
             and (current.window_start, current.window_end) == (window_start, window_end)
         ):
-            job_log.info("baseline.unchanged", version=current.version)
             return Outcome("unchanged", current.version)
-        version = 1 if current is None else current.version + 1
+        version = inputs.seen_version + 1
         session.add(
             SeriesBaseline(
                 org_id=series.org_id,
@@ -194,7 +236,6 @@ async def compute_baseline(
                 SeriesBaseline.series_id == series_id, SeriesBaseline.version <= version - KEEP_VERSIONS
             )
         )
-    job_log.info("baseline.stored", version=version, n_samples=kept.num_rows, bad=n_bad, findings=n_findings)
     return Outcome("stored", version)
 
 

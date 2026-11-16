@@ -105,7 +105,9 @@ async def extent(session: AsyncSession, series_id: uuid.UUID, layer: str = RAW_L
 def estimate_rows(ext: Extent, start_ns: int, end_ns: int) -> int:
     """Rows of `[start_ns, end_ns)`: each range's rows scaled by its share inside the window.
 
-    Overlapping writes count twice, so the estimate errs high, which suits a cap.
+    Overlapping writes count twice, which errs high. Rows are taken as evenly spread inside
+    a range, so a dense burst in a long range is underestimated: the estimate sizes a window,
+    it does not bound a read.
     """
     total = 0.0
     for r in ext.ranges:
