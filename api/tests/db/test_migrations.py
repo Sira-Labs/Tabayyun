@@ -43,6 +43,8 @@ EXPECTED_TABLES = {
     "source_files",
     # Spec 027.
     "check_suites",
+    # Spec 028.
+    "series_baselines",
 }
 HYPERTABLES = {"findings", "metrics", "scores"}
 
@@ -378,7 +380,7 @@ def test_0013_can_be_run_again_after_an_interrupted_index_build(db_url, fresh_sc
                     "WHERE indexrelid = 'ix_runs_suite_id_created_at'::regclass"
                 )
             )
-        migrate.upgrade(db_url, "head", timescale="auto")
+        migrate.upgrade(db_url, "0013", timescale="auto")
         with engine.connect() as conn:
             assert conn.execute(state).one() == (True, True)
             definition = "SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_runs_suite_id_created_at'"
@@ -386,7 +388,7 @@ def test_0013_can_be_run_again_after_an_interrupted_index_build(db_url, fresh_sc
         # Complete already: stamped back to 0012, the same steps change nothing and do not fail.
         with engine.begin() as conn:
             conn.execute(text("UPDATE alembic_version SET version_num = '0012'"))
-        migrate.upgrade(db_url, "head", timescale="auto")
+        migrate.upgrade(db_url, "0013", timescale="auto")
         with engine.connect() as conn:
             assert conn.execute(state).one() == (True, True)
     finally:
@@ -434,6 +436,38 @@ def test_0012_adds_check_suites_and_downgrades(db_url, fresh_schema):
             assert conn.execute(function).scalar_one() == 0
         migrate.upgrade(db_url, "head", timescale="auto")
         assert "check_suites" in inspect(engine).get_table_names() and run_columns() == {"suite_id", "checks"}
+    finally:
+        engine.dispose()
+        fresh_schema("auto")
+
+
+def test_0014_adds_series_baselines_and_downgrades(db_url, fresh_schema):
+    """0014 brings `series_baselines` with its policy, `series.baseline_checked_at` and the
+    claim function, which only the app role may call; its downgrade removes all three."""
+    fresh_schema("auto")
+    engine = create_engine(db_url)
+    function = text("SELECT count(*) FROM pg_proc WHERE proname = 'tabayyun_claim_series_for_baseline'")
+    signature = "tabayyun_claim_series_for_baseline(timestamptz, integer)"
+
+    def series_column() -> bool:
+        return "baseline_checked_at" in {c["name"] for c in inspect(engine).get_columns("series")}
+
+    try:
+        with engine.connect() as conn:
+            assert conn.execute(function).scalar_one() == 1
+            may_call = text("SELECT has_function_privilege(:role, :f, 'EXECUTE')")
+            assert conn.execute(may_call, {"role": "tabayyun_app", "f": signature}).scalar_one() is True
+            assert conn.execute(may_call, {"role": "public", "f": signature}).scalar_one() is False
+            policies = text("SELECT policyname FROM pg_policies WHERE tablename = 'series_baselines'")
+            assert conn.execute(policies).scalars().all() == ["tenant"]
+        assert series_column()
+        migrate.downgrade(db_url, "0013")
+        assert _current_revision(db_url) == "0013"
+        assert "series_baselines" not in inspect(engine).get_table_names() and not series_column()
+        with engine.connect() as conn:
+            assert conn.execute(function).scalar_one() == 0
+        migrate.upgrade(db_url, "head", timescale="auto")
+        assert "series_baselines" in inspect(engine).get_table_names() and series_column()
     finally:
         engine.dispose()
         fresh_schema("auto")

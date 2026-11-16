@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tabayyun import connectors, core
 from tabayyun.authz.scope import Scope
 from tabayyun.db.models import DatasetSeries, Run, Score, Series, Source
+from tabayyun.services import baselines as baselines_service
 from tabayyun.services import coverage as coverage_service
 from tabayyun.services import datasets as datasets_service
 from tabayyun.services import fetches
@@ -89,6 +90,8 @@ class Plan:
     members: list[Member]
     # The checks to run, `[{id, params}]`; None runs the core's default set.
     configs: list[dict[str, Any]] | None = None
+    # Stored baselines by series id, as `(version, profile)` (spec 028).
+    baselines: dict[str, tuple[int, dict[str, Any]]] = field(default_factory=dict)
     groups: list[dict[str, Any]] = field(default_factory=list)
     groups_outside: list[dict[str, Any]] = field(default_factory=list)
     missing: dict[str, list[list[int]]] = field(default_factory=dict)
@@ -196,6 +199,8 @@ async def _plan(session: AsyncSession, run: Run) -> Plan | None:
         configs=run_configs(run.checks),
     )
     in_dataset = {m.id for m in members}
+    stored = await baselines_service.current_for(session, list(in_dataset))
+    plan.baselines = {str(sid): (b.version, b.profile) for sid, b in stored.items()}
     groups = await groups_service.groups_within(session, plan.scope, list(in_dataset))
     group_members = await groups_service.members_of(session, [g.id for g in groups])
     for group in groups:
@@ -314,6 +319,8 @@ def _check(plan: Plan, batches: dict[str, pa.RecordBatch]) -> core.MultiReport:
         configs=plan.configs,
         quality_col="quality",
         ingest_col=INGEST_COL if has_ingest else None,
+        # A series without a stored baseline is judged against its own data in the window.
+        profiles={sid: profile for sid, (_, profile) in plan.baselines.items() if sid in batches},
     )
 
 
@@ -463,6 +470,9 @@ async def _persist(
                 if str(m.id) not in report.reports
             ],
             "missing": plan.missing,
+            "baselines": {
+                str(m.id): plan.baselines[str(m.id)][0] for m in checked if str(m.id) in plan.baselines
+            },
             **({"fetched": plan.fetched} if plan.fetched else {}),
             **({"fetch_errors": plan.fetch_errors} if plan.fetch_errors else {}),
         }

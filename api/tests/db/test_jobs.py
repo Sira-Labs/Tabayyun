@@ -15,7 +15,13 @@ from tabayyun.db import for_org, make_engine, make_session_factory
 from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Run, Upload
 from tabayyun.jobs import app as jobs_app
 from tabayyun.jobs import libpq_conninfo, make_app, tasks, worker_application_name
-from tabayyun.jobs.names import REAP_STALE_RUNS_TASK, RUN_CHECKS_TASK, RUN_DUE_SUITES_TASK
+from tabayyun.jobs.names import (
+    PROFILE_SERIES_TASK,
+    REAP_STALE_RUNS_TASK,
+    REFRESH_BASELINES_TASK,
+    RUN_CHECKS_TASK,
+    RUN_DUE_SUITES_TASK,
+)
 from tabayyun.main import create_app
 from tabayyun.services import runs as runs_service
 from tenancy import app_settings
@@ -75,6 +81,9 @@ def test_tasks_registered_on_the_app():
     assert RUN_CHECKS_TASK in jobs_app.tasks
     assert REAP_STALE_RUNS_TASK in jobs_app.tasks
     assert RUN_DUE_SUITES_TASK in jobs_app.tasks  # the suite scheduler (spec 027)
+    # The baseline scheduler and its per-series job (spec 028).
+    assert {REFRESH_BASELINES_TASK, PROFILE_SERIES_TASK} <= set(jobs_app.tasks)
+    assert jobs_app.tasks[PROFILE_SERIES_TASK].queue == "maintenance"
     assert jobs_app.tasks[RUN_CHECKS_TASK].queue == "runs"
 
 

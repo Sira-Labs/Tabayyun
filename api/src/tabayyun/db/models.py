@@ -52,6 +52,7 @@ RUN_TRIGGERS = ("upload", "suite", "manual")
 RUN_STATUSES = ("queued", "running", "succeeded", "failed")
 FINDING_STATUSES = ("open", "acked", "muted", "resolved")
 GROUP_KINDS = ("related", "redundant", "balance")
+BASELINE_TRIGGERS = ("schedule", "manual")
 MEMBER_ROLES = ("member", "input", "output")
 ORG_ROLES = ("owner", "admin", "member")
 WORKSPACE_ROLES = ("admin", "editor", "viewer")
@@ -298,6 +299,8 @@ class Series(TenantMixin, Base):
         UniqueConstraint("source_id", "external_id"),
         CheckConstraint(_in("kind", SERIES_KINDS), name="kind"),
         Index("ix_series_workspace_id_name", "workspace_id", "name"),
+        # The baseline scheduler takes the longest-waiting series first (spec 028).
+        Index("ix_series_baseline_checked_at", text("baseline_checked_at NULLS FIRST")),
     )
 
     id: Mapped[uuid.UUID] = _uuid_pk()
@@ -315,10 +318,36 @@ class Series(TenantMixin, Base):
     non_negative: Mapped[bool | None] = mapped_column(Boolean)
     asset_path: Mapped[str | None] = mapped_column(Text)
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, server_default="{}")
+    # When the baseline scheduler last queued the series (spec 028); not a change of the series.
+    baseline_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
+
+
+class SeriesBaseline(TenantMixin, Base):
+    """One version of a series' baseline profile (spec 028)."""
+
+    __tablename__ = "series_baselines"
+    __table_args__ = (
+        UniqueConstraint("series_id", "version"),
+        CheckConstraint(_in("trigger", BASELINE_TRIGGERS), name="trigger"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    series_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("series.id", ondelete="CASCADE"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    n_samples: Mapped[int] = mapped_column(Integer, nullable=False)
+    # What was left out: `{"bad": n, "findings": n, "windows": [[start_ns, end_ns], ...]}`.
+    excluded: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    profile: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    trigger: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _created_at()
 
 
 class Dataset(TenantMixin, Base):

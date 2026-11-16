@@ -100,6 +100,10 @@ async def _seed_org(app: Any, prefix: str) -> dict[str, str]:
             "/api/suites", json={"name": f"{prefix}-suite", "dataset_id": dataset.json()["id"]}
         )
         assert suite.status_code == 201, suite.text
+        # Spec 028: a stored baseline of the first series (computed after the response).
+        assert (await c.post(f"/api/series/{s1}/baselines")).status_code == 202
+        baselines = (await c.get(f"/api/series/{s1}/baselines")).json()["items"]
+        assert [b["version"] for b in baselines] == [1], baselines
     return {
         "source": source.json()["id"],
         "run": run["id"],
@@ -445,6 +449,9 @@ ROUTES = [
     ("PATCH", "/api/suites/{suite_id}", "suite", {"name": "renamed"}),
     ("DELETE", "/api/suites/{suite_id}", "suite", None),
     ("POST", "/api/suites/{suite_id}/runs", "suite", None),
+    # Spec 028: baselines of a series.
+    ("GET", "/api/series/{series_id}/baselines", "series", None),
+    ("POST", "/api/series/{series_id}/baselines", "series", None),
 ]
 READ_BACK = {
     "run": "/api/runs/{}",
@@ -573,7 +580,7 @@ async def test_other_org_gets_404_for_every_admin_route(seed, app_for, method, t
             open_a = "SELECT revoked_at IS NULL FROM invitations WHERE id = :i"
             assert conn.execute(text(open_a), {"i": INVITATION_A}).scalar() is True
             # Only the seeded events: the refused request wrote none in org B.
-            seeded = "('org.renamed', 'source.created', 'suite.created')"
+            seeded = "('org.renamed', 'source.created', 'suite.created', 'series.baseline_refresh_requested')"
             assert (
                 conn.execute(
                     text(f"SELECT count(*) FROM audit_events WHERE org_id = :o AND action NOT IN {seeded}"),  # noqa: S608

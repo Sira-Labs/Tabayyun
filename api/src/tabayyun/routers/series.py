@@ -1,5 +1,5 @@
 """Series endpoints: catalogue, metadata and partial updates (spec 004), metric points and
-score history (spec 003), chart points and profile (spec 025)."""
+score history (spec 003), chart points and profile (spec 025), baselines (spec 028)."""
 
 from __future__ import annotations
 
@@ -8,17 +8,22 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 import structlog
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tabayyun import core
-from tabayyun.authz import ReadScope, Scope, WriteScope, get_session
-from tabayyun.db.models import Series
+from tabayyun.auth.deps import client_ip
+from tabayyun.authz import Principal, ReadScope, Scope, WriteScope, get_principal, get_session
+from tabayyun.db import for_org
+from tabayyun.db.models import Series, SeriesBaseline
 from tabayyun.routers.windows import read_or_503, window_or_422
+from tabayyun.services import baselines as baselines_service
 from tabayyun.services import findings as findings_service
 from tabayyun.services import series as series_service
 from tabayyun.services import series_chart
+from tabayyun.services.admin import audit
+from tabayyun.services.cache import CacheError
 from tabayyun.services.timeconv import datetime_to_ns, parse_time
 
 router = APIRouter(prefix="/api/series", tags=["series"])
@@ -498,3 +503,134 @@ async def get_profile(
         quality_counts=series_chart.quality_counts(batch),
         band=BandOut(**band) if band else None,
     )
+
+
+# Baselines (spec 028)
+
+
+class ThresholdOut(BaseModel):
+    """A threshold a check learns from the baseline, with the check's default parameters."""
+
+    check_id: str
+    param: str
+    value: float | None
+    basis: str
+
+
+class ExcludedOut(BaseModel):
+    """What a baseline left out: sample counts and the finding windows, ns as strings."""
+
+    bad: int
+    findings: int
+    windows: list[tuple[str, str]]
+
+
+class BaselineOut(BaseModel):
+    """One version of a series' baseline."""
+
+    version: int
+    created_at: datetime
+    trigger: Literal["schedule", "manual"]
+    window: TimeWindow
+    n_samples: int
+    excluded: ExcludedOut
+    thresholds: list[ThresholdOut]
+    band: BandOut | None
+    profile: dict[str, Any]
+
+
+class BaselineList(BaseModel):
+    """A series' baselines, newest first; the first is the current one."""
+
+    items: list[BaselineOut]
+    next_cursor: None = None
+
+
+class BaselineQueued(BaseModel):
+    """A baseline computation was started."""
+
+    queued: bool = True
+
+
+def _baseline_out(row: SeriesBaseline, series: Series) -> BaselineOut:
+    excluded = row.excluded or {}
+    band = series_chart.band(series, row.profile)
+    return BaselineOut(
+        version=row.version,
+        created_at=row.created_at,
+        trigger=row.trigger,  # type: ignore[arg-type]  # the table's check constraint
+        window=TimeWindow.model_validate(
+            {"from": str(datetime_to_ns(row.window_start)), "to": str(datetime_to_ns(row.window_end))}
+        ),
+        n_samples=row.n_samples,
+        excluded=ExcludedOut(
+            bad=int(excluded.get("bad", 0)),
+            findings=int(excluded.get("findings", 0)),
+            windows=[(str(s), str(e)) for s, e in excluded.get("windows", [])],
+        ),
+        thresholds=[ThresholdOut(**t) for t in baselines_service.learned_thresholds(row.profile, series)],
+        band=BandOut(**band) if band else None,
+        profile=row.profile,
+    )
+
+
+@router.get("/{series_id}/baselines", response_model=BaselineList)
+async def list_baselines(
+    series_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    scope: ReadScope,
+    limit: Annotated[int, Query(ge=1, le=baselines_service.KEEP_VERSIONS)] = baselines_service.KEEP_VERSIONS,
+) -> BaselineList:
+    """The series' baselines, newest first, with the thresholds each one gives the checks."""
+    series = await _series_or_404(session, scope, series_id)
+    rows = await baselines_service.list_baselines(session, series.id, limit)
+    return BaselineList(items=[_baseline_out(row, series) for row in rows])
+
+
+async def _refresh_inline(app_state: Any, org_id: uuid.UUID, series_id: uuid.UUID) -> None:
+    """Compute the baseline after the response (inline jobs); a failure is logged, as in a job."""
+    try:
+        await baselines_service.compute_baseline(
+            for_org(app_state.session_factory, org_id),
+            app_state.run_cache,
+            series_id,
+            trigger="manual",
+            max_rows=app_state.settings.baseline_max_rows,
+        )
+    except CacheError as exc:
+        log.warning("baseline.cache_read_failed", series_id=str(series_id), error=str(exc))
+
+
+@router.post("/{series_id}/baselines", response_model=BaselineQueued, status_code=202)
+async def refresh_baseline(
+    series_id: str,
+    request: Request,
+    background: BackgroundTasks,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    scope: WriteScope,
+    principal: Annotated[Principal, Depends(get_principal)],
+) -> BaselineQueued:
+    """Compute the series' baseline now. 409 `no_data` when the cache holds nothing of it."""
+    series = await _series_or_404(session, scope, series_id)
+    if await series_chart.extent(session, series.id) is None:
+        raise HTTPException(status_code=409, detail="no_data")
+    await audit.record(
+        session,
+        audit.Actor(
+            user_id=principal.user_id,
+            org_id=principal.org_id,
+            ip_address=client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+        ),
+        "series.baseline_refresh_requested",
+        "series",
+        series.id,
+        workspace_id=scope.workspace_id,
+        details={"name": series.name},
+    )
+    if request.app.state.settings.inline_jobs:
+        await session.commit()
+        background.add_task(_refresh_inline, request.app.state, scope.org_id, series.id)
+    else:
+        await baselines_service.enqueue(session, series.id, scope.org_id, "manual")
+    return BaselineQueued()

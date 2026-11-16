@@ -205,12 +205,15 @@ def run_checks_multi(
     configs: list[dict[str, Any]] | None = None,
     quality_col: str | None = None,
     ingest_col: str | None = None,
+    profiles: Mapping[str, dict[str, Any]] | None = None,
 ) -> MultiReport:
     """Run single-series checks on every table and cross-series checks on `groups` (spec 008).
 
     Keys of `tables` and `metas` are the series ids the reports and groups use; `window` is
     the half-open `[start_ns, end_ns)` completeness and scores are measured against.
     `configs` (`[{id, params}]`) replaces the default set: only those checks run (spec 027).
+    `profiles` holds stored baselines by series id; a series without one is judged against the
+    profile of its own data in the window (spec 028).
     """
     raw = tc.run_checks_multi(
         dict(tables),
@@ -221,6 +224,7 @@ def run_checks_multi(
         window=window,
         quality_col=quality_col,
         ingest_col=ingest_col,
+        profiles=dict(profiles) if profiles else None,
     )
     return MultiReport.model_validate(raw)
 
