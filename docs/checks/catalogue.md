@@ -208,7 +208,9 @@ Profiles are versioned and stored; findings link to the profile they used.
 ### 13. `tby.spikes` — Point outliers
 - **Dim:** plausibility. **Sev:** medium (low for the spiky-signal summary).
 - **Algorithm:** Hampel filter: |x − rolling_median| > `t` × 1.4826 × rolling_MAD, window
-  `w`, with the scale floored at the series resolution or baseline `noise_mad`. A hit is a
+  `w`, with the scale floored at the series resolution or baseline `noise_mad`, whichever
+  is larger. The resolution is the declared one, else the stored baseline's, else read from
+  the window (spec 028). A hit is a
   spike only when it is isolated: a run of at most `max_width` consecutive hits bounded by
   ordinary samples. Longer runs are excursions (appliance switching, a solar ramp against a
   night-time median) and are left to rate-of-change, operational-range and changepoint.

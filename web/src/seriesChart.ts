@@ -1,7 +1,7 @@
 // Chart data and range arithmetic of the series page (spec 025). Pure functions, so the page
 // and its tests share them; the uPlot wrapper only draws what these return.
-import { allPages, apiGet } from "./api";
-import type { Finding, Severity } from "./types";
+import { allPages, apiGet, apiSend } from "./api";
+import type { Finding, Page, Severity } from "./types";
 
 /** A half-open time range in ns since the epoch. JS numbers keep ns to about 256 ns, plenty for
  * a chart; the URL carries them as integer strings. */
@@ -46,6 +46,22 @@ export type ProfileResponse = {
   profile: Profile | null;
   quality_counts: Record<"good" | "uncertain" | "bad" | "estimated", number>;
   band: Band | null;
+};
+
+/** A threshold a check learns from the baseline; `value` is null when there is nothing to learn it from. */
+export type BaselineThreshold = { check_id: string; param: string; value: number | null; basis: string };
+
+/** One stored version of a series' baseline (spec 028); the window is half-open, in ns strings. */
+export type Baseline = {
+  version: number;
+  created_at: string;
+  trigger: "schedule" | "manual";
+  window: { from: string; to: string };
+  n_samples: number;
+  excluded: { bad: number; findings: number; windows: [string, string][] };
+  thresholds: BaselineThreshold[];
+  band: Band | null;
+  profile: Record<string, unknown>;
 };
 
 const NS_PER_S = 1e9;
@@ -196,6 +212,11 @@ export const chartApi = {
       `/api/series/${encodeURIComponent(seriesId)}/chart?${q({ ...(range ? searchOfRange(range) : {}), width_px: widthPx })}`,
     ),
   profile: (seriesId: string) => apiGet<ProfileResponse>(`/api/series/${encodeURIComponent(seriesId)}/profile`),
+  /** The newest `limit` baselines, newest first; the first is the current one. */
+  baselines: (seriesId: string, limit = 2) =>
+    apiGet<Page<Baseline>>(`/api/series/${encodeURIComponent(seriesId)}/baselines?${q({ limit })}`),
+  /** Queue a baseline computation now (editors); 409 `no_data` when nothing is cached. */
+  refreshBaseline: (seriesId: string) => apiSend<{ queued: boolean }>("POST", `/api/series/${encodeURIComponent(seriesId)}/baselines`),
   findings: (seriesId: string, range: Range) =>
     allPages<Finding>(
       (cursor) =>

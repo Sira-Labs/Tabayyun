@@ -109,9 +109,12 @@ fn report_json(
 /// 008). `tables` maps series id to an Arrow batch/stream; `metas_json` is a JSON object of
 /// series id to metadata (missing entries get `{"id": ...}`); `groups_json` a JSON list of
 /// groups. `window` is `(start_ns, end_ns)`; without it the window spans the data (extended
-/// to `now_ns`). Returns JSON `{"reports": {id: report}, "groups_skipped": [...]}`.
+/// to `now_ns`). `profiles_json` is a JSON object of series id to a stored baseline profile
+/// (spec 028): those series are checked against it, any other against the profile of its own
+/// data when `compute_profile` is set. Returns JSON `{"reports": {id: report},
+/// "groups_skipped": [...]}`.
 #[pyfunction]
-#[pyo3(signature = (tables, metas_json, groups_json, configs_json=None, now_ns=None, window=None, compute_profile=true, ts_col="ts", value_col="value", quality_col=None, ingest_col=None))]
+#[pyo3(signature = (tables, metas_json, groups_json, configs_json=None, now_ns=None, window=None, compute_profile=true, ts_col="ts", value_col="value", quality_col=None, ingest_col=None, profiles_json=None))]
 #[allow(clippy::too_many_arguments)]
 fn run_checks_multi(
     py: Python<'_>,
@@ -126,7 +129,12 @@ fn run_checks_multi(
     value_col: &str,
     quality_col: Option<&str>,
     ingest_col: Option<&str>,
+    profiles_json: Option<&str>,
 ) -> PyResult<String> {
+    let stored: BTreeMap<String, Profile> = match profiles_json {
+        Some(s) => serde_json::from_str(s).map_err(err)?,
+        None => BTreeMap::new(),
+    };
     let mut metas: BTreeMap<String, SeriesMeta> = serde_json::from_str(metas_json).map_err(err)?;
     let groups: Vec<SeriesGroup> = serde_json::from_str(groups_json).map_err(err)?;
     let configs: Vec<CheckConfig> = match configs_json {
@@ -156,11 +164,15 @@ fn run_checks_multi(
         };
         let window = window.map_or_else(data_window, |(s, e)| Window::new(s, e));
         let ctx = CheckContext { now_ns: now_ns.unwrap_or(window.end - 1), window, profile: None };
-        let profiles: BTreeMap<String, Profile> = if compute_profile {
-            frames.iter().map(|f| (f.meta.id.clone(), Profile::compute(f))).collect()
-        } else {
-            BTreeMap::new()
-        };
+        let mut profiles = stored;
+        profiles.retain(|id, _| frames.iter().any(|f| &f.meta.id == id));
+        if compute_profile {
+            for f in &frames {
+                if !profiles.contains_key(&f.meta.id) {
+                    profiles.insert(f.meta.id.clone(), Profile::compute(f));
+                }
+            }
+        }
         let mut out = Registry::run_multi(&configs, &frames, &profiles, &groups, &ctx).map_err(err)?;
         let reports: serde_json::Map<String, serde_json::Value> = frames
             .iter()

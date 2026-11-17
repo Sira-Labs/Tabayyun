@@ -531,6 +531,24 @@ starts; the plan is the backlog until then.
         transaction and can be run again after an interruption (review finding).
       - Not exercised here: the worker's periodic tick against a live queue on staging; the
         tick function, the claim and the task registration are covered by tests.
+- [x] **028 Baseline profiles** — `docs/specs/028-baseline-profiles.md` (S10-2, 16 Nov). Every
+      criterion is met.
+      - The window ends at the last instant the cache holds, not at the time of the job, so an
+        uploaded history gets a baseline; it is halved until it fits
+        `TABAYYUN_BASELINE_MAX_ROWS`.
+      - Samples are left out in the API with Arrow filters, as the profile of spec 025 already
+        did for bad quality; the core only learned to load a stored profile with missing
+        fields and to take a profile per series.
+      - A profile equal to the current one stores no version, so versions mark real changes.
+      - The scheduler stamps `series.baseline_checked_at` through a SECURITY DEFINER function
+        and queues jobs under one lock: baselines never take more than one worker slot.
+      - The learned thresholds on the series page restate in the API what two checks do with
+        the profile (`tby.rate_of_change`, `tby.spikes`), with the checks' default parameters;
+        a suite's own override is not applied there.
+      - Group tolerances are still learned inside the run, and upload runs still use the
+        window's own profile (out of scope).
+      - Not exercised here: the hourly task and the job on a live worker queue on staging; the
+        claim, the queued jobs and the computation are covered by tests.
 - [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
       `tabayyun-api` and `tabayyun-worker` on staging; then a `synthetic` source with
       `poll_interval_s` gives staging a live, polling source for demos.

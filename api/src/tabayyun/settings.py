@@ -131,6 +131,9 @@ class Settings(BaseSettings):
     chart_max_rows: int = Field(
         default=10_000_000, ge=1, description="Raw rows one chart or profile request may read (spec 025)."
     )
+    baseline_max_rows: int = Field(
+        default=5_000_000, ge=1, description="Raw rows one baseline profile may read (spec 028)."
+    )
     file_sources_root: str | None = Field(
         default=None,
         description="Folder `csv_dir` sources read under (spec 026); unset turns them off.",

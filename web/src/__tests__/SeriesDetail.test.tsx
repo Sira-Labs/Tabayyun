@@ -120,6 +120,7 @@ function backend(chartFor: (q: URLSearchParams) => unknown = (q) => (q.get("from
       return chartFor(q);
     }
     if (path === `/api/series/${SID}/profile`) return PROFILE;
+    if (path === `/api/series/${SID}/baselines`) return { items: [], next_cursor: null };
     if (path === "/api/findings") {
       asked.findings.push(q);
       return { items: [FINDING], next_cursor: null };
@@ -156,6 +157,7 @@ describe("SeriesDetail", () => {
     const profile = screen.getByRole("region", { name: "Profile" });
     expect(within(profile).getByText("40.2 to 59.8")).toBeTruthy();
     expect(within(profile).getByText(/good 86.1 %, bad 13.9 %/)).toBeTruthy();
+    expect(await within(screen.getByRole("region", { name: "Baseline" })).findByText(/No baseline yet/)).toBeTruthy();
   });
 
   it("changes the range with presets, keys, drag and back, through the URL", async () => {

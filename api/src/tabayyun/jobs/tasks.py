@@ -20,16 +20,18 @@ from tabayyun.jobs.names import (
     MAIL_QUEUE,
     MAINTENANCE_QUEUE,
     POLL_SOURCES_TASK,
+    PROFILE_SERIES_TASK,
     PRUNE_RATE_LIMITS_TASK,
     PRUNE_SOURCE_FETCHES_TASK,
     REAP_STALE_RUNS_TASK,
+    REFRESH_BASELINES_TASK,
     RUN_CHECKS_TASK,
     RUN_DUE_SUITES_TASK,
     RUNS_QUEUE,
     SEND_INVITATION_TASK,
 )
 from tabayyun.mail import MailError, SmtpConfig
-from tabayyun.services import execution, fetches, ingest, rate_limits, suites
+from tabayyun.services import baselines, execution, fetches, ingest, rate_limits, suites
 from tabayyun.services import runs as runs_service
 from tabayyun.services.admin import invitations
 from tabayyun.settings import get_settings
@@ -156,6 +158,30 @@ async def run_due_suites(timestamp: int) -> None:
     started = await suites.fire_due_suites(runtime.session_factory(), runs_service.utc_now())
     if started:
         log.info("suites.fired", count=len(started), tick=timestamp)
+
+
+@app.periodic(cron="37 * * * *")
+@app.task(queue=MAINTENANCE_QUEUE, name=REFRESH_BASELINES_TASK, retry=False)
+async def refresh_baselines(timestamp: int) -> None:
+    """Every hour: queue a baseline job for the series not refreshed in the last day (spec 028)."""
+    queued = await baselines.queue_due(runtime.session_factory(), runs_service.utc_now())
+    if queued:
+        log.info("baselines.queued", count=queued, tick=timestamp)
+
+
+@app.task(queue=MAINTENANCE_QUEUE, name=PROFILE_SERIES_TASK, retry=False)
+async def profile_series(series_id: str, org_id: str, trigger: str = "schedule") -> None:
+    """Compute one series' baseline (spec 028); not retried, the next day's job tries again.
+
+    Deferred with the lock `baselines`, so these jobs run one after another.
+    """
+    await baselines.compute_baseline(
+        for_org(runtime.session_factory(), uuid.UUID(org_id)),
+        runtime.run_cache(),
+        uuid.UUID(series_id),
+        trigger="manual" if trigger == "manual" else "schedule",
+        max_rows=get_settings().baseline_max_rows,
+    )
 
 
 @app.periodic(cron="17 * * * *")
