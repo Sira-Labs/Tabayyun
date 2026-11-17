@@ -168,9 +168,9 @@ baseline the panel says so and, for editors, offers to compute one.
 - The thresholds are a list, not a table: the panel sits in the series page's narrow side
   column, and a six-column table hid the previous value and the change behind a sideways
   scroll (seen in the browser check).
-- A refresh that changes nothing stores no version, so the panel waits 60 seconds and then
-  says that nothing changed or that there is too little usable data; the job's own outcome is
-  not reported back to the page.
+- A refresh that changes nothing stores no version, and the job's own outcome is not
+  reported back to the page: after 60 seconds the panel says that no new version is there
+  yet.
 - The declared resolution of the series wins over the learned one in the spike floor, as in
   the check, so that threshold can change with a metadata edit, without a new version.
 - `stats.baselines` is present on every dataset run, empty when no series had a baseline.
@@ -192,6 +192,10 @@ baseline the panel says so and, for editors, offers to compute one.
     between those reads is noticed as well.
   - Without any resolution (a constant baseline, none declared) the page shows no spike
     floor: the check reads the resolution from the window it checks.
+  - Samples without a number (empty cells, NaN) are dropped before the minimum of 50 is
+    counted, and are in neither exclusion count.
+  - After its 60 seconds the panel says only that no new version is there yet, names no
+    cause it cannot know, and keeps looking every ten seconds.
   - The panel is keyed by series, so a refresh in progress does not carry over to another
     series' page.
 
