@@ -192,7 +192,7 @@ describe("series.baseline", () => {
     expect(within(panel).getByRole("button", { name: "Refresh baseline" })).toBeTruthy();
   });
 
-  it("says when no new version came", async () => {
+  it("says when no new version came, without naming a cause, and keeps looking", async () => {
     baselinePolling.timeoutMs = 80;
     const asked = backend([baseline()], asRole("editor"));
     const user = userEvent.setup();
@@ -200,11 +200,14 @@ describe("series.baseline", () => {
     await user.click(await within(panel).findByRole("button", { name: "Refresh baseline" }));
     await waitFor(() =>
       expect(within(panel).getByRole("status").textContent).toBe(
-        "No new version: nothing changed since version 7, or there is too little usable data.",
+        "No new version yet: version 7 is still the current one. The computation may still be running; it stores nothing when nothing changed.",
       ),
     );
+    // It keeps looking, less often: a job that was only slow still shows its version.
+    asked.items = [baseline({ version: 8 }), baseline()];
+    await waitFor(() => expect(within(panel).getByRole("status").textContent).toBe("Baseline updated to version 8."));
     const after = asked.gets.length;
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await new Promise((resolve) => setTimeout(resolve, 150));
     expect(asked.gets.length).toBe(after);
   });
 

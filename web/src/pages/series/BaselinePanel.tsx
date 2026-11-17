@@ -8,7 +8,7 @@ import { chartApi, type Baseline, type BaselineThreshold } from "../../seriesCha
 import { ErrorLine, panelClass } from "../admin/ui";
 
 /** How often and for how long the panel looks for the new version after a refresh; tests shorten both. */
-export const baselinePolling = { intervalMs: 2000, timeoutMs: 60_000 };
+export const baselinePolling = { intervalMs: 2000, timeoutMs: 60_000, slowFactor: 5 };
 
 const mutedClass = "text-slate-600 dark:text-slate-400";
 const DASH = "—";
@@ -57,7 +57,10 @@ export function BaselinePanel({ seriesId }: { seriesId: string }) {
     queryFn: () => chartApi.baselines(seriesId),
     refetchInterval: (q) => {
       const newest = q.state.data?.items[0]?.version ?? null;
-      return watch && !watch.timedOut && newest === watch.since ? baselinePolling.intervalMs : false;
+      if (!watch || newest !== watch.since) return false;
+      // After the wait the panel keeps looking, less often: a job behind a busy queue still
+      // shows its version without a reload.
+      return baselinePolling.intervalMs * (watch.timedOut ? baselinePolling.slowFactor : 1);
     },
   });
   const current = baselines.data?.items[0];
@@ -84,8 +87,8 @@ export function BaselinePanel({ seriesId }: { seriesId: string }) {
   else if (watch?.timedOut) {
     status =
       watch.since === null
-        ? "No baseline was computed: there is too little usable data."
-        : `No new version: nothing changed since version ${watch.since}, or there is too little usable data.`;
+        ? "No baseline yet. The computation may still be running; it stores nothing when there is too little usable data."
+        : `No new version yet: version ${watch.since} is still the current one. The computation may still be running; it stores nothing when nothing changed.`;
   }
   const noData = refreshErrorText(refresh.error);
 
