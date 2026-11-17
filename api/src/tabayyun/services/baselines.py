@@ -83,10 +83,13 @@ def fit_window(ext: series_chart.Extent, max_rows: int) -> tuple[int, int] | Non
 
 
 def usable(batch: pa.RecordBatch, windows: Sequence[tuple[int, int]]) -> tuple[pa.RecordBatch, int, int]:
-    """The batch without bad-quality samples and without samples inside `windows`
-    (`[start_ns, end_ns)`), and how many each rule removed (bad quality counts first)."""
-    good = batch.filter(pc.not_equal(batch.column("quality"), series_chart.QUALITY_CODES["bad"]))
-    n_bad = batch.num_rows - good.num_rows
+    """The batch without bad-quality samples, without samples that hold no number and without
+    samples inside `windows` (`[start_ns, end_ns)`), and how many the first and the last rule
+    removed (bad quality counts first). Samples without a number teach nothing and are in
+    neither count; without them the minimum is counted on what the profile really uses."""
+    not_bad = batch.filter(pc.not_equal(batch.column("quality"), series_chart.QUALITY_CODES["bad"]))
+    n_bad = batch.num_rows - not_bad.num_rows
+    good = not_bad.filter(pc.fill_null(pc.is_finite(not_bad.column("value")), False))
     if not windows or good.num_rows == 0:
         return good, n_bad, 0
     ts = good.column("ts").cast(pa.int64())

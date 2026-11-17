@@ -36,7 +36,10 @@ def _rows(n: int, *, start: datetime = T0, step: timedelta = MINUTE, scale: floa
 
 async def _upload(client, name: str, rows: list[list], **data) -> dict:
     """Upload rows of `(ts, value, quality)` as series `name`; the finished run."""
-    lines = ["ts,value,quality"] + [f"{ts.isoformat()},{value:.4f},{quality}" for ts, value, quality in rows]
+    lines = ["ts,value,quality"] + [
+        f"{ts.isoformat()},{'' if value != value else f'{value:.4f}'},{quality}"  # NaN: an empty cell
+        for ts, value, quality in rows
+    ]
     r = await client.post(
         "/api/runs",
         files={"file": ("f.csv", ("\n".join(lines) + "\n").encode(), "text/csv")},
@@ -421,3 +424,24 @@ async def test_a_store_between_the_reads_of_the_inputs_is_noticed(lab, monkeypat
     assert await lab.compute(sid) == baselines.Outcome("unchanged", 1)
     [row] = await lab.rows(sid)
     assert (row.version, row.trigger, row.n_samples) == (1, "manual", 2 * 1440)
+
+
+async def test_samples_without_a_number_do_not_count(lab):
+    """Empty cells arrive as NaN. They are not learned from and not counted: neither towards
+    the minimum nor as bad quality."""
+    rows = _rows(1440)
+    for i in range(200, 500):
+        rows[i][1] = float("nan")
+    rows[600][2] = "bad"
+    sid = await lab.series("gappy", rows)
+    assert (await lab.compute(sid)).status == "stored"
+    [row] = await lab.rows(sid)
+    assert row.n_samples == 1440 - 300 - 1 == row.profile["n_finite"]
+    assert row.excluded == {"bad": 1, "findings": 0, "windows": []}
+
+    # Sixty samples of which twenty hold a number: too few, although sixty rows were read.
+    sparse = _rows(60)
+    for i in range(20, 60):
+        sparse[i][1] = float("nan")
+    few = await lab.series("mostly-empty", sparse)
+    assert await lab.compute(few) == baselines.Outcome("too_few")
