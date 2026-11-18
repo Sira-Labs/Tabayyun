@@ -220,6 +220,11 @@ async def _merge(
             "status_at",
             "first_run_id",
             "created_at",
+            # Triage (spec 029) belongs to the finding, whichever way its window grows.
+            "muted_until",
+            "assignee_id",
+            "feedback",
+            "feedback_at",
         )
     }
     await session.delete(existing)

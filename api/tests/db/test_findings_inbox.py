@@ -458,6 +458,22 @@ async def test_export_csv_safe_and_truncated(inbox, monkeypatch):
         "adam",
     )
     assert middle["window_start"] == (T0 + timedelta(hours=2)).isoformat() and middle["status"] == "open"
+    # A reason with a carriage return stays one cell: no record break, no formula cell of its own.
+    r = await inbox.client.patch(
+        f"/api/findings/{a}", json={"status": "resolved", "reason": "reviewed\r=1+1"}
+    )
+    assert r.status_code == 200, r.text
+    raw = (await inbox.client.get("/api/findings/export", params={"status": "all"})).text
+    parsed = list(csv.reader(io.StringIO(raw, newline="")))
+    assert len(parsed) == 1 + 3 and {len(row) for row in parsed} == {len(triage.EXPORT_COLUMNS)}
+    [resolved] = [row for row in parsed if row[0] == a]
+    assert resolved[triage.EXPORT_COLUMNS.index("status_reason")] == "reviewed\r=1+1"
+    assert not any(cell.startswith("=") for row in parsed for cell in row)
+    assert triage._cell("\t=1+1") == "'\t=1+1" and triage._cell("\r=1+1") == "'\r=1+1"
+    assert triage._cell("plain") == "plain" and triage._cell(None) == "" and triage._cell(-5) == "'-5"
+    r = await inbox.client.patch(f"/api/findings/{a}", json={"status": "open"})
+    assert r.status_code == 200, r.text
+
     # The same filters as the list.
     rows, _ = await export(severity="critical")
     assert [r["id"] for r in rows] == [a]

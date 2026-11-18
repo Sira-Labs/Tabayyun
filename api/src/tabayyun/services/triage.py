@@ -323,10 +323,15 @@ async def groups(
 # Export
 
 
+# A cell starting with one of these is a formula to a spreadsheet; tab and carriage return are
+# skipped by some of them before the formula character.
+FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r")
+
+
 def _cell(value: Any) -> str:
     """A CSV cell that a spreadsheet does not run as a formula."""
     cell = "" if value is None else str(value)
-    return f"'{cell}" if cell[:1] in ("=", "+", "-", "@") else cell
+    return f"'{cell}" if cell.startswith(FORMULA_STARTS) else cell
 
 
 async def export_csv(
@@ -334,7 +339,10 @@ async def export_csv(
 ) -> tuple[str, bool]:
     """The filtered findings as CSV text, newest window first, and whether `max_rows` cut it."""
     out = io.StringIO()
-    writer = csv.writer(out, lineterminator="\n")
+    # RFC 4180 line ends. With them the writer quotes a cell that holds a carriage return or a
+    # line feed; with "\n" alone a bare carriage return stayed unquoted, and a reader could
+    # take it for the end of a record and the rest of the cell for new cells.
+    writer = csv.writer(out, lineterminator="\r\n")
     writer.writerow(EXPORT_COLUMNS)
     cursor: str | None = None
     written = 0
