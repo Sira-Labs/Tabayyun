@@ -65,17 +65,29 @@ function baseHeaders(): Record<string, string> {
   return workspace ? { ...HEADERS, [WORKSPACE_HEADER]: workspace } : HEADERS;
 }
 
-/** Fetch JSON with the CSRF and workspace headers; throws ApiError with the server's detail. A
- * 401 also triggers the unauthorized handler; 204 resolves to undefined. */
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/** Fetch with the CSRF and workspace headers; throws ApiError with the server's detail. A 401
+ * also triggers the unauthorized handler. */
+async function send(path: string, init: RequestInit = {}): Promise<Response> {
   const res = await fetch(path, { credentials: "same-origin", ...init, headers: { ...baseHeaders(), ...init.headers } });
   if (!res.ok) {
     const body = await res.text();
     if (res.status === 401) onUnauthorized?.();
     throw new ApiError(res.status, errorMessage(body, `${res.status} ${res.statusText}`.trim()), parseJson(body));
   }
+  return res;
+}
+
+/** Fetch JSON; 204 resolves to undefined. */
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await send(path, init);
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
+}
+
+/** GET a file (a CSV export) in the chosen workspace, with the response's headers. */
+export async function apiBlob(path: string): Promise<{ blob: Blob; headers: Headers }> {
+  const res = await send(path, { headers: { Accept: "*/*" } });
+  return { blob: await res.blob(), headers: res.headers };
 }
 
 /** GET a JSON resource. */

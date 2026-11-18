@@ -1,0 +1,85 @@
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { formatNumber } from "../../format";
+import { inboxApi, inboxKeys, toggled, toggledAll, type GroupFilter, type InboxSearch } from "../../findingsInbox";
+import { ErrorLine, linkButtonClass } from "../admin/ui";
+import { BulkActions } from "./BulkActions";
+import { FindingsTable } from "./FindingsTable";
+import { mutedClass } from "./parts";
+
+/** The findings of a search, or of one of its groups: pages of 200 loaded while scrolling,
+ * the row selection and, for editors, the actions on it (spec 029). The selection lives here,
+ * so the page mounts a new list (by `key`) when the filter changes and the selection is gone. */
+export function FindingsList({
+  search,
+  group,
+  label,
+  canWrite,
+  onNotice,
+}: {
+  search: InboxSearch;
+  group: GroupFilter | null;
+  label: string;
+  canWrite: boolean;
+  onNotice: (message: string) => void;
+}) {
+  const frame = useRef<HTMLDivElement>(null);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const findings = useInfiniteQuery({
+    queryKey: inboxKeys.list(search, group),
+    queryFn: ({ pageParam }) => inboxApi.list(search, group, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+  });
+  const items = useMemo(() => findings.data?.pages.flatMap((p) => p.items) ?? [], [findings.data]);
+  const ids = useMemo(() => items.map((f) => f.id), [items]);
+  const { fetchNextPage, hasNextPage } = findings;
+  const loadMore = useCallback(() => void fetchNextPage(), [fetchNextPage]);
+  // Findings a reload dropped are no longer selected.
+  const chosen = useMemo(() => ids.filter((id) => selected.has(id)), [ids, selected]);
+
+  const done = (message: string) => {
+    setSelected(new Set());
+    onNotice(message);
+    // The actions bar goes with the selection: keep the focus in the list.
+    frame.current?.focus();
+  };
+
+  return (
+    <div ref={frame} tabIndex={-1} role="group" aria-label={label} className="space-y-2 outline-none">
+      {findings.isPending && <p>Loading findings…</p>}
+      {!findings.isFetchNextPageError && <ErrorLine error={findings.error} prefix="Could not load findings" />}
+      {findings.isSuccess && items.length === 0 && <p className={mutedClass}>No findings match.</p>}
+      {canWrite && chosen.length > 0 && <BulkActions ids={chosen} onDone={done} />}
+      {items.length > 0 && (
+        <>
+          <FindingsTable
+            items={items}
+            label={label}
+            hasMore={hasNextPage}
+            autoLoad={!findings.isFetching && !findings.isFetchNextPageError}
+            onLoadMore={loadMore}
+            selection={
+              canWrite
+                ? {
+                    selected,
+                    onToggle: (id) => setSelected((now) => toggled(now, id)),
+                    onToggleAll: () => setSelected((now) => toggledAll(ids, now)),
+                  }
+                : null
+            }
+          />
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <p className={mutedClass}>{hasNextPage ? `${formatNumber(items.length)} loaded` : `All ${formatNumber(items.length)} loaded`}</p>
+            {hasNextPage && (
+              <button type="button" className={linkButtonClass} disabled={findings.isFetchingNextPage} onClick={loadMore}>
+                {findings.isFetchingNextPage ? "Loading more…" : "Load more"}
+              </button>
+            )}
+          </div>
+          {findings.isFetchNextPageError && <ErrorLine error={findings.error} prefix="Could not load more findings" />}
+        </>
+      )}
+    </div>
+  );
+}
