@@ -107,6 +107,7 @@ def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = No
     signed_in = [Depends(get_principal)]
     for router in (checks, runs, findings, series, sources, groups, datasets, workspaces, compare, suites):
         app.include_router(router.router, dependencies=signed_in)
+    app.include_router(findings.filters_router, dependencies=signed_in)
     # The admin router orders its own gate: session, then passkey freshness (spec 014).
     app.include_router(admin.router)
     app.include_router(invitations.router)

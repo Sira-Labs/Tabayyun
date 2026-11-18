@@ -16,6 +16,7 @@ PRUNE_SOURCE_FETCHES_TASK = "tabayyun.prune_source_fetches"
 RUN_DUE_SUITES_TASK = "tabayyun.run_due_suites"
 PROFILE_SERIES_TASK = "tabayyun.profile_series"
 REFRESH_BASELINES_TASK = "tabayyun.refresh_baselines"
+REOPEN_EXPIRED_MUTES_TASK = "tabayyun.reopen_expired_mutes"
 # Postgres application_name prefix of the worker's connections; the suffix after "/" is the
 # commit it runs, which /api/version lists (see `worker_application_name`).
 WORKER_APPLICATION_NAME = "tabayyun-worker"

@@ -45,6 +45,8 @@ EXPECTED_TABLES = {
     "check_suites",
     # Spec 028.
     "series_baselines",
+    # Spec 029.
+    "finding_filters",
 }
 HYPERTABLES = {"findings", "metrics", "scores"}
 
@@ -468,6 +470,40 @@ def test_0014_adds_series_baselines_and_downgrades(db_url, fresh_schema):
             assert conn.execute(function).scalar_one() == 0
         migrate.upgrade(db_url, "head", timescale="auto")
         assert "series_baselines" in inspect(engine).get_table_names() and series_column()
+    finally:
+        engine.dispose()
+        fresh_schema("auto")
+
+
+def test_0015_adds_the_triage_columns_and_downgrades(db_url, fresh_schema):
+    """0015 brings the findings' triage columns, `finding_filters` with its policy and the
+    function that opens expired mutes, which only the app role may call; its downgrade
+    removes all three and keeps the findings."""
+    fresh_schema("auto")
+    engine = create_engine(db_url)
+    function = text("SELECT count(*) FROM pg_proc WHERE proname = 'tabayyun_reopen_expired_mutes'")
+    signature = "tabayyun_reopen_expired_mutes(timestamptz)"
+    triage = {"muted_until", "assignee_id", "feedback", "feedback_at"}
+
+    def finding_columns() -> set[str]:
+        return {c["name"] for c in inspect(engine).get_columns("findings")} & triage
+
+    try:
+        with engine.connect() as conn:
+            assert conn.execute(function).scalar_one() == 1
+            may_call = text("SELECT has_function_privilege(:role, :f, 'EXECUTE')")
+            assert conn.execute(may_call, {"role": "tabayyun_app", "f": signature}).scalar_one() is True
+            assert conn.execute(may_call, {"role": "public", "f": signature}).scalar_one() is False
+            policies = text("SELECT policyname FROM pg_policies WHERE tablename = 'finding_filters'")
+            assert conn.execute(policies).scalars().all() == ["tenant"]
+        assert finding_columns() == triage
+        migrate.downgrade(db_url, "0014")
+        assert _current_revision(db_url) == "0014"
+        assert "finding_filters" not in inspect(engine).get_table_names() and finding_columns() == set()
+        with engine.connect() as conn:
+            assert conn.execute(function).scalar_one() == 0
+        migrate.upgrade(db_url, "head", timescale="auto")
+        assert "finding_filters" in inspect(engine).get_table_names() and finding_columns() == triage
     finally:
         engine.dispose()
         fresh_schema("auto")

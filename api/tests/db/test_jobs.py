@@ -19,6 +19,7 @@ from tabayyun.jobs.names import (
     PROFILE_SERIES_TASK,
     REAP_STALE_RUNS_TASK,
     REFRESH_BASELINES_TASK,
+    REOPEN_EXPIRED_MUTES_TASK,
     RUN_CHECKS_TASK,
     RUN_DUE_SUITES_TASK,
 )
@@ -84,6 +85,7 @@ def test_tasks_registered_on_the_app():
     # The baseline scheduler and its per-series job (spec 028).
     assert {REFRESH_BASELINES_TASK, PROFILE_SERIES_TASK} <= set(jobs_app.tasks)
     assert jobs_app.tasks[PROFILE_SERIES_TASK].queue == "maintenance"
+    assert REOPEN_EXPIRED_MUTES_TASK in jobs_app.tasks  # the end of mutes (spec 029)
     assert jobs_app.tasks[RUN_CHECKS_TASK].queue == "runs"
 
 
