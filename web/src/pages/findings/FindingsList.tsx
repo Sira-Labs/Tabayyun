@@ -35,11 +35,18 @@ export function FindingsList({
   const ids = useMemo(() => items.map((f) => f.id), [items]);
   const { fetchNextPage, hasNextPage } = findings;
   const loadMore = useCallback(() => void fetchNextPage(), [fetchNextPage]);
-  // Findings a reload dropped are no longer selected.
+  // Findings a reload dropped are no longer selected, also when a later reload brings them
+  // back: the stored selection is pruned whenever the loaded findings change.
+  const [pruned, setPruned] = useState(ids);
+  if (ids !== pruned) {
+    setPruned(ids);
+    const loaded = new Set(ids);
+    if ([...selected].some((id) => !loaded.has(id))) setSelected(new Set([...selected].filter((id) => loaded.has(id))));
+  }
   const chosen = useMemo(() => ids.filter((id) => selected.has(id)), [ids, selected]);
 
-  const done = (message: string) => {
-    setSelected(new Set());
+  const done = (message: string, keep: readonly string[] = []) => {
+    setSelected(new Set(keep));
     onNotice(message);
     // The actions bar goes with the selection: keep the focus in the list.
     frame.current?.focus();

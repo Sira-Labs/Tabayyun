@@ -198,6 +198,9 @@ export type FindingChange = {
 };
 export type BulkFailure = { id: string; error: "not_found" | "transition"; status: string | null };
 export type BulkResult = { updated: string[]; failed: BulkFailure[] };
+/** What a bulk change over several requests did: the results of the requests that were
+ * answered, and when one failed, the ids that were not sent or not answered, with the error. */
+export type BulkOutcome = BulkResult & { unsent: string[]; error: unknown };
 /** The API's limit on the ids of one bulk request. */
 export const BULK_MAX = 500;
 
@@ -278,15 +281,26 @@ export const inboxApi = {
   groups: (search: InboxSearch, by: Grouping) =>
     apiGet<{ items: FindingGroup[]; truncated: boolean }>(groupsUrl(search, by)),
   change: (id: string, change: FindingChange) => apiSend<InboxFinding>("PATCH", finding(id), change),
-  /** One change to many findings: at most 500 ids a request, one request after the other. */
-  bulk: async (ids: readonly string[], change: FindingChange): Promise<BulkResult> => {
-    const result: BulkResult = { updated: [], failed: [] };
-    for (const part of chunks(ids, BULK_MAX)) {
-      const answer = await apiSend<BulkResult>("POST", "/api/findings/bulk", { ids: part, change });
-      result.updated.push(...answer.updated);
-      result.failed.push(...answer.failed);
+  /** One change to many findings: at most 500 ids a request, one request after the other.
+   * A request that fails after others were answered does not throw: what was changed stays
+   * changed, so the outcome carries the results so far, the ids left over and the error.
+   * It throws only when the first request fails, when nothing was changed. */
+  bulk: async (ids: readonly string[], change: FindingChange): Promise<BulkOutcome> => {
+    const outcome: BulkOutcome = { updated: [], failed: [], unsent: [], error: null };
+    const parts = chunks(ids, BULK_MAX);
+    for (const [index, part] of parts.entries()) {
+      try {
+        const answer = await apiSend<BulkResult>("POST", "/api/findings/bulk", { ids: part, change });
+        outcome.updated.push(...answer.updated);
+        outcome.failed.push(...answer.failed);
+      } catch (error) {
+        if (index === 0) throw error;
+        outcome.unsent = parts.slice(index).flat();
+        outcome.error = error;
+        break;
+      }
     }
-    return result;
+    return outcome;
   },
   assignees: () => apiGet<{ items: Assignee[] }>("/api/findings/assignees"),
   /** The CSV of a search's filters, and whether the server cut it. */

@@ -16,19 +16,29 @@ type Send = (action: Action) => void;
 /** The actions on the selected findings, for editors (spec 029): acknowledge, mute, resolve,
  * reopen, assign, false positive. Each is one bulk change; `onDone` gets the result in words
  * once the list and the groups have been asked to reload. */
-export function BulkActions({ ids, onDone }: { ids: readonly string[]; onDone: (message: string) => void }) {
+export function BulkActions({ ids, onDone }: { ids: readonly string[]; onDone: (message: string, keep?: readonly string[]) => void }) {
   const client = useQueryClient();
   const [dialog, setDialog] = useState<"mute" | "resolve" | "assign" | null>(null);
   const bulk = useMutation({
     mutationFn: (action: Action) => inboxApi.bulk(ids, action.change),
-    onSuccess: (result, action) => {
+    onSuccess: (outcome, action) => {
       void client.invalidateQueries({ queryKey: inboxKeys.all });
       setDialog(null);
-      onDone(bulkMessage(action.done, result));
+      if (outcome.error === null) {
+        onDone(bulkMessage(action.done, outcome));
+        return;
+      }
+      // A later request failed: what was changed is reported, the rest stays selected.
+      const why = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+      const left = `${formatNumber(outcome.unsent.length)} were not sent and stay selected (${why}).`;
+      onDone(`${bulkMessage(action.done, outcome)} ${left}`, outcome.unsent);
     },
   });
   const send: Send = (action) => bulk.mutate(action);
+  // A request that was sent cannot be taken back: while it runs the dialog stays, so its
+  // result is reported in the dialog that started it and no second change starts beside it.
   const close = () => {
+    if (bulk.isPending) return;
     setDialog(null);
     bulk.reset();
   };
@@ -68,7 +78,7 @@ function title(verb: string, n: number): string {
 function Buttons({ submit, busy, disabled, onClose }: { submit: string; busy: boolean; disabled?: boolean; onClose: () => void }) {
   return (
     <div className="flex justify-end gap-2">
-      <button type="button" className={buttonClass} onClick={onClose}>
+      <button type="button" className={buttonClass} disabled={busy} onClick={onClose}>
         Cancel
       </button>
       <button type="submit" className={buttonClass} disabled={busy || disabled}>

@@ -77,14 +77,18 @@ export function DebouncedText({
   const [sent, setSent] = useState(value);
   const [seen, setSeen] = useState(value);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Counts the values that came from elsewhere, so the effect below can drop a commit that
+  // is still waiting: it would put the text typed before over the value that replaced it.
+  const [replaced, setReplaced] = useState(0);
   if (value !== seen) {
     setSeen(value);
     if (value !== sent) {
       setSent(value);
       setText(value ?? "");
+      setReplaced(replaced + 1);
     }
   }
-  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(() => () => clearTimeout(timer.current), [replaced]);
 
   const change = (next: string) => {
     setText(next);

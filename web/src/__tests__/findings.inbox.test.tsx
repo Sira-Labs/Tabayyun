@@ -214,6 +214,83 @@ describe("findings.inbox", () => {
     expect(screen.queryAllByRole("checkbox", { name: /^Select Feeder/, checked: true })).toHaveLength(0);
   });
 
+  it("keeps what a failed later request left over selected, and says what was done", async () => {
+    // 501 selected findings go out as 500 and 1; the second request fails.
+    const many = Array.from({ length: 501 }, (_, i) => finding(i + 1));
+    const asked = backend(many, asRole("editor"));
+    asked.bulk = (ids) => (ids.length === 500 ? { updated: ids, failed: [] } : json({ detail: "cache unavailable" }, 503));
+    const user = userEvent.setup();
+    renderApp("/findings");
+    await rows();
+    await user.click(screen.getByRole("checkbox", { name: "Select all loaded findings" }));
+    await user.click(screen.getByRole("button", { name: "Acknowledge" }));
+    await waitFor(() => expect(status()).toMatch(/^500 findings acknowledged\. 1 were not sent and stay selected \(/));
+    expect(asked.bulks.map((b) => b.ids.length)).toEqual([500, 1]);
+    // The list was asked again, and only the unsent finding is still selected: a retry sends it alone.
+    expect(within(screen.getByRole("group", { name: "Actions on the selected findings" })).getByText("1 selected")).toBeTruthy();
+    asked.bulk = (ids) => ({ updated: ids, failed: [] });
+    await user.click(screen.getByRole("button", { name: "Acknowledge" }));
+    await waitFor(() => expect(status()).toBe("1 finding acknowledged."));
+    expect(asked.bulks[2]?.ids).toEqual(asked.bulks[1]?.ids);
+  });
+
+  it("does not select again a finding that left the list and came back", async () => {
+    const asked = backend(THREE, asRole("editor"));
+    const user = userEvent.setup();
+    const app = renderApp("/findings");
+    await rows();
+    await select(user, "Spike number 1");
+    await select(user, "Spike number 2");
+    expect(screen.getByText("2 selected")).toBeTruthy();
+    // A reload without the first finding, then one with it again.
+    asked.items = [finding(2, { severity: "critical" }), finding(3)];
+    await app.client.invalidateQueries();
+    await waitFor(() => expect(screen.getByText("1 selected")).toBeTruthy());
+    asked.items = THREE;
+    await app.client.invalidateQueries();
+    await waitFor(async () => expect(await rows()).toHaveLength(3));
+    expect(screen.getByText("1 selected")).toBeTruthy();
+    const back = screen.getByText("Spike number 1").closest('[role="row"]') as HTMLElement;
+    expect((within(back).getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("keeps a dialog and its Cancel while its request runs", async () => {
+    const asked = backend(THREE, asRole("editor"));
+    let answer: (value: Response) => void = () => undefined;
+    asked.bulk = () => new Promise<Response>((resolve) => (answer = resolve)) as unknown as Response;
+    const user = userEvent.setup();
+    renderApp("/findings");
+    await rows();
+    await select(user, "Spike number 1");
+    await user.click(screen.getByRole("button", { name: "Resolve…" }));
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Resolve" }));
+    await waitFor(() => expect((within(dialog).getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true));
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    answer(json({ updated: ["f-1"], failed: [] }));
+    await waitFor(() => expect(status()).toBe("1 finding resolved."));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(asked.bulks).toHaveLength(1);
+  });
+
+  it("does not put typed text over a saved filter applied while it was waiting", async () => {
+    debounce.ms = 150;
+    const asked = backend(THREE, asRole("viewer"));
+    asked.filters = [{ id: "sf-1", name: "Feeders", query: "q=feeder", created_at: "2026-11-01T00:00:00Z" }];
+    const user = userEvent.setup();
+    const app = renderApp("/findings");
+    await rows();
+    await user.click(await screen.findByRole("button", { name: "Saved filters (1)" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "pump" } });
+    await user.click(screen.getByRole("button", { name: "Feeders" }));
+    await waitFor(() => expect(searchOf(app)).toEqual({ q: "feeder" }));
+    expect((screen.getByRole("textbox", { name: "Search" }) as HTMLInputElement).value).toBe("feeder");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(searchOf(app)).toEqual({ q: "feeder" });
+    expect(listRequests(asked).some((query) => query.get("q") === "pump")).toBe(false);
+  });
+
   it("names what could not be changed", async () => {
     const asked = backend(THREE, asRole("editor"));
     asked.bulk = () => ({
