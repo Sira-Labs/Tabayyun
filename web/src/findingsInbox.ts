@@ -199,8 +199,10 @@ export type FindingChange = {
 export type BulkFailure = { id: string; error: "not_found" | "transition"; status: string | null };
 export type BulkResult = { updated: string[]; failed: BulkFailure[] };
 /** What a bulk change over several requests did: the results of the requests that were
- * answered, and when one failed, the ids that were not sent or not answered, with the error. */
-export type BulkOutcome = BulkResult & { unsent: string[]; error: unknown };
+ * answered and, when one failed, the ids without an answer, with the error. A request that
+ * failed may still have been applied by the server (a lost response), so those ids have an
+ * unknown outcome; the requests after it were not sent. */
+export type BulkOutcome = BulkResult & { unanswered: string[]; error: unknown };
 /** The API's limit on the ids of one bulk request. */
 export const BULK_MAX = 500;
 
@@ -283,10 +285,11 @@ export const inboxApi = {
   change: (id: string, change: FindingChange) => apiSend<InboxFinding>("PATCH", finding(id), change),
   /** One change to many findings: at most 500 ids a request, one request after the other.
    * A request that fails after others were answered does not throw: what was changed stays
-   * changed, so the outcome carries the results so far, the ids left over and the error.
-   * It throws only when the first request fails, when nothing was changed. */
+   * changed, so the outcome carries the results so far, the ids without an answer and the
+   * error. It throws only when the first request fails; even then the server may have applied
+   * it, so the caller reloads in both cases. */
   bulk: async (ids: readonly string[], change: FindingChange): Promise<BulkOutcome> => {
-    const outcome: BulkOutcome = { updated: [], failed: [], unsent: [], error: null };
+    const outcome: BulkOutcome = { updated: [], failed: [], unanswered: [], error: null };
     const parts = chunks(ids, BULK_MAX);
     for (const [index, part] of parts.entries()) {
       try {
@@ -295,7 +298,7 @@ export const inboxApi = {
         outcome.failed.push(...answer.failed);
       } catch (error) {
         if (index === 0) throw error;
-        outcome.unsent = parts.slice(index).flat();
+        outcome.unanswered = parts.slice(index).flat();
         outcome.error = error;
         break;
       }

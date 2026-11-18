@@ -28,11 +28,16 @@ export function BulkActions({ ids, onDone }: { ids: readonly string[]; onDone: (
         onDone(bulkMessage(action.done, outcome));
         return;
       }
-      // A later request failed: what was changed is reported, the rest stays selected.
+      // A later request failed: what was changed is reported. The rest got no answer, which
+      // does not say it was not applied; it stays selected, and the reloaded list shows it.
       const why = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
-      const left = `${formatNumber(outcome.unsent.length)} were not sent and stay selected (${why}).`;
-      onDone(`${bulkMessage(action.done, outcome)} ${left}`, outcome.unsent);
+      const n = outcome.unanswered.length;
+      const left = `${formatNumber(n)} got no answer and ${n === 1 ? "stays" : "stay"} selected: check the reloaded list before trying again (${why}).`;
+      onDone(`${bulkMessage(action.done, outcome)} ${left}`, outcome.unanswered);
     },
+    // The first request failed. The server may have applied it all the same (a response that
+    // was lost), so the list and the groups are reloaded before anyone tries again.
+    onError: () => void client.invalidateQueries({ queryKey: inboxKeys.all }),
   });
   const send: Send = (action) => bulk.mutate(action);
   // A request that was sent cannot be taken back: while it runs the dialog stays, so its

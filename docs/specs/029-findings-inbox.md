@@ -180,6 +180,9 @@ Each finding in a response gains `series_name`, `asset_path`, `assignee`
     left the list and came back is not selected again.
   - A value that replaces the search text from outside drops a commit of typed text that
     was still waiting.
+  - A bulk request without an answer has an unknown outcome (the server may have applied it
+    and the response was lost): the list is reloaded also when the first request fails, and
+    the message asks to check it before trying again.
 
 ## Out of scope
 

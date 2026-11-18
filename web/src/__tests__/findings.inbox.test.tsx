@@ -224,14 +224,37 @@ describe("findings.inbox", () => {
     await rows();
     await user.click(screen.getByRole("checkbox", { name: "Select all loaded findings" }));
     await user.click(screen.getByRole("button", { name: "Acknowledge" }));
-    await waitFor(() => expect(status()).toMatch(/^500 findings acknowledged\. 1 were not sent and stay selected \(/));
+    await waitFor(() =>
+      expect(status()).toMatch(/^500 findings acknowledged\. 1 got no answer and stays selected: check the reloaded list before trying again \(/),
+    );
     expect(asked.bulks.map((b) => b.ids.length)).toEqual([500, 1]);
-    // The list was asked again, and only the unsent finding is still selected: a retry sends it alone.
+    // The list was asked again, and only the finding without an answer is still selected: a retry sends it alone.
     expect(within(screen.getByRole("group", { name: "Actions on the selected findings" })).getByText("1 selected")).toBeTruthy();
     asked.bulk = (ids) => ({ updated: ids, failed: [] });
     await user.click(screen.getByRole("button", { name: "Acknowledge" }));
     await waitFor(() => expect(status()).toBe("1 finding acknowledged."));
     expect(asked.bulks[2]?.ids).toEqual(asked.bulks[1]?.ids);
+  });
+
+  it("reloads after a request whose answer was lost, because the server may have applied it", async () => {
+    const asked = backend(THREE, asRole("editor"));
+    // The server acknowledges the finding, and the response never arrives.
+    asked.bulk = () => {
+      asked.items = [finding(1, { status: "acked" }), finding(2, { severity: "critical" }), finding(3)];
+      throw new TypeError("Failed to fetch");
+    };
+    const user = userEvent.setup();
+    renderApp("/findings");
+    await rows();
+    await select(user, "Spike number 1");
+    const before = listRequests(asked).length;
+    await user.click(screen.getByRole("button", { name: "Acknowledge" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/^Could not change the findings: /);
+    // The list was asked again and shows what the server did; the selection is kept.
+    await waitFor(() => expect(listRequests(asked).length).toBeGreaterThan(before));
+    const row = (await screen.findByText("Spike number 1")).closest('[role="row"]') as HTMLElement;
+    await waitFor(() => expect(within(row).getAllByRole("cell")[5]?.textContent).toBe("acked"));
+    expect(screen.getByText("1 selected")).toBeTruthy();
   });
 
   it("does not select again a finding that left the list and came back", async () => {
