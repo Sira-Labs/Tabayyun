@@ -116,26 +116,26 @@ Each finding in a response gains `series_name`, `asset_path`, `assignee`
 
 ## Acceptance criteria
 
-- [ ] The list filters by assignee, feedback, text, asset and source, alone and combined
+- [x] The list filters by assignee, feedback, text, asset and source, alone and combined
       with the existing filters, and returns series name, asset path and assignee.
-- [ ] Groups by check, series and asset count what the list returns for the same filter, and
+- [x] Groups by check, series and asset count what the list returns for the same filter, and
       a group's key lists exactly that group.
-- [ ] Muting with an end stores it; a past or too distant end, or an end with another
+- [x] Muting with an end stores it; a past or too distant end, or an end with another
       status, is a 422; the periodic task reopens expired mutes and no others.
-- [ ] Assigning to an editor works, to a viewer or a user of another org is a 422, and null
+- [x] Assigning to an editor works, to a viewer or a user of another org is a 422, and null
       unassigns.
-- [ ] `false_positive` is stored without a status change and can be removed.
-- [ ] A bulk change over findings in different states changes those it may and reports the
+- [x] `false_positive` is stored without a status change and can be removed.
+- [x] A bulk change over findings in different states changes those it may and reports the
       others; more than 500 ids is a 422.
-- [ ] Every action writes its audit event with the acting user; viewers get 403 on every
+- [x] Every action writes its audit event with the acting user; viewers get 403 on every
       write to a finding.
-- [ ] The export contains the filtered findings as CSV with safe cells and says when it was
+- [x] The export contains the filtered findings as CSV with safe cells and says when it was
       cut.
-- [ ] Saved filters are created, listed and deleted per user; another user neither sees nor
+- [x] Saved filters are created, listed and deleted per user; another user neither sees nor
       deletes them.
-- [ ] The page filters through the URL, groups, selects, performs every action on a
+- [x] The page filters through the URL, groups, selects, performs every action on a
       selection, saves and applies filters, and stays responsive with 10 000 loaded findings.
-- [ ] Another org's findings and filters give 404, also inside a bulk request (`not_found`).
+- [x] Another org's findings and filters give 404, also inside a bulk request (`not_found`).
 
 ## Test cases
 
@@ -148,6 +148,25 @@ Each finding in a response gains `series_name`, `asset_path`, `assignee`
 - **Web** (Vitest): `findings.inbox` (filters in the URL, grouping, selection and each bulk
   action with its dialog, partial failure message, saved filters, export link, viewers see
   no actions), `findings.virtual` (only the visible rows are rendered).
+
+## Implementation notes
+
+- `PATCH /api/findings/{id}` keeps its old body (`status`, `reason`) and now refuses unknown
+  fields; its lifecycle errors are unchanged. The service function behind it moved to
+  `services/triage.py`, which records every change.
+- Saved filters store the page's search string as it is, grouping included, so a filter can
+  open the page grouped.
+- The assignee list holds the users with at least the editor role, by name, without e-mail
+  addresses: viewers may read it.
+- Groups are counted in one query with a count per severity; a group's `key` is passed back
+  as `check_id`, `series_id` or `asset_path`.
+- The table is virtualised with `@tanstack/react-virtual` at a fixed row height; the React
+  compiler leaves that component unmemoised, which the linter reports as a notice.
+- More than 500 selected findings are sent in requests of 500, one after another.
+- "Stays responsive with 10 000 loaded findings" is shown by the test that only a screenful
+  of rows is in the document; it was not measured in a browser with that many.
+- A run interrupted by a usage limit left the web half unfinished overnight; it was completed
+  and verified in the next run.
 
 ## Out of scope
 

@@ -549,6 +549,21 @@ starts; the plan is the backlog until then.
         window's own profile (out of scope).
       - Not exercised here: the hourly task and the job on a live worker queue on staging; the
         claim, the queued jobs and the computation are covered by tests.
+- [x] **029 Findings inbox** — `docs/specs/029-findings-inbox.md` (S10-3, 17 – 18 Nov). Every
+      criterion is met.
+      - The lifecycle stays ADR-0013's; a mute can carry an end, and a periodic task opens
+        expired mutes through a SECURITY DEFINER function (no user acted, so no audit event).
+      - Assignment and false-positive feedback do not change the status; the feedback is
+        stored for later use (threshold tuning is out of scope).
+      - A bulk change applies to each finding on its own terms and reports the rest; a change
+        that is wrong in itself refuses the whole request.
+      - Saved filters are personal and not audited; viewers may save them.
+      - The CSV export prefixes cells a spreadsheet would run as formulas, and stops at
+        50 000 rows with a header saying so.
+      - `findings` may be a hypertable: the new foreign key and check are added validated, in
+        the migration's transaction.
+      - Not exercised here: the mute-expiry task on a live worker queue, and the page with
+        10 000 findings in a real browser (the test shows only a screenful is drawn).
 - [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
       `tabayyun-api` and `tabayyun-worker` on staging; then a `synthetic` source with
       `poll_interval_s` gives staging a live, polling source for demos.

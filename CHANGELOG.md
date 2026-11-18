@@ -30,8 +30,22 @@ All notable changes to this project are documented here. The format follows
     thresholds it gives the checks with the change against the version before.
   - `GET /api/series/{id}/baselines` and `POST /api/series/{id}/baselines`; dataset runs name
     the versions they used in `stats.baselines`. Migration 0014 adds `series_baselines`.
+- Findings inbox (spec 029):
+  - `/findings` lists the findings of a workspace across all series, filtered by status,
+    severity, dimension, check, assignee, feedback and text, with the filter in the URL.
+    Findings can be grouped by check, series or asset; the table loads while scrolling and
+    draws only the visible rows.
+  - Editors acknowledge, mute until a date with a reason, resolve, reopen, assign and mark
+    false positives, one finding or many at once; what could not be changed is named. An
+    expired mute opens the finding again.
+  - Filters can be saved per user, and the current list exported as CSV.
+  - Every change of a finding is written to the audit log with the acting user.
+  - `GET /api/findings` gained filters and returns series name, asset path, assignee, the end
+    of a mute and feedback; new are `/api/findings/groups`, `/bulk`, `/assignees`, `/export`
+    and `/api/finding-filters`. Migration 0015 adds the columns and `finding_filters`.
 
 ### Changed
+- `PATCH /api/findings/{id}` refuses fields it does not know (it ignored them before).
 - Dataset runs judge a series against its stored baseline once it has one, no longer against
   the window they are checking. Rate-of-change, spike, noise, drift and resolution findings of
   a series can change with its first baseline. Upload runs are unchanged.
