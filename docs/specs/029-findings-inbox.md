@@ -168,6 +168,19 @@ Each finding in a response gains `series_name`, `asset_path`, `assignee`
 - A run interrupted by a usage limit left the web half unfinished overnight; it was completed
   and verified in the next run.
 
+- From the review:
+  - Assignee, feedback and a mute's end survive when a later report merges into the finding,
+    also when its window grows backwards and the row is rewritten.
+  - The CSV uses CRLF line ends, so a cell with a carriage return is quoted and cannot break
+    a record; cells that start with a tab or a carriage return are prefixed too.
+  - When a later request of a bulk change over more than 500 findings fails, what was
+    changed is reported and reloaded, and only the findings not sent stay selected.
+  - A dialog stays open, with Cancel disabled, while its request runs.
+  - The stored selection is pruned whenever the loaded findings change, so a finding that
+    left the list and came back is not selected again.
+  - A value that replaces the search text from outside drops a commit of typed text that
+    was still waiting.
+
 ## Out of scope
 
 - Live updates of the page: S10-4 (SSE).
