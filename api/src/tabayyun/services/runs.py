@@ -482,6 +482,10 @@ async def _cache_upload(
             run = await session.get(Run, run_id, with_for_update=True)
             if run is not None:
                 run.stats = {**(run.stats or {}), "cache": info}
+                # Who reloaded on `run.completed` has the run without its cache and the series
+                # without its coverage: tell them again once both are stored (spec 030).
+                scope = Scope(org_id=run.org_id, workspace_id=run.workspace_id)
+                await events.publish(session, scope, events.RUN_UPDATED, {"run_id": str(run_id)})
     except SQLAlchemyError:
         run_log.exception("cache.record_failed")
     return info

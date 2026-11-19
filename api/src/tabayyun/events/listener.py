@@ -55,8 +55,10 @@ class Listener:
             pass
 
     async def _run(self) -> None:
-        """Listen until cancelled; after a lost connection, connect again and tell every
-        stream to reload, since notifications sent in between are gone."""
+        """Listen until cancelled; after a lost connection, connect again. Every time the
+        channel is listened on anew, also the first, the open streams are told to reload:
+        what was published while nobody listened is gone, and a stream can be open before
+        the first `LISTEN` took effect."""
         backoff = self._backoff_first_s
         first = True
         while True:
@@ -67,8 +69,7 @@ class Listener:
                     # The channel is a constant of this module, not input.
                     await conn.execute(f"LISTEN {CHANNEL}")
                     log.info("events.listening", reconnected=not first)
-                    if not first:
-                        self._broker.resync_all()
+                    self._broker.resync_all()
                     first = False
                     backoff = self._backoff_first_s
                     self._listening.set()

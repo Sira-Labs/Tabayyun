@@ -12,7 +12,7 @@ import pytest
 from tabayyun.authz.scope import Scope
 from tabayyun.events import FINDING_CREATED, RESYNC, RUN_COMPLETED, Event, MalformedEventError
 from tabayyun.events.broker import BUFFER, Broker, TooManyStreamsError
-from tabayyun.events.stream import KEEP_ALIVE, frame, stream
+from tabayyun.events.stream import KEEP_ALIVE, EventStreamResponse, frame, stream
 
 ORG_A, ORG_B = uuid.uuid4(), uuid.uuid4()
 WS_1, WS_2 = uuid.uuid4(), uuid.uuid4()
@@ -151,3 +151,59 @@ async def test_stream_keep_alive_and_max_age():
     assert chunks[0].startswith(b"retry: ")
     assert 2 <= len(chunks[1:]) <= 6
     assert set(chunks[1:]) == {KEEP_ALIVE}
+
+
+async def test_response_cuts_off_a_client_that_stopped_reading():
+    """A send that never returns does not keep the stream past its deadline, and its place
+    is given back."""
+    broker = Broker(max_streams=1)
+    subscription = broker.subscribe(SCOPE)
+    sent: list[dict] = []
+    stalled = asyncio.Event()
+
+    async def receive() -> dict:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+        if message["type"] == "http.response.body":
+            # The client took the first frame and reads no more.
+            stalled.set()
+            await asyncio.Event().wait()
+
+    response = EventStreamResponse(
+        stream(subscription, heartbeat_s=0.01, max_age_s=60),
+        deadline_s=0.2,
+        on_close=lambda: broker.unsubscribe(subscription),
+    )
+    scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"}, "method": "GET"}
+    await asyncio.wait_for(response(scope, receive, send), 5)
+    assert stalled.is_set()
+    assert sent[0]["type"] == "http.response.start" and sent[0]["status"] == 200
+    assert broker.streams == 0
+
+
+async def test_response_gives_the_place_back_when_the_stream_ends():
+    """A stream that ends at its age closes the response and frees its place."""
+    broker = Broker(max_streams=1)
+    subscription = broker.subscribe(SCOPE)
+    body = bytearray()
+
+    async def receive() -> dict:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def send(message: dict) -> None:
+        if message["type"] == "http.response.body":
+            body.extend(message.get("body", b""))
+
+    response = EventStreamResponse(
+        stream(subscription, heartbeat_s=0.02, max_age_s=0.08),
+        deadline_s=5,
+        on_close=lambda: broker.unsubscribe(subscription),
+    )
+    scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"}, "method": "GET"}
+    await asyncio.wait_for(response(scope, receive, send), 5)
+    assert bytes(body).startswith(b"retry: 5000")
+    assert broker.streams == 0

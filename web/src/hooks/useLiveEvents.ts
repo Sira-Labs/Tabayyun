@@ -21,14 +21,14 @@ export function eventsUrl(workspaceId: string): string {
 }
 
 /** Open the stream of `workspaceId` and reload `client`'s queries as its events say; returns
- * what closes it. After the stream was lost and is back, and on `resync`, everything a
- * missed event could have changed is reloaded. */
+ * what closes it. Whenever the stream opens, the first time too, and on `resync`, everything
+ * a missed event could have changed is reloaded: nothing replays what was published between
+ * a page's own requests and the moment its stream was listening. */
 export function connectLiveEvents(client: QueryClient, workspaceId: string): () => void {
   const pending = new Set<string>();
   let gather: ReturnType<typeof setTimeout> | undefined;
   let reopen: ReturnType<typeof setTimeout> | undefined;
   let source: EventSource | undefined;
-  let lost = false;
 
   const flush = () => {
     gather = undefined;
@@ -44,12 +44,8 @@ export function connectLiveEvents(client: QueryClient, workspaceId: string): () 
     reopen = undefined;
     const stream = new EventSource(eventsUrl(workspaceId));
     source = stream;
-    stream.onopen = () => {
-      if (lost) reload(ALL_QUERIES);
-      lost = false;
-    };
+    stream.onopen = () => reload(ALL_QUERIES);
     stream.onerror = () => {
-      lost = true;
       // Closed for good (the server refused the stream): try again later. A stream that was
       // open and ended is reconnected by the browser, and stays CONNECTING meanwhile.
       if (stream.readyState === EventSource.CLOSED && reopen === undefined) {
@@ -58,6 +54,8 @@ export function connectLiveEvents(client: QueryClient, workspaceId: string): () 
       }
     };
     stream.addEventListener("run.completed", () => reload(RUN_QUERIES));
+    // A completed run's record changed afterwards (an upload's cache and coverage).
+    stream.addEventListener("run.updated", () => reload(RUN_QUERIES));
     stream.addEventListener("finding.created", () => reload(FINDING_QUERIES));
     stream.addEventListener("resync", () => reload(ALL_QUERIES));
   };

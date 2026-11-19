@@ -133,8 +133,10 @@ The web app holds one `text/event-stream` request to `GET /api/events` per open 
 030). The api sends a comment every `TABAYYUN_EVENTS_HEARTBEAT_S` seconds (default 15), so a
 proxy with an idle timeout of a minute keeps the stream, and ends each stream after
 `TABAYYUN_EVENTS_MAX_AGE_S` (default 900); the browser connects again. One api process
-serves at most `TABAYYUN_EVENTS_MAX_STREAMS` streams (default 200) and holds one extra
-database connection while any is open. The bundled Caddy passes the stream on as it comes;
+serves at most `TABAYYUN_EVENTS_MAX_STREAMS` streams (default 200). From its first stream
+until it shuts down, also after the last tab was closed, an api process holds one database
+connection more than its pool (`application_name` `tabayyun-events`): count one per api
+process in the database's connection budget. The bundled Caddy passes the stream on as it comes;
 behind nginx the response's `X-Accel-Buffering: no` turns buffering off for it. A proxy that
 buffers or blocks the stream costs only the live updates: the pages load as before.
 

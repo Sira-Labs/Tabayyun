@@ -39,6 +39,7 @@ channel `tabayyun_events`:
 |---|---|---|
 | `run.completed` | a run turned `succeeded` or `failed` (also when the reaper fails a lost run) | `run_id`, `status`, `n_findings_new` |
 | `finding.created` | a run that succeeded stored at least one new finding | `run_id`, `count` |
+| `run.updated` | a completed run's record changed afterwards: an upload's cache and coverage were written | `run_id` |
 
 `finding.created` is one event per run with the number of new findings, not one per finding:
 a dataset run can store thousands.
@@ -90,9 +91,10 @@ data: {"type":"resync"}
 ### Web
 
 `useLiveEvents()` in the page frame opens the stream for the current workspace and keeps it
-for as long as the frame is mounted. On `run.completed` it reloads the queries of runs,
-series, scores and suites; on `finding.created` those of findings (the inbox included); on
-`resync`, and when the stream opens again after an error, all of them. Reloads are gathered:
+for as long as the frame is mounted. On `run.completed` and `run.updated` it reloads the
+queries of runs, series, scores and suites; on `finding.created` those of findings (the
+inbox included); on `resync`, and whenever the stream opens (the first time too), all of
+them. Reloads are gathered:
 at most one per second.
 
 ## Behaviour
@@ -105,12 +107,15 @@ at most one per second.
    the streams of that event's org and workspace. A stream holds no database connection:
    the role is checked in a short transaction before the stream starts.
 3. **Losing the connection.** The listener connects again with a growing pause (1 s to
-   30 s). After it is back, every stream gets `resync`, because notifications sent in
-   between are gone.
+   30 s). Every time it listens anew, the first time too, every open stream gets `resync`:
+   notifications sent while nobody listened are gone, and a stream can be open before the
+   first `LISTEN` took effect.
 4. **Slow clients.** A stream buffers up to 100 events. When the buffer is full it is
    emptied and the stream gets one `resync` instead.
 5. **Ending.** A stream ends when the client goes away, when it is `MAX_AGE_S` old, or at
-   shutdown. In each case its place is given back.
+   shutdown. A client that keeps the connection but stops reading cannot hold it: five
+   seconds past the maximum age the response is cut off. In each case the stream's place is
+   given back.
 6. **Tenancy.** A stream only ever gets events whose `org_id` and `workspace_id` equal its
    own; events of other orgs and workspaces are dropped by the process before any stream
    sees them. The channel carries ids, a status and counts, and no data of a series.
@@ -136,14 +141,18 @@ at most one per second.
 - [x] The stream holds no database connection while it is open.
 - [x] In the web app, the findings inbox shows a new finding after `finding.created` without
       a reload by the user, and the runs list a finished run after `run.completed`.
-- [x] Several events within a second cause one reload; a reopened stream reloads everything.
+- [x] Several events within a second cause one reload; a stream that opens reloads everything.
+- [x] A client that stopped reading is cut off after the maximum age and frees its place.
+- [x] An upload publishes `run.updated` after its cache and coverage are stored.
 
 ## Test cases
 
 - **API, no database** (`api/tests/test_events.py`): `encode_decode_round_trip`,
   `decode_refuses_malformed`, `broker_delivers_by_org_and_workspace`,
   `broker_overflow_resyncs`, `broker_limit_and_release`, `stream_formats_events`,
-  `stream_keep_alive_and_max_age`, `sse_frames`.
+  `stream_keep_alive_and_max_age`, `sse_frames`,
+  `response_cuts_off_a_client_that_stopped_reading`,
+  `response_gives_the_place_back_when_the_stream_ends`.
 - **API, database** (`api/tests/db/test_events.py`): `run_publishes_completed_and_created`,
   `failed_run_publishes_completed`, `rolled_back_run_publishes_nothing`,
   `reaper_publishes_completed`, `listener_delivers_and_resyncs_after_reconnect`,
@@ -170,6 +179,20 @@ at most one per second.
   opens a new one after 30 seconds.
 - The failed-run test fails a queued run through the service: an upload that cannot be
   parsed is refused with 422 before a run exists.
+
+- From the review:
+  - The stream's own age check runs only when its generator is resumed, and a client that
+    stops reading blocks the send before that. The response therefore has a deadline of its
+    own (`EventStreamResponse`), which also gives the place back.
+  - Every successful `LISTEN` resyncs the open streams, and the web app reloads whenever
+    its stream opens, the first time included: between a page's own requests and the
+    moment its stream is listened for, an event can pass that nothing replays. The cost is
+    one extra reload of the visible queries per page load.
+  - An upload's cache and coverage are written after the run completed, outside its
+    transaction; `run.updated` tells the pages that reloaded on `run.completed` to do so
+    once more.
+  - An api process keeps its listening connection from its first stream to its shutdown;
+    the deployment notes say so for the connection budget.
 
 ## Out of scope
 

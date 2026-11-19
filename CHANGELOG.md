@@ -45,8 +45,9 @@ All notable changes to this project are documented here. The format follows
     and `/api/finding-filters`. Migration 0015 adds the columns and `finding_filters`.
 - Live events (spec 030):
   - `GET /api/events` is a server-sent event stream of the workspace: `run.completed` when a
-    run succeeded or failed (also when the reaper fails a lost run) and `finding.created`
-    when a run stored new findings. Events travel through Postgres `LISTEN`/`NOTIFY`, so the
+    run succeeded or failed (also when the reaper fails a lost run), `finding.created`
+    when a run stored new findings, and `run.updated` when an upload's cache and coverage
+    were written after it completed. Events travel through Postgres `LISTEN`/`NOTIFY`, so the
     worker's runs reach the browsers of every api process, and only with the commit that
     stored them.
   - The web app holds one stream per page frame and reloads runs, findings, series and

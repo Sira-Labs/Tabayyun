@@ -23,6 +23,14 @@ async function stream(opened: FakeEventSource[], n = 1): Promise<FakeEventSource
   return opened[n - 1] as FakeEventSource;
 }
 
+/** Accept the stream and wait until the reload its opening causes is over. */
+async function accepted(source: FakeEventSource, asked: { gets: string[] }) {
+  const before = asked.gets.length;
+  source.accept();
+  await waitFor(() => expect(asked.gets.length).toBeGreaterThan(before));
+  await settle(40);
+}
+
 describe("live.events", () => {
   it("opens the stream of the current workspace and closes it with the page", async () => {
     const opened = fakeEventSource();
@@ -41,10 +49,22 @@ describe("live.events", () => {
     const asked = backend([finding(1)]);
     renderApp("/findings");
     const source = await stream(opened);
-    source.accept();
     await screen.findByText("Spike number 1");
+    await accepted(source, asked);
     asked.items = [finding(2), finding(1)];
     source.emit("finding.created", { run_id: "r1", count: 1 });
+    expect(await screen.findByText("Spike number 2")).toBeTruthy();
+  });
+
+  it("reloads when the stream first opens: a finding stored before it listened is not missed", async () => {
+    const opened = fakeEventSource();
+    const asked = backend([finding(1)]);
+    renderApp("/findings");
+    const source = await stream(opened);
+    await screen.findByText("Spike number 1");
+    // Stored after the page asked for its list and before the stream was accepted: no event.
+    asked.items = [finding(2), finding(1)];
+    source.accept();
     expect(await screen.findByText("Spike number 2")).toBeTruthy();
   });
 
@@ -53,8 +73,8 @@ describe("live.events", () => {
     const asked = backend([finding(1)]);
     renderApp("/findings");
     const source = await stream(opened);
-    source.accept();
     await screen.findByText("Spike number 1");
+    await accepted(source, asked);
     const before = listRequests(asked).length;
     for (let n = 0; n < 5; n += 1) {
       source.emit("run.completed", { run_id: `r${n}`, status: "succeeded", n_findings_new: 1 });
@@ -70,8 +90,8 @@ describe("live.events", () => {
     const asked = backend([finding(1)]);
     renderApp("/findings");
     const source = await stream(opened);
-    source.accept();
     await screen.findByText("Spike number 1");
+    await accepted(source, asked);
     const before = listRequests(asked).length;
     source.emit("run.completed", { run_id: "r1", status: "failed", n_findings_new: 0 });
     await settle(80);
@@ -80,19 +100,28 @@ describe("live.events", () => {
 
   it("shows a finished run in the runs list after run.completed", async () => {
     const opened = fakeEventSource();
-    let runs = [makeRun({ id: "00000000-0000-0000-0000-000000000001", status: "running" })];
+    const id = "00000000-0000-0000-0000-000000000001";
+    let runs = [makeRun({ id, status: "running" })];
+    let asks = 0;
     stubFetch((url) => {
-      if (url === "/api/runs?limit=25") return { items: runs, next_cursor: null };
-      throw new Error(`unexpected ${url}`);
+      if (url !== "/api/runs?limit=25") throw new Error(`unexpected ${url}`);
+      asks += 1;
+      return { items: runs, next_cursor: null };
     });
     renderApp("/runs");
     const source = await stream(opened);
-    source.accept();
     expect(await screen.findByText("running")).toBeTruthy();
-    runs = [makeRun({ id: "00000000-0000-0000-0000-000000000001", status: "succeeded" })];
-    source.emit("run.completed", { run_id: runs[0]?.id, status: "succeeded", n_findings_new: 0 });
+    source.accept();
+    await waitFor(() => expect(asks).toBe(2));
+    await settle(40);
+    runs = [makeRun({ id, status: "succeeded" })];
+    source.emit("run.completed", { run_id: id, status: "succeeded", n_findings_new: 0 });
     expect(await screen.findByText("succeeded")).toBeTruthy();
     expect(screen.queryByText("running")).toBeNull();
+    // The run's record changed once more after it completed: the list is asked again.
+    const before = asks;
+    source.emit("run.updated", { run_id: id });
+    await waitFor(() => expect(asks).toBe(before + 1));
   });
 
   it("reloads after resync, and after the stream was lost and is back", async () => {
@@ -100,10 +129,8 @@ describe("live.events", () => {
     const asked = backend([finding(1)]);
     renderApp("/findings");
     const source = await stream(opened);
-    source.accept();
     await screen.findByText("Spike number 1");
-    // The first open reloads nothing: the page has just loaded.
-    await settle(60);
+    await accepted(source, asked);
     const first = listRequests(asked).length;
 
     source.emit("resync");

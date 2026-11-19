@@ -52,16 +52,21 @@ async def _post_run(client, csv: bytes) -> str:
 
 async def test_run_publishes_completed_and_created(admin_env, db_url):
     """A succeeded run tells its status and its new findings; the same upload again finds
-    nothing new and says only that it completed."""
+    nothing new and says only that it completed. An upload's cache and coverage are stored
+    after the run completed, so `run.updated` follows each: a page that reloaded on
+    `run.completed` reloads once more."""
     async with admin_env.client() as c, heard(db_url) as got:
         first = await _post_run(c, faulty_csv(["gap", "flatline"]))
         second = await _post_run(c, faulty_csv(["gap", "flatline"]))
     new = admin_env.scalar("SELECT (stats->>'n_findings_new')::int FROM runs WHERE id = :id", id=first)
     assert new > 0
+    assert admin_env.scalar("SELECT stats->'cache'->>'written' FROM runs WHERE id = :id", id=first) == "true"
     assert [(e.type, e.data) for e in got] == [
         (events.RUN_COMPLETED, {"run_id": first, "status": "succeeded", "n_findings_new": new}),
         (events.FINDING_CREATED, {"run_id": first, "count": new}),
+        (events.RUN_UPDATED, {"run_id": first}),
         (events.RUN_COMPLETED, {"run_id": second, "status": "succeeded", "n_findings_new": 0}),
+        (events.RUN_UPDATED, {"run_id": second}),
     ]
     assert {(e.org_id, e.workspace_id) for e in got} == {(DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID)}
 
@@ -131,8 +136,9 @@ async def test_reaper_publishes_completed(admin_env, db_url):
 
 
 async def test_listener_delivers_and_resyncs_after_reconnect(admin_env, db_url):
-    """The listener hands events to the broker, drops what is not an event, and after losing
-    its connection comes back and tells the streams to reload."""
+    """The listener tells the streams that were open before it listened to reload, hands
+    events to the broker, drops what is not an event, and after losing its connection comes
+    back and tells the streams to reload again."""
     broker = Broker(max_streams=5)
     listener = Listener(libpq_conninfo(app_url(db_url)), broker, backoff_first_s=0.05)
     subscription = broker.subscribe(SCOPE)
@@ -140,6 +146,8 @@ async def test_listener_delivers_and_resyncs_after_reconnect(admin_env, db_url):
     listener.ensure_started()
     try:
         assert await listener.listening(5)
+        # The stream was there before the channel was listened on: it may have missed events.
+        assert subscription.queue.get_nowait().type == events.RESYNC
         async with admin_env.client():
             app = admin_env.apps[-1]
             first = uuid.uuid4()
@@ -241,7 +249,8 @@ async def test_route_streams_the_workspaces_events(admin_env):
     body = response.text
     assert body.startswith("retry: 5000\n\n: connected\n\n")
     assert ": keep-alive\n\n" in body
-    frames = [f for f in body.split("\n\n") if f.startswith("event: ")]
+    assert body.count("event: resync\n") == 1
+    frames = [f for f in body.split("\n\n") if f.startswith("event: ") and "resync" not in f]
     told = [(f.split("\n")[0], json.loads(f.split("data: ", 1)[1])) for f in frames]
     assert [(name, data["run_id"]) for name, data in told] == [
         ("event: run.completed", str(mine)),

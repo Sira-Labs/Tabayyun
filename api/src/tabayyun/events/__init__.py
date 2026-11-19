@@ -24,6 +24,8 @@ CHANNEL = "tabayyun_events"
 VERSION = 1
 
 RUN_COMPLETED = "run.completed"
+# A completed run's record changed afterwards (an upload's cache and coverage were written).
+RUN_UPDATED = "run.updated"
 FINDING_CREATED = "finding.created"
 # Not published by anyone: told to a stream that may have missed events.
 RESYNC = "resync"

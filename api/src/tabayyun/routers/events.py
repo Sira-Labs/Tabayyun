@@ -7,7 +7,6 @@ a database connection: a request-scoped session would stay open for as long as t
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -20,9 +19,9 @@ from tabayyun.authz.policy import ForbiddenError, NotVisibleError, authorize
 from tabayyun.authz.roles import Action
 from tabayyun.authz.scope import Scope
 from tabayyun.db import for_org
-from tabayyun.events.broker import Broker, Subscription, TooManyStreamsError
+from tabayyun.events.broker import Broker, TooManyStreamsError
 from tabayyun.events.listener import Listener
-from tabayyun.events.stream import stream
+from tabayyun.events.stream import GRACE_S, EventStreamResponse, stream
 from tabayyun.settings import Settings
 
 router = APIRouter(prefix="/api/events", tags=["events"])
@@ -53,23 +52,14 @@ async def _scope(request: Request, principal: Principal, workspace: str | None) 
     return Scope(org_id=principal.org_id, workspace_id=workspace_id)
 
 
-async def _frames(broker: Broker, subscription: Subscription, settings: Settings) -> AsyncIterator[bytes]:
-    """The stream's frames; its place is given back however it ends."""
-    try:
-        async for chunk in stream(
-            subscription, heartbeat_s=settings.events_heartbeat_s, max_age_s=settings.events_max_age_s
-        ):
-            yield chunk
-    finally:
-        broker.unsubscribe(subscription)
-
-
+# Documented as a plain streaming response: FastAPI reads the status of an OpenAPI
+# operation from the response class's signature, which the subclass narrows.
 @router.get("", response_class=StreamingResponse)
 async def events(
     request: Request,
     principal: Annotated[Principal, Depends(get_principal)],
     workspace: Annotated[str | None, Query(max_length=64)] = None,
-) -> StreamingResponse:
+) -> EventStreamResponse:
     """`text/event-stream` of the workspace's events: `run.completed`, `finding.created` and
     `resync` (reload: events may have been missed). 404 without a role in the workspace, 503
     `too_many_streams` when the process serves as many streams as it may."""
@@ -84,6 +74,14 @@ async def events(
         ) from exc
     listener.ensure_started()
     settings: Settings = request.app.state.settings
-    return StreamingResponse(
-        _frames(broker, subscription, settings), media_type="text/event-stream", headers=STREAM_HEADERS
+    frames = stream(
+        subscription, heartbeat_s=settings.events_heartbeat_s, max_age_s=settings.events_max_age_s
+    )
+    # The stream's place is given back however the response ends, also when a client that
+    # stopped reading has to be cut off after the maximum age.
+    return EventStreamResponse(
+        frames,
+        deadline_s=settings.events_max_age_s + GRACE_S,
+        on_close=lambda: broker.unsubscribe(subscription),
+        headers=STREAM_HEADERS,
     )
