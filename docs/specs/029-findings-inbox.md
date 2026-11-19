@@ -186,9 +186,10 @@ Each finding in a response gains `series_name`, `asset_path`, `assignee`
     the filter shows, and says what each is now, not what the request did (a lookup cannot
     tell): as the change asked (status with the reason and the end that were sent,
     assignee, feedback), not showing the change (it stays selected), or gone. One that
-    cannot be looked up either is reported as unknown and stays selected until the next
+    cannot be looked up either is reported as unknown. Findings whose request was never
+    sent are named apart. Whatever the result says stays selected does so until the next
     change, also when the list no longer shows it, so trying again tells what became of
-    it. Findings whose request was never sent are named apart and stay selected. Only a
+    it. Only a
     refusal (4xx) of the first request is shown as an error; it is an answer and starts
     no lookup. The list is reloaded in every case.
   - The findings of a running change stay selected until its result is reported, also

@@ -36,9 +36,9 @@ export function FindingsList({
   const { fetchNextPage, hasNextPage } = findings;
   const loadMore = useCallback(() => void fetchNextPage(), [fetchNextPage]);
   // Findings the pruning below leaves alone, also when the list no longer shows them: those
-  // of a change that is running, until its result is reported, and after it those that got
-  // no answer and could not be looked up, until the next change, so trying again tells what
-  // became of them.
+  // of a change that is running, until its result is reported, and after it those the result
+  // says stay selected (no answer, or not sent), until the next change, so trying again
+  // tells what became of them.
   const [unknown, setUnknown] = useState<ReadonlySet<string>>(() => new Set());
   // Findings a reload dropped are no longer selected, also when a later reload brings them
   // back: the stored selection is pruned whenever the loaded findings change.
@@ -55,8 +55,8 @@ export function FindingsList({
 
   // Only what the change was sent for leaves the selection: a row ticked while the request
   // was running stays ticked.
-  const done: BulkDone = (message, sent, keep = [], unchecked = []) => {
-    setUnknown(new Set(unchecked));
+  const done: BulkDone = (message, sent, keep = []) => {
+    setUnknown(new Set(keep));
     const gone = new Set(sent);
     for (const id of keep) gone.delete(id);
     setSelected((now) => new Set([...now].filter((id) => !gone.has(id))));

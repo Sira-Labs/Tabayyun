@@ -14,9 +14,9 @@ type Action = { change: FindingChange; done: string };
 type Send = (action: Action) => void;
 /** A change as it goes out: the ids it was started with, which the selection may leave. */
 type Sent = { action: Action; ids: readonly string[] };
-/** Reports a bulk change: its result in words, the ids it was sent for, those of them that
- * stay selected, and those of them whose outcome is unknown. */
-export type BulkDone = (message: string, sent: readonly string[], keep?: readonly string[], unknown?: readonly string[]) => void;
+/** Reports a bulk change: its result in words, the ids it was sent for and those of them
+ * that stay selected, also when the list no longer shows them. */
+export type BulkDone = (message: string, sent: readonly string[], keep?: readonly string[]) => void;
 
 const stay = (n: number, one: string, many: string) => `${formatNumber(n)} ${n === 1 ? one : many}`;
 
@@ -48,10 +48,10 @@ export function BulkActions({ ids, onDone, onHold }: { ids: readonly string[]; o
         words.push(`${stay(differing.length, "got no answer and does not show the change now: it stays", "got no answer and do not show the change now: they stay")} selected.`);
       }
       if (unchecked.length > 0) {
-        words.push(`${stay(unchecked.length, "got no answer and could not be checked: it stays", "got no answer and could not be checked: they stay")} selected, also when the list no longer shows ${unchecked.length === 1 ? "it" : "them"}.`);
+        words.push(`${stay(unchecked.length, "got no answer and could not be checked: it stays", "got no answer and could not be checked: they stay")} selected.`);
       }
       if (unsent.length > 0) words.push(`${stay(unsent.length, "was not sent and stays", "were not sent and stay")} selected.`);
-      onDone(`${words.join(" ")} The request failed: ${why}.`, sent, [...differing, ...unchecked, ...unsent], unchecked);
+      onDone(`${words.join(" ")} The request failed: ${why}.`, sent, [...differing, ...unchecked, ...unsent]);
     },
     // The server refused the request, so nothing was changed. The list and the groups are
     // reloaded all the same, and the selection is no longer held.

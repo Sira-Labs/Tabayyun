@@ -292,6 +292,35 @@ describe("findings.inbox", () => {
     expect(screen.getByText("1 selected")).toBeTruthy();
   });
 
+  it("keeps a finding selected that does not show the change and left the list", async () => {
+    // The mute's answer is lost; before the lookup someone reopened and resolved the finding,
+    // so it does not show the change, and the default filter no longer lists it.
+    const asked = backend(THREE, asRole("editor"));
+    asked.bulk = () => {
+      asked.items = [finding(2, { severity: "critical" }), finding(3)];
+      asked.find = (id) => (id === "f-1" ? finding(1, { status: "resolved" }) : undefined);
+      throw new TypeError("Failed to fetch");
+    };
+    const user = userEvent.setup();
+    renderApp("/findings");
+    await rows();
+    await select(user, "Spike number 1");
+    await user.click(screen.getByRole("button", { name: "Mute…" }));
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByRole("textbox", { name: "Reason" }), "sensor swap");
+    await user.click(within(dialog).getByRole("button", { name: "Mute" }));
+    await waitFor(() =>
+      expect(status()).toBe("1 got no answer and does not show the change now: it stays selected. The request failed: Failed to fetch."),
+    );
+    await waitFor(() => expect(screen.queryByText("Spike number 1")).toBeNull());
+    expect(screen.getByText("1 selected")).toBeTruthy();
+    // Trying again sends it and gets the server's word on it.
+    asked.bulk = (ids) => ({ updated: [], failed: ids.map((id) => ({ id, error: "transition", status: "resolved" })) });
+    await user.click(screen.getByRole("button", { name: "Acknowledge" }));
+    await waitFor(() => expect(status()).toBe("No findings acknowledged. 1 could not be changed: 1 is resolved."));
+    expect(asked.bulks[1]?.ids).toEqual(["f-1"]);
+  });
+
   it("keeps the findings of a running change selected when a reload drops them", async () => {
     const asked = backend(THREE, asRole("editor"));
     let fail: (reason: unknown) => void = () => undefined;
@@ -337,7 +366,7 @@ describe("findings.inbox", () => {
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Resolve" }));
     await waitFor(() =>
       expect(status()).toBe(
-        "1 got no answer and could not be checked: it stays selected, also when the list no longer shows it. The request failed: Failed to fetch.",
+        "1 got no answer and could not be checked: it stays selected. The request failed: Failed to fetch.",
       ),
     );
     // The reloaded list no longer shows it; it is still selected, and trying again says what it is.
