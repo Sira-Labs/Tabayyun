@@ -58,7 +58,7 @@ describe("findings.virtual", () => {
   it("selects rows that are drawn and keeps the selection of those that are not", async () => {
     fakeLayout(VIEWPORT);
     const selected = new Set(["f-0", "f-9999"]);
-    const selection: TableSelection = { selected, onToggle: vi.fn(), onToggleAll: vi.fn() };
+    const selection: TableSelection = { selected, locked: false, onToggle: vi.fn(), onToggleAll: vi.fn() };
     const { table } = await renderTable({ selection });
     const all = within(table).getByRole("checkbox", { name: "Select all loaded findings" }) as HTMLInputElement;
     expect(all.indeterminate).toBe(true);

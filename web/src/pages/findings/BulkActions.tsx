@@ -23,7 +23,17 @@ const stay = (n: number, one: string, many: string) => `${formatNumber(n)} ${n =
 /** The actions on the selected findings, for editors (spec 029): acknowledge, mute, resolve,
  * reopen, assign, false positive. Each is one bulk change; `onDone` gets the result in words
  * once the list and the groups have been asked to reload. */
-export function BulkActions({ ids, onDone, onHold }: { ids: readonly string[]; onDone: BulkDone; onHold: (ids: readonly string[]) => void }) {
+export function BulkActions({
+  ids,
+  onDone,
+  onHold,
+}: {
+  ids: readonly string[];
+  onDone: BulkDone;
+  /** Called when a change starts (its ids, running) and when the server refused it (no ids,
+   * not running); `onDone` ends every other change. */
+  onHold: (ids: readonly string[], running: boolean) => void;
+}) {
   const client = useQueryClient();
   const [dialog, setDialog] = useState<"mute" | "resolve" | "assign" | null>(null);
   const bulk = useMutation({
@@ -56,14 +66,14 @@ export function BulkActions({ ids, onDone, onHold }: { ids: readonly string[]; o
     // The server refused the request, so nothing was changed. The list and the groups are
     // reloaded all the same, and the selection is no longer held.
     onError: () => {
-      onHold([]);
+      onHold([], false);
       void client.invalidateQueries({ queryKey: inboxKeys.all });
     },
   });
   // From here until the result is reported the sent findings stay selected, whatever a
   // reload of the list shows in between.
   const send: Send = (action) => {
-    onHold(ids);
+    onHold(ids, true);
     bulk.mutate({ action, ids });
   };
   // A request that was sent cannot be taken back: while it runs the dialog stays, so its

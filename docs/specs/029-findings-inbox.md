@@ -195,8 +195,11 @@ Each finding in a response gains `series_name`, `asset_path`, `assignee`
   - The findings of a running change stay selected until its result is reported, also
     when a reload drops them in between; "select all loaded" adds and removes the loaded
     rows only.
-  - A bulk change takes out of the selection only the findings it was sent for, so a row
-    ticked while the request was running stays ticked.
+  - One bulk change at a time: while one runs, the checkboxes are disabled and the actions
+    stay on the page, so no second change can start beside it and a refusal has a place to
+    show. The findings of the running change stay selected until its result is reported,
+    also when a reload drops them in between; "select all loaded" adds and removes the
+    loaded rows only.
 
 ## Out of scope
 

@@ -414,7 +414,7 @@ describe("findings.inbox", () => {
     expect(asked.gets.some((url) => url.startsWith("/api/findings/f-"))).toBe(false);
   });
 
-  it("keeps a finding selected that was ticked while a change was running", async () => {
+  it("locks the selection while a change runs, so no second change starts beside it", async () => {
     const asked = backend(THREE, asRole("editor"));
     let answer: (value: Response) => void = () => undefined;
     asked.bulk = () => new Promise<Response>((resolve) => (answer = resolve)) as unknown as Response;
@@ -424,13 +424,33 @@ describe("findings.inbox", () => {
     await select(user, "Spike number 1");
     await user.click(screen.getByRole("button", { name: "Acknowledge" }));
     await waitFor(() => expect(asked.bulks).toHaveLength(1));
+    // Neither a row nor the header checkbox changes the selection now, and no action starts.
+    const boxes = screen.getAllByRole("checkbox", { name: /^Select / }) as HTMLInputElement[];
+    expect(boxes.length).toBe(4);
+    expect(boxes.every((box) => box.disabled)).toBe(true);
+    await select(user, "Spike number 1");
     await select(user, "Spike number 2");
+    expect(screen.getByText("1 selected")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Reopen" }) as HTMLButtonElement).disabled).toBe(true);
     answer(json({ updated: ["f-1"], failed: [] }));
     await waitFor(() => expect(status()).toBe("1 finding acknowledged."));
-    expect(asked.bulks[0]?.ids).toEqual(["f-1"]);
+    expect(asked.bulks).toHaveLength(1);
+    await waitFor(() => expect((screen.getAllByRole("checkbox", { name: /^Select / }) as HTMLInputElement[]).some((box) => box.disabled)).toBe(false));
+    await select(user, "Spike number 2");
     expect(screen.getByText("1 selected")).toBeTruthy();
-    const row = screen.getByText("Spike number 2").closest('[role="row"]') as HTMLElement;
-    expect((within(row).getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("unlocks the selection and shows the error when the server refuses a change", async () => {
+    const asked = backend(THREE, asRole("editor"));
+    asked.bulk = () => json({ detail: "Your role does not allow this." }, 403);
+    const user = userEvent.setup();
+    renderApp("/findings");
+    await rows();
+    await select(user, "Spike number 1");
+    await user.click(screen.getByRole("button", { name: "Acknowledge" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("Could not change the findings: Your role does not allow this.");
+    await select(user, "Spike number 2");
+    expect(screen.getByText("2 selected")).toBeTruthy();
   });
 
   it("does not select again a finding that left the list and came back", async () => {

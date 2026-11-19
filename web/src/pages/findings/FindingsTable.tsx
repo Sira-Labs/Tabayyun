@@ -15,9 +15,11 @@ const NEAR_END = 40;
 const COLUMNS = "11.5rem minmax(7rem,1fr) 9rem 5.5rem 9.5rem 7rem minmax(10rem,2fr)";
 const cellClass = "flex min-w-0 items-center px-2";
 
-/** Row selection of the table: what is selected and how a row, or all loaded rows, change it. */
+/** Row selection of the table: what is selected and how a row, or all loaded rows, change it.
+ * While `locked` the checkboxes show the selection and cannot change it. */
 export type TableSelection = {
   selected: ReadonlySet<string>;
+  locked: boolean;
   onToggle: (id: string) => void;
   onToggleAll: () => void;
 };
@@ -74,6 +76,7 @@ export function FindingsTable({
                   type="checkbox"
                   aria-label="Select all loaded findings"
                   checked={all === "all"}
+                  disabled={selection.locked}
                   ref={(box) => {
                     if (box) box.indeterminate = all === "some";
                   }}
@@ -100,6 +103,7 @@ export function FindingsTable({
                 top={row.start - HEADER_HEIGHT}
                 grid={grid}
                 checked={selection ? selection.selected.has(finding.id) : null}
+                locked={selection?.locked ?? false}
                 onToggle={selection?.onToggle}
               />
             );
@@ -117,6 +121,7 @@ function Row({
   top,
   grid,
   checked,
+  locked,
   onToggle,
 }: {
   finding: InboxFinding;
@@ -124,6 +129,7 @@ function Row({
   top: number;
   grid: CSSProperties;
   checked: boolean | null;
+  locked: boolean;
   onToggle: ((id: string) => void) | undefined;
 }) {
   const start = formatLocalTime(finding.window.start);
@@ -141,6 +147,7 @@ function Row({
             type="checkbox"
             aria-label={`Select ${finding.series_name}, ${finding.check_id}, ${start}`}
             checked={checked}
+            disabled={locked}
             onChange={() => onToggle?.(finding.id)}
           />
         </div>

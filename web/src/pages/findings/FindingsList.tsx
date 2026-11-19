@@ -40,6 +40,13 @@ export function FindingsList({
   // says stay selected (no answer, or not sent), until the next change, so trying again
   // tells what became of them.
   const [unknown, setUnknown] = useState<ReadonlySet<string>>(() => new Set());
+  // One change at a time: while one runs, the selection is locked and the actions stay on
+  // the page, so no second change can start beside it and its error has a place to show.
+  const [busy, setBusy] = useState(false);
+  const hold = (sent: readonly string[], running: boolean) => {
+    setUnknown(new Set(sent));
+    setBusy(running);
+  };
   // Findings a reload dropped are no longer selected, also when a later reload brings them
   // back: the stored selection is pruned whenever the loaded findings change.
   const [pruned, setPruned] = useState(ids);
@@ -56,7 +63,7 @@ export function FindingsList({
   // Only what the change was sent for leaves the selection: a row ticked while the request
   // was running stays ticked.
   const done: BulkDone = (message, sent, keep = []) => {
-    setUnknown(new Set(keep));
+    hold(keep, false);
     const gone = new Set(sent);
     for (const id of keep) gone.delete(id);
     setSelected((now) => new Set([...now].filter((id) => !gone.has(id))));
@@ -70,7 +77,7 @@ export function FindingsList({
       {findings.isPending && <p>Loading findings…</p>}
       {!findings.isFetchNextPageError && <ErrorLine error={findings.error} prefix="Could not load findings" />}
       {findings.isSuccess && items.length === 0 && <p className={mutedClass}>No findings match.</p>}
-      {canWrite && chosen.length > 0 && <BulkActions ids={chosen} onDone={done} onHold={(held) => setUnknown(new Set(held))} />}
+      {canWrite && (chosen.length > 0 || busy) && <BulkActions ids={chosen} onDone={done} onHold={hold} />}
       {items.length > 0 && (
         <>
           <FindingsTable
@@ -83,6 +90,7 @@ export function FindingsList({
               canWrite
                 ? {
                     selected,
+                    locked: busy,
                     onToggle: (id) => setSelected((now) => toggled(now, id)),
                     onToggleAll: () => setSelected((now) => toggledAll(ids, now)),
                   }
