@@ -225,12 +225,12 @@ describe("findings.inbox", () => {
     await user.click(screen.getByRole("checkbox", { name: "Select all loaded findings" }));
     await user.click(screen.getByRole("button", { name: "Acknowledge" }));
     await waitFor(() =>
-      expect(status()).toBe("500 findings acknowledged. 1 was not changed and stays selected. The request failed: cache unavailable."),
+      expect(status()).toBe("500 findings acknowledged. 1 got no answer and does not show the change now: it stays selected. The request failed: cache unavailable."),
     );
     // The finding without an answer was looked up and found as it was.
     expect(asked.gets).toContain("/api/findings/f-501");
     expect(asked.bulks.map((b) => b.ids.length)).toEqual([500, 1]);
-    // The list was asked again, and only the unchanged finding is still selected: a retry sends it alone.
+    // The list was asked again, and only the finding that does not show the change is still selected: a retry sends it alone.
     expect(within(screen.getByRole("group", { name: "Actions on the selected findings" })).getByText("1 selected")).toBeTruthy();
     asked.bulk = (ids) => ({ updated: ids, failed: [] });
     await user.click(screen.getByRole("button", { name: "Acknowledge" }));
@@ -268,7 +268,9 @@ describe("findings.inbox", () => {
     expect(screen.queryByRole("group", { name: "Actions on the selected findings" })).toBeNull();
   });
 
-  it("shows the error and keeps the selection when a lost answer changed nothing", async () => {
+  it("says what a finding is now when the lookup does not show the change", async () => {
+    // The request may have failed, or it muted the finding and someone reopened it since:
+    // the lookup cannot tell, so the message says only what it shows.
     const asked = backend(THREE, asRole("editor"));
     asked.bulk = () => {
       throw new TypeError("Failed to fetch");
@@ -278,10 +280,42 @@ describe("findings.inbox", () => {
     await rows();
     await select(user, "Spike number 1");
     const before = listRequests(asked).length;
-    await user.click(screen.getByRole("button", { name: "Acknowledge" }));
-    expect((await screen.findByRole("alert")).textContent).toMatch(/^Could not change the findings: /);
+    await user.click(screen.getByRole("button", { name: "Mute…" }));
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByRole("textbox", { name: "Reason" }), "sensor swap");
+    await user.click(within(dialog).getByRole("button", { name: "Mute" }));
+    await waitFor(() =>
+      expect(status()).toBe("1 got no answer and does not show the change now: it stays selected. The request failed: Failed to fetch."),
+    );
     expect(asked.gets).toContain("/api/findings/f-1");
     await waitFor(() => expect(listRequests(asked).length).toBeGreaterThan(before));
+    expect(screen.getByText("1 selected")).toBeTruthy();
+  });
+
+  it("keeps the findings of a running change selected when a reload drops them", async () => {
+    const asked = backend(THREE, asRole("editor"));
+    let fail: (reason: unknown) => void = () => undefined;
+    asked.bulk = () => new Promise<Response>((_, reject) => (fail = reject)) as unknown as Response;
+    asked.find = () => {
+      throw new TypeError("Failed to fetch");
+    };
+    const user = userEvent.setup();
+    const app = renderApp("/findings");
+    await rows();
+    await select(user, "Spike number 1");
+    await user.click(screen.getByRole("button", { name: "Acknowledge" }));
+    await waitFor(() => expect(asked.bulks).toHaveLength(1));
+    // While the request runs, a reload no longer lists the finding.
+    asked.items = [finding(2, { severity: "critical" }), finding(3)];
+    await app.client.invalidateQueries();
+    await waitFor(() => expect(screen.queryByText("Spike number 1")).toBeNull());
+    fail(new TypeError("Failed to fetch"));
+    await waitFor(() => expect(status()).toMatch(/^1 got no answer and could not be checked: it stays selected/));
+    expect(screen.getByText("1 selected")).toBeTruthy();
+    // The header checkbox works on the loaded rows and leaves the unknown one selected.
+    await user.click(screen.getByRole("checkbox", { name: "Select all loaded findings" }));
+    expect(screen.getByText("3 selected")).toBeTruthy();
+    await user.click(screen.getByRole("checkbox", { name: "Select all loaded findings" }));
     expect(screen.getByText("1 selected")).toBeTruthy();
   });
 
@@ -332,7 +366,9 @@ describe("findings.inbox", () => {
     const dialog = screen.getByRole("dialog");
     await user.type(within(dialog).getByRole("textbox", { name: "Reason" }), "new reason");
     await user.click(within(dialog).getByRole("button", { name: "Mute" }));
-    expect((await within(dialog).findByRole("alert")).textContent).toMatch(/^Could not change the findings: /);
+    await waitFor(() =>
+      expect(status()).toBe("1 got no answer and does not show the change now: it stays selected. The request failed: Failed to fetch."),
+    );
     expect(asked.gets).toContain("/api/findings/f-1");
     expect(screen.getByText("1 selected")).toBeTruthy();
   });

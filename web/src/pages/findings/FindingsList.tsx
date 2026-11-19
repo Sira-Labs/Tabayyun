@@ -35,9 +35,10 @@ export function FindingsList({
   const ids = useMemo(() => items.map((f) => f.id), [items]);
   const { fetchNextPage, hasNextPage } = findings;
   const loadMore = useCallback(() => void fetchNextPage(), [fetchNextPage]);
-  // Findings whose last change got no answer and could not be looked up: they stay selected
-  // until the next change, also when the list no longer shows them, so trying again tells
-  // what became of them.
+  // Findings the pruning below leaves alone, also when the list no longer shows them: those
+  // of a change that is running, until its result is reported, and after it those that got
+  // no answer and could not be looked up, until the next change, so trying again tells what
+  // became of them.
   const [unknown, setUnknown] = useState<ReadonlySet<string>>(() => new Set());
   // Findings a reload dropped are no longer selected, also when a later reload brings them
   // back: the stored selection is pruned whenever the loaded findings change.
@@ -69,7 +70,7 @@ export function FindingsList({
       {findings.isPending && <p>Loading findings…</p>}
       {!findings.isFetchNextPageError && <ErrorLine error={findings.error} prefix="Could not load findings" />}
       {findings.isSuccess && items.length === 0 && <p className={mutedClass}>No findings match.</p>}
-      {canWrite && chosen.length > 0 && <BulkActions ids={chosen} onDone={done} />}
+      {canWrite && chosen.length > 0 && <BulkActions ids={chosen} onDone={done} onHold={(held) => setUnknown(new Set(held))} />}
       {items.length > 0 && (
         <>
           <FindingsTable

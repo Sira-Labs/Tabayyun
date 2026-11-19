@@ -23,7 +23,7 @@ const stay = (n: number, one: string, many: string) => `${formatNumber(n)} ${n =
 /** The actions on the selected findings, for editors (spec 029): acknowledge, mute, resolve,
  * reopen, assign, false positive. Each is one bulk change; `onDone` gets the result in words
  * once the list and the groups have been asked to reload. */
-export function BulkActions({ ids, onDone }: { ids: readonly string[]; onDone: BulkDone }) {
+export function BulkActions({ ids, onDone, onHold }: { ids: readonly string[]; onDone: BulkDone; onHold: (ids: readonly string[]) => void }) {
   const client = useQueryClient();
   const [dialog, setDialog] = useState<"mute" | "resolve" | "assign" | null>(null);
   const bulk = useMutation({
@@ -35,25 +35,37 @@ export function BulkActions({ ids, onDone }: { ids: readonly string[]; onDone: B
         onDone(bulkMessage(action.done, outcome), sent);
         return;
       }
-      // A request failed. What got no answer was looked up: a finding found as asked is said
-      // to be so now (a lookup cannot tell who made it so), an unchanged one stays selected
-      // for another try, and one that could not be looked up either stays selected as unknown.
+      // A request failed. What got no answer was looked up, and the lookup says what a finding
+      // is now, not what the request did: one found as asked is said to be so, one that is
+      // not (never changed, or changed again by someone since) stays selected, and so does
+      // one that could not be looked up either. What was not sent stays selected too.
       const why = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
-      const { found, left, unchecked } = outcome;
+      const { found, differing, unchecked, unsent } = outcome;
       const words: string[] = [];
       if (outcome.updated.length + outcome.failed.length > 0) words.push(bulkMessage(action.done, outcome));
       if (found.length > 0) words.push(`${stay(found.length, "finding got no answer and is", "findings got no answer and are")} now ${action.done}.`);
-      if (left.length > 0) words.push(`${stay(left.length, "was not changed and stays", "were not changed and stay")} selected.`);
+      if (differing.length > 0) {
+        words.push(`${stay(differing.length, "got no answer and does not show the change now: it stays", "got no answer and do not show the change now: they stay")} selected.`);
+      }
       if (unchecked.length > 0) {
         words.push(`${stay(unchecked.length, "got no answer and could not be checked: it stays", "got no answer and could not be checked: they stay")} selected, also when the list no longer shows ${unchecked.length === 1 ? "it" : "them"}.`);
       }
-      onDone(`${words.join(" ")} The request failed: ${why}.`, sent, [...left, ...unchecked], unchecked);
+      if (unsent.length > 0) words.push(`${stay(unsent.length, "was not sent and stays", "were not sent and stay")} selected.`);
+      onDone(`${words.join(" ")} The request failed: ${why}.`, sent, [...differing, ...unchecked, ...unsent], unchecked);
     },
-    // Every finding was found unchanged. The list and the groups are reloaded all the same,
-    // so what is on the page is what the server has before anyone tries again.
-    onError: () => void client.invalidateQueries({ queryKey: inboxKeys.all }),
+    // The server refused the request, so nothing was changed. The list and the groups are
+    // reloaded all the same, and the selection is no longer held.
+    onError: () => {
+      onHold([]);
+      void client.invalidateQueries({ queryKey: inboxKeys.all });
+    },
   });
-  const send: Send = (action) => bulk.mutate({ action, ids });
+  // From here until the result is reported the sent findings stay selected, whatever a
+  // reload of the list shows in between.
+  const send: Send = (action) => {
+    onHold(ids);
+    bulk.mutate({ action, ids });
+  };
   // A request that was sent cannot be taken back: while it runs the dialog stays, so its
   // result is reported in the dialog that started it and no second change starts beside it.
   const close = () => {

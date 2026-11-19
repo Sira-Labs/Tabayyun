@@ -181,9 +181,16 @@ export function selectionState(ids: readonly string[], selected: ReadonlySet<str
   return n === 0 ? "none" : n === ids.length ? "all" : "some";
 }
 
-/** "Select all loaded": every id, or none when all were selected. */
+/** "Select all loaded": every id joins the selection, or all leave it when all were selected.
+ * Selected ids that are not among `ids` (findings the list no longer shows) stay as they are. */
 export function toggledAll(ids: readonly string[], selected: ReadonlySet<string>): Set<string> {
-  return selectionState(ids, selected) === "all" ? new Set() : new Set(ids);
+  const next = new Set(selected);
+  const all = selectionState(ids, selected) === "all";
+  for (const id of ids) {
+    if (all) next.delete(id);
+    else next.add(id);
+  }
+  return next;
 }
 
 // --- changes ---------------------------------------------------------------------------------
@@ -199,12 +206,19 @@ export type FindingChange = {
 export type BulkFailure = { id: string; error: "not_found" | "transition"; status: string | null };
 export type BulkResult = { updated: string[]; failed: BulkFailure[] };
 /** What a bulk change over several requests did. `updated` and `failed` are what the server
- * said. After a request without an answer its findings are looked up: `found` are now as the
- * change asked (which the request may have done, or something before it), `left` are not
- * (as are those whose request was never sent), a finding that is gone joins `failed`, and
- * `unchecked` could not be looked up either. `error` is the failure that stopped the
- * requests, or null. */
-export type BulkOutcome = BulkResult & { found: string[]; left: string[]; unchecked: string[]; error: unknown };
+ * said. After a request without an answer its findings are looked up, and what the lookup
+ * shows is what they are now, not what the request did: `found` are as the change asked,
+ * `differing` are not (never changed, or changed and changed again since), a finding that is
+ * gone joins `failed`, and `unchecked` could not be looked up either. `unsent` are those of
+ * the requests after it, which were not sent, or of a request the server refused. `error` is
+ * the failure that stopped the requests, or null. */
+export type BulkOutcome = BulkResult & {
+  found: string[];
+  differing: string[];
+  unchecked: string[];
+  unsent: string[];
+  error: unknown;
+};
 /** Lookups that run at a time when a request without an answer is checked. */
 const LOOKUPS = 8;
 
@@ -305,7 +319,7 @@ async function lookUp(ids: readonly string[], change: FindingChange, outcome: Bu
     for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
       try {
         const now = await apiGet<InboxFinding>(finding(id));
-        (applied(now, change) ? outcome.found : outcome.left).push(id);
+        (applied(now, change) ? outcome.found : outcome.differing).push(id);
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) outcome.failed.push({ id, error: "not_found", status: null });
         else outcome.unchecked.push(id);
@@ -325,10 +339,10 @@ export const inboxApi = {
    * After a request that fails, no further one is sent. A failure without an answer of the
    * server (a lost response, a 5xx) does not say the change was not applied, so those
    * findings are looked up one by one, whatever the list's filter shows, and reported as what
-   * they turned out to be. It throws only when the first request failed and every finding
-   * was found unchanged, so nothing is to report but the error. */
+   * they are now. It throws only when the server refused the first request: then nothing was
+   * changed and nothing is to report but the error. */
   bulk: async (ids: readonly string[], change: FindingChange): Promise<BulkOutcome> => {
-    const outcome: BulkOutcome = { updated: [], failed: [], found: [], left: [], unchecked: [], error: null };
+    const outcome: BulkOutcome = { updated: [], failed: [], found: [], differing: [], unchecked: [], unsent: [], error: null };
     const parts = chunks(ids, BULK_MAX);
     for (const [index, part] of parts.entries()) {
       try {
@@ -336,12 +350,11 @@ export const inboxApi = {
         outcome.updated.push(...answer.updated);
         outcome.failed.push(...answer.failed);
       } catch (error) {
+        if (refused(error) && index === 0) throw error;
         outcome.error = error;
-        outcome.left = parts.slice(index + 1).flat();
-        if (refused(error)) outcome.left.unshift(...part);
+        outcome.unsent = parts.slice(index + 1).flat();
+        if (refused(error)) outcome.unsent.unshift(...part);
         else await lookUp(part, change, outcome);
-        const known = outcome.updated.length + outcome.failed.length + outcome.found.length + outcome.unchecked.length;
-        if (known === 0) throw error;
         break;
       }
     }

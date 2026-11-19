@@ -102,8 +102,11 @@ describe("findings.filters", () => {
     expect(selectionState(ids, new Set(ids))).toBe("all");
     expect(selectionState(ids, new Set(["gone"]))).toBe("none");
     expect(selectionState([], new Set(["a"]))).toBe("none");
-    expect([...toggledAll(ids, new Set(["b"]))]).toEqual(ids);
+    expect([...toggledAll(ids, new Set(["b"]))].sort()).toEqual(ids);
     expect(toggledAll(ids, new Set(ids)).size).toBe(0);
+    // A selected id the list does not show is neither dropped nor counted.
+    expect([...toggledAll(ids, new Set(["gone"]))].sort()).toEqual([...ids, "gone"].sort());
+    expect([...toggledAll(ids, new Set([...ids, "gone"]))]).toEqual(["gone"]);
   });
 
   it("words a bulk result", () => {
