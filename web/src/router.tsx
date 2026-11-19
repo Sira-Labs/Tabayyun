@@ -1,6 +1,7 @@
 import { Outlet, createRootRoute, createRoute, createRouter, lazyRouteComponent, redirect, type RouterHistory } from "@tanstack/react-router";
 import { setUnauthorizedHandler } from "./api";
 import { validateCompareSearch } from "./compare/url";
+import { validateInboxSearch } from "./findingsInbox";
 import { Account } from "./pages/Account";
 import { ADMIN_TABS, Admin, type AdminTab } from "./pages/admin/Admin";
 import { Layout } from "./pages/Layout";
@@ -78,6 +79,13 @@ const editSuiteRoute = createRoute({
   path: "/suites/$suiteId/edit",
   component: lazyRouteComponent(() => import("./pages/suites/SuiteEdit"), "SuiteEdit"),
 });
+// The findings inbox loads on its first visit too.
+const findingsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/findings",
+  validateSearch: validateInboxSearch,
+  component: lazyRouteComponent(() => import("./pages/findings/FindingsInbox"), "FindingsInbox"),
+});
 const accountRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings/account", component: Account });
 const adminRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -111,6 +119,7 @@ export const routeTree = rootRoute.addChildren([
     newSuiteRoute,
     suiteRoute,
     editSuiteRoute,
+    findingsRoute,
     accountRoute,
     adminRoute,
   ]),

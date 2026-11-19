@@ -25,13 +25,14 @@ from tabayyun.jobs.names import (
     PRUNE_SOURCE_FETCHES_TASK,
     REAP_STALE_RUNS_TASK,
     REFRESH_BASELINES_TASK,
+    REOPEN_EXPIRED_MUTES_TASK,
     RUN_CHECKS_TASK,
     RUN_DUE_SUITES_TASK,
     RUNS_QUEUE,
     SEND_INVITATION_TASK,
 )
 from tabayyun.mail import MailError, SmtpConfig
-from tabayyun.services import baselines, execution, fetches, ingest, rate_limits, suites
+from tabayyun.services import baselines, execution, fetches, ingest, rate_limits, suites, triage
 from tabayyun.services import runs as runs_service
 from tabayyun.services.admin import invitations
 from tabayyun.settings import get_settings
@@ -158,6 +159,15 @@ async def run_due_suites(timestamp: int) -> None:
     started = await suites.fire_due_suites(runtime.session_factory(), runs_service.utc_now())
     if started:
         log.info("suites.fired", count=len(started), tick=timestamp)
+
+
+@app.periodic(cron="*/5 * * * *")
+@app.task(queue=MAINTENANCE_QUEUE, name=REOPEN_EXPIRED_MUTES_TASK, retry=False)
+async def reopen_expired_mutes(timestamp: int) -> None:
+    """Every five minutes: open the muted findings whose end has passed (spec 029)."""
+    reopened = await triage.reopen_expired_mutes(runtime.session_factory(), runs_service.utc_now())
+    if reopened:
+        log.info("findings.mutes_expired", count=reopened, tick=timestamp)
 
 
 @app.periodic(cron="37 * * * *")

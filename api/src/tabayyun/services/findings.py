@@ -23,17 +23,18 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import structlog
-from sqlalchemy import or_, select, text, tuple_
+from sqlalchemy import ColumnElement, or_, select, text, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tabayyun import core
 from tabayyun.authz.scope import Scope
 from tabayyun.db.models import (
-    FINDING_STATUSES,
     Finding,
     Metric,
     Score,
+    Series,
+    User,
 )
 from tabayyun.services.pagination import decode_keyset, encode_keyset
 from tabayyun.services.timeconv import datetime_to_ns, ns_to_datetime, ns_to_datetime_ceil
@@ -103,6 +104,16 @@ class FindingFilter:
     run_id: uuid.UUID | None = None
     since: datetime | None = None
     until: datetime | None = None
+    # Spec 029. `unassigned` and `assignee_id` exclude each other; `feedback` is a value of
+    # `FINDING_FEEDBACK` or "none"; `asset` is a path with everything below it, `asset_path`
+    # exactly one path ("" for series without one).
+    assignee_id: uuid.UUID | None = None
+    unassigned: bool = False
+    feedback: str | None = None
+    text: str | None = None
+    asset: str | None = None
+    asset_path: str | None = None
+    source_id: uuid.UUID | None = None
 
 
 # Persistence (worker path, inside the run's transaction)
@@ -209,6 +220,11 @@ async def _merge(
             "status_at",
             "first_run_id",
             "created_at",
+            # Triage (spec 029) belongs to the finding, whichever way its window grows.
+            "muted_until",
+            "assignee_id",
+            "feedback",
+            "feedback_at",
         )
     }
     await session.delete(existing)
@@ -315,9 +331,45 @@ async def persist_report(
 # Reads
 
 
-def finding_to_dict(finding: Finding) -> dict[str, Any]:
-    """The `Finding` response shape of spec 003 (window in ns)."""
+@dataclass(frozen=True)
+class FindingContext:
+    """What a finding's response names beside its own columns: its series and its assignee."""
+
+    series: dict[uuid.UUID, tuple[str, str | None]]
+    users: dict[uuid.UUID, str]
+
+
+async def context_of(session: AsyncSession, findings: Sequence[Finding]) -> FindingContext:
+    """Series names with asset paths and assignee names of `findings`, in two queries."""
+    series_ids = {f.series_id for f in findings}
+    user_ids = {f.assignee_id for f in findings if f.assignee_id is not None}
+    series: dict[uuid.UUID, tuple[str, str | None]] = {}
+    users: dict[uuid.UUID, str] = {}
+    if series_ids:
+        rows = await session.execute(
+            select(Series.id, Series.name, Series.asset_path).where(Series.id.in_(series_ids))
+        )
+        series = {sid: (name, asset) for sid, name, asset in rows}
+    if user_ids:
+        named = await session.execute(select(User.id, User.display_name).where(User.id.in_(user_ids)))
+        users = {uid: name for uid, name in named}
+    return FindingContext(series=series, users=users)
+
+
+def finding_to_dict(finding: Finding, context: FindingContext | None = None) -> dict[str, Any]:
+    """The `Finding` response shape of spec 003 (window in ns) with the triage fields of spec
+    029; series name, asset path and the assignee's name come from `context`."""
+    name, asset = (context.series if context else {}).get(finding.series_id, ("", None))
+    assignee = None
+    if finding.assignee_id is not None:
+        display = (context.users if context else {}).get(finding.assignee_id, "")
+        assignee = {"id": str(finding.assignee_id), "display_name": display}
     return {
+        "series_name": name,
+        "asset_path": asset,
+        "assignee": assignee,
+        "muted_until": finding.muted_until,
+        "feedback": finding.feedback,
         "id": str(finding.id),
         "check_id": finding.check_id,
         "series_id": str(finding.series_id),
@@ -342,23 +394,9 @@ async def list_findings(
     session: AsyncSession, scope: Scope, *, filters: FindingFilter, limit: int, cursor: str | None
 ) -> tuple[list[Finding], str | None]:
     """Findings newest window first, keyset-paginated on `(window_start desc, id desc)`."""
-    stmt = select(Finding).where(Finding.workspace_id == scope.workspace_id)
-    if filters.series_id is not None:
-        stmt = stmt.where(Finding.series_id == filters.series_id)
-    if filters.check_id is not None:
-        stmt = stmt.where(Finding.check_id == filters.check_id)
-    if filters.severities is not None:
-        stmt = stmt.where(Finding.severity.in_(filters.severities))
-    if filters.dimension is not None:
-        stmt = stmt.where(Finding.dimension == filters.dimension)
-    if filters.statuses is not None:
-        stmt = stmt.where(Finding.status.in_(filters.statuses))
-    if filters.run_id is not None:
-        stmt = stmt.where(or_(Finding.first_run_id == filters.run_id, Finding.last_run_id == filters.run_id))
-    if filters.since is not None:
-        stmt = stmt.where(Finding.window_end > filters.since)
-    if filters.until is not None:
-        stmt = stmt.where(Finding.window_start < filters.until)
+    stmt = (
+        select(Finding).join(Series, Series.id == Finding.series_id).where(*filter_conditions(scope, filters))
+    )
     if cursor:
         window_start, finding_id = decode_keyset(cursor)
         stmt = stmt.where(tuple_(Finding.window_start, Finding.id) < (window_start, finding_id))
@@ -369,6 +407,57 @@ async def list_findings(
     return rows[:limit], next_cursor
 
 
+def like_pattern(text_: str) -> str:
+    """`text_` as a LIKE pattern that matches it literally (escape character `\\`)."""
+    return text_.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def filter_conditions(scope: Scope, filters: FindingFilter) -> list[ColumnElement[bool]]:
+    """WHERE conditions of `filters` for a statement that joins `Finding` with `Series`."""
+    conditions: list[ColumnElement[bool]] = [Finding.workspace_id == scope.workspace_id]
+    if filters.series_id is not None:
+        conditions.append(Finding.series_id == filters.series_id)
+    if filters.check_id is not None:
+        conditions.append(Finding.check_id == filters.check_id)
+    if filters.severities is not None:
+        conditions.append(Finding.severity.in_(filters.severities))
+    if filters.dimension is not None:
+        conditions.append(Finding.dimension == filters.dimension)
+    if filters.statuses is not None:
+        conditions.append(Finding.status.in_(filters.statuses))
+    if filters.run_id is not None:
+        conditions.append(or_(Finding.first_run_id == filters.run_id, Finding.last_run_id == filters.run_id))
+    if filters.since is not None:
+        conditions.append(Finding.window_end > filters.since)
+    if filters.until is not None:
+        conditions.append(Finding.window_start < filters.until)
+    if filters.unassigned:
+        conditions.append(Finding.assignee_id.is_(None))
+    elif filters.assignee_id is not None:
+        conditions.append(Finding.assignee_id == filters.assignee_id)
+    if filters.feedback == "none":
+        conditions.append(Finding.feedback.is_(None))
+    elif filters.feedback is not None:
+        conditions.append(Finding.feedback == filters.feedback)
+    if filters.text:
+        pattern = f"%{like_pattern(filters.text)}%"
+        conditions.append(
+            or_(Finding.summary.ilike(pattern, escape="\\"), Series.name.ilike(pattern, escape="\\"))
+        )
+    if filters.asset is not None:
+        root = filters.asset.rstrip("/")
+        below = f"{like_pattern(root)}/%"
+        conditions.append(or_(Series.asset_path == root, Series.asset_path.like(below, escape="\\")))
+    if filters.asset_path is not None:
+        if filters.asset_path == "":
+            conditions.append(or_(Series.asset_path.is_(None), Series.asset_path == ""))
+        else:
+            conditions.append(Series.asset_path == filters.asset_path)
+    if filters.source_id is not None:
+        conditions.append(Series.source_id == filters.source_id)
+    return conditions
+
+
 async def get_finding(
     session: AsyncSession, scope: Scope, finding_id: uuid.UUID, *, for_update: bool = False
 ) -> Finding | None:
@@ -377,32 +466,6 @@ async def get_finding(
     if for_update:
         stmt = stmt.with_for_update()
     return (await session.execute(stmt)).scalars().first()
-
-
-async def change_status(
-    session: AsyncSession,
-    scope: Scope,
-    finding_id: uuid.UUID,
-    *,
-    status: str,
-    reason: str | None,
-    now: datetime,
-) -> Finding:
-    """Apply one lifecycle transition; raises FindingNotFoundError or TransitionError."""
-    if status not in FINDING_STATUSES:
-        raise ValueError(f"unknown status {status!r}")
-    finding = await get_finding(session, scope, finding_id, for_update=True)
-    if finding is None:
-        raise FindingNotFoundError(str(finding_id))
-    if status not in TRANSITIONS[finding.status]:
-        raise TransitionError(finding.status, status)
-    finding.status = status
-    finding.status_reason = reason.strip() if reason and reason.strip() else None
-    finding.status_at = now
-    finding.updated_at = now
-    await session.flush()
-    log.info("finding.status", finding_id=str(finding_id), status=status)
-    return finding
 
 
 async def list_metrics(

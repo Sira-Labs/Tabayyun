@@ -53,6 +53,7 @@ RUN_STATUSES = ("queued", "running", "succeeded", "failed")
 FINDING_STATUSES = ("open", "acked", "muted", "resolved")
 GROUP_KINDS = ("related", "redundant", "balance")
 BASELINE_TRIGGERS = ("schedule", "manual")
+FINDING_FEEDBACK = ("false_positive",)
 MEMBER_ROLES = ("member", "input", "output")
 ORG_ROLES = ("owner", "admin", "member")
 WORKSPACE_ROLES = ("admin", "editor", "viewer")
@@ -493,6 +494,13 @@ class Finding(TenantMixin, Base):
     __table_args__ = (
         PrimaryKeyConstraint("id", "window_start"),
         CheckConstraint(_in("status", FINDING_STATUSES), name="status"),
+        CheckConstraint(_in("feedback", FINDING_FEEDBACK), name="feedback"),
+        # The task that opens expired mutes looks only at mutes with an end (spec 029).
+        Index(
+            "ix_findings_muted_until",
+            "muted_until",
+            postgresql_where=text("status = 'muted' AND muted_until IS NOT NULL"),
+        ),
         Index(
             "ix_findings_workspace_id_status_window_start",
             "workspace_id",
@@ -520,10 +528,33 @@ class Finding(TenantMixin, Base):
     first_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("runs.id"))
     last_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("runs.id"))
     occurrences: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    # Triage (spec 029): when a mute ends (null: no end), who works on it, and the user's verdict.
+    muted_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    feedback: Mapped[str | None] = mapped_column(Text)
+    feedback_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
+
+
+class SavedFindingFilter(TenantMixin, Base):
+    """A user's saved filter of the findings page (spec 029): personal, per workspace."""
+
+    __tablename__ = "finding_filters"
+    __table_args__ = (UniqueConstraint("workspace_id", "user_id", "name"),)
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    # The page's URL search string.
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _created_at()
 
 
 class Metric(OrgMixin, Base):

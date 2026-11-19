@@ -104,6 +104,11 @@ async def _seed_org(app: Any, prefix: str) -> dict[str, str]:
         assert (await c.post(f"/api/series/{s1}/baselines")).status_code == 202
         baselines = (await c.get(f"/api/series/{s1}/baselines")).json()["items"]
         assert [b["version"] for b in baselines] == [1], baselines
+        # Spec 029: a saved filter of the findings page.
+        saved = await c.post(
+            "/api/finding-filters", json={"name": f"{prefix}-filter", "query": "status=open"}
+        )
+        assert saved.status_code == 201, saved.text
     return {
         "source": source.json()["id"],
         "run": run["id"],
@@ -112,6 +117,7 @@ async def _seed_org(app: Any, prefix: str) -> dict[str, str]:
         "group": group.json()["id"],
         "dataset": dataset.json()["id"],
         "suite": suite.json()["id"],
+        "filter": saved.json()["id"],
     }
 
 
@@ -464,7 +470,11 @@ READ_BACK = {
 }
 # Scoped to the signed-in user, not to a tenant: `test_auth_flow.py` checks that another user's
 # session gives 404 (spec 013).
-USER_SCOPED_ROUTES = {("DELETE", "/api/auth/sessions/{session_id}")}
+# A saved filter (spec 029) belongs to one user too: the test below it checks the other org.
+USER_SCOPED_ROUTES = {
+    ("DELETE", "/api/auth/sessions/{session_id}"),
+    ("DELETE", "/api/finding-filters/{filter_id}"),
+}
 # Admin routes (spec 014) with ids of org A: placeholders are filled by name, and org B's owner
 # (an org admin of B) must get 404 from each, leaving org A unchanged.
 ADMIN_ROUTES = [
@@ -600,6 +610,31 @@ async def test_lists_show_only_the_own_org(seed, app_for, path):
     listed = {item["id"] for item in body.get("items", [])}
     assert not listed & set(seed.a.values()), path
     assert listed, f"org B sees nothing in {path}"
+
+
+async def test_other_org_cannot_touch_findings_in_bulk_or_filters(seed, app_for):
+    """Spec 029: org A's finding inside org B's bulk request is `not_found` and stays as it
+    was; org B neither lists nor deletes org A's saved filter."""
+    b = app_for(USER_B, ORG_B, WORKSPACE_B)
+    body = {"ids": [seed.a["finding"]], "change": {"status": "resolved", "feedback": "false_positive"}}
+    r = await _call(b, "POST", "/api/findings/bulk", body)
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "updated": [],
+        "failed": [{"id": seed.a["finding"], "error": "not_found", "status": None}],
+    }
+    owner_a = app_for(BOOTSTRAP_USER_ID)
+    finding = (await _call(owner_a, "GET", f"/api/findings/{seed.a['finding']}")).json()
+    assert (finding["status"], finding["feedback"]) == ("open", None)
+    assert (await _call(b, "DELETE", f"/api/finding-filters/{seed.a['filter']}")).status_code == 404
+    listed = (await _call(b, "GET", "/api/finding-filters")).json()["items"]
+    assert [f["id"] for f in listed] == [seed.b["filter"]]
+    mine = (await _call(owner_a, "GET", "/api/finding-filters")).json()["items"]
+    assert [f["id"] for f in mine] == [seed.a["filter"]]
+    for path in ("/api/findings/groups?by=series&status=all", "/api/findings/assignees"):
+        text_ = (await _call(b, "GET", path)).text
+        assert seed.a["series"] not in text_ and str(BOOTSTRAP_USER_ID) not in text_, path
+    assert seed.a["finding"] not in (await _call(b, "GET", "/api/findings/export?status=all")).text
 
 
 async def test_dataset_run_of_another_org_is_not_found(seed, app_for):

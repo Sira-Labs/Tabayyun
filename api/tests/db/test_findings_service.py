@@ -11,7 +11,7 @@ from sqlalchemy import func, select, update
 from tabayyun import core
 from tabayyun.authz import Scope
 from tabayyun.db import for_org, make_engine, make_session_factory
-from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Finding, Metric, Run
+from tabayyun.db.models import BOOTSTRAP_USER_ID, DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Finding, Metric, Run
 from tabayyun.services import findings as findings_service
 from tabayyun.services import series as series_service
 from tabayyun.services.timeconv import datetime_to_ns
@@ -168,6 +168,35 @@ async def test_acked_stays_acked_on_merge(ctx):
     await ctx.persist([_finding(10, 70)])
     [row] = await ctx.findings()
     assert (row.status, row.occurrences) == ("acked", 2)
+
+
+@pytest.mark.parametrize("incoming", [(40, 120), (0, 40)], ids=["forwards", "backwards"])
+async def test_triage_survives_a_merge(ctx, incoming):
+    """An assigned finding marked as a false positive keeps both when a later report merges
+    into it, whether its window grows forwards (an update) or backwards (a rewrite of the row)."""
+    await ctx.persist([_finding(30, 90)])
+    marked = datetime(2026, 4, 1, tzinfo=UTC)
+    async with ctx.factory() as session, session.begin():
+        await session.execute(
+            update(Finding).values(
+                assignee_id=BOOTSTRAP_USER_ID, feedback="false_positive", feedback_at=marked, status="acked"
+            )
+        )
+    [before] = await ctx.findings()
+    _, outcome = await ctx.persist([_finding(*incoming)])
+    assert (outcome.new, outcome.merged) == (0, 1)
+    [after] = await ctx.findings()
+    assert after.id == before.id and after.occurrences == 2
+    assert (_minutes(after.window_start), _minutes(after.window_end)) == (
+        min(30, incoming[0]),
+        max(90, incoming[1]),
+    )
+    assert (after.assignee_id, after.feedback, after.feedback_at, after.status) == (
+        BOOTSTRAP_USER_ID,
+        "false_positive",
+        marked,
+        "acked",
+    )
 
 
 @pytest.mark.parametrize("status", ["resolved", "muted"])
