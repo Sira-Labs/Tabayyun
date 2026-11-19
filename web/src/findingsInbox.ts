@@ -198,11 +198,27 @@ export type FindingChange = {
 };
 export type BulkFailure = { id: string; error: "not_found" | "transition"; status: string | null };
 export type BulkResult = { updated: string[]; failed: BulkFailure[] };
-/** What a bulk change over several requests did: the results of the requests that were
- * answered and, when one failed, the ids without an answer, with the error. A request that
- * failed may still have been applied by the server (a lost response), so those ids have an
- * unknown outcome; the requests after it were not sent. */
-export type BulkOutcome = BulkResult & { unanswered: string[]; error: unknown };
+/** What a bulk change over several requests did. `updated` and `failed` are what the server
+ * said, or what looking the findings up showed after a request without an answer. `left` were
+ * not changed (their request was never sent, or the lookup found them as they were);
+ * `unchecked` got no answer and could not be looked up either. `error` is the failure that
+ * stopped the requests, or null. */
+export type BulkOutcome = BulkResult & { left: string[]; unchecked: string[]; error: unknown };
+/** Lookups that run at a time when a request without an answer is checked. */
+const LOOKUPS = 8;
+
+/** Whether the finding is as the change would leave it. */
+export function applied(finding: InboxFinding, change: FindingChange): boolean {
+  if (change.status !== undefined && finding.status !== change.status) return false;
+  if (change.assignee_id !== undefined && (finding.assignee?.id ?? null) !== change.assignee_id) return false;
+  if (change.feedback !== undefined && finding.feedback !== change.feedback) return false;
+  return true;
+}
+
+/** Whether the server answered and refused: then nothing was changed, and nothing is unknown. */
+function refused(error: unknown): boolean {
+  return error instanceof ApiError && error.status < 500;
+}
 /** The API's limit on the ids of one bulk request. */
 export const BULK_MAX = 500;
 
@@ -277,6 +293,23 @@ export type FindingGroup = {
 
 const finding = (id: string) => `/api/findings/${encodeURIComponent(id)}`;
 
+/** Sort the findings of a request without an answer into the outcome, by what they are now. */
+async function lookUp(ids: readonly string[], change: FindingChange, outcome: BulkOutcome): Promise<void> {
+  const queue = [...ids];
+  const worker = async () => {
+    for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+      try {
+        const now = await apiGet<InboxFinding>(finding(id));
+        (applied(now, change) ? outcome.updated : outcome.left).push(id);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) outcome.failed.push({ id, error: "not_found", status: null });
+        else outcome.unchecked.push(id);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(LOOKUPS, queue.length) }, worker));
+}
+
 export const inboxApi = {
   list: (search: InboxSearch, group: GroupFilter | null, cursor?: string) =>
     apiGet<Page<InboxFinding>>(listUrl(search, group, cursor)),
@@ -284,12 +317,13 @@ export const inboxApi = {
     apiGet<{ items: FindingGroup[]; truncated: boolean }>(groupsUrl(search, by)),
   change: (id: string, change: FindingChange) => apiSend<InboxFinding>("PATCH", finding(id), change),
   /** One change to many findings: at most 500 ids a request, one request after the other.
-   * A request that fails after others were answered does not throw: what was changed stays
-   * changed, so the outcome carries the results so far, the ids without an answer and the
-   * error. It throws only when the first request fails; even then the server may have applied
-   * it, so the caller reloads in both cases. */
+   * After a request that fails, no further one is sent. A failure without an answer of the
+   * server (a lost response, a 5xx) does not say the change was not applied, so those
+   * findings are looked up one by one, whatever the list's filter shows, and counted as what
+   * they turned out to be. It throws only when the first request failed and no finding was
+   * found changed, so nothing is to report but the error. */
   bulk: async (ids: readonly string[], change: FindingChange): Promise<BulkOutcome> => {
-    const outcome: BulkOutcome = { updated: [], failed: [], unanswered: [], error: null };
+    const outcome: BulkOutcome = { updated: [], failed: [], left: [], unchecked: [], error: null };
     const parts = chunks(ids, BULK_MAX);
     for (const [index, part] of parts.entries()) {
       try {
@@ -297,9 +331,11 @@ export const inboxApi = {
         outcome.updated.push(...answer.updated);
         outcome.failed.push(...answer.failed);
       } catch (error) {
-        if (index === 0) throw error;
-        outcome.unanswered = parts.slice(index).flat();
         outcome.error = error;
+        outcome.left = parts.slice(index + 1).flat();
+        if (refused(error)) outcome.left.unshift(...part);
+        else await lookUp(part, change, outcome);
+        if (outcome.updated.length === 0 && outcome.failed.length === 0) throw error;
         break;
       }
     }

@@ -225,10 +225,12 @@ describe("findings.inbox", () => {
     await user.click(screen.getByRole("checkbox", { name: "Select all loaded findings" }));
     await user.click(screen.getByRole("button", { name: "Acknowledge" }));
     await waitFor(() =>
-      expect(status()).toMatch(/^500 findings acknowledged\. 1 got no answer and stays selected: check the reloaded list before trying again \(/),
+      expect(status()).toBe("500 findings acknowledged. 1 was not changed and stays selected. The request failed: cache unavailable."),
     );
+    // The finding without an answer was looked up and found as it was.
+    expect(asked.gets).toContain("/api/findings/f-501");
     expect(asked.bulks.map((b) => b.ids.length)).toEqual([500, 1]);
-    // The list was asked again, and only the finding without an answer is still selected: a retry sends it alone.
+    // The list was asked again, and only the unchanged finding is still selected: a retry sends it alone.
     expect(within(screen.getByRole("group", { name: "Actions on the selected findings" })).getByText("1 selected")).toBeTruthy();
     asked.bulk = (ids) => ({ updated: ids, failed: [] });
     await user.click(screen.getByRole("button", { name: "Acknowledge" }));
@@ -236,11 +238,37 @@ describe("findings.inbox", () => {
     expect(asked.bulks[2]?.ids).toEqual(asked.bulks[1]?.ids);
   });
 
-  it("reloads after a request whose answer was lost, because the server may have applied it", async () => {
+  it("looks up what a lost answer left unknown, also when the finding left the list", async () => {
     const asked = backend(THREE, asRole("editor"));
-    // The server acknowledges the finding, and the response never arrives.
+    // The server mutes the finding, so the default filter no longer lists it, and the
+    // response never arrives.
     asked.bulk = () => {
-      asked.items = [finding(1, { status: "acked" }), finding(2, { severity: "critical" }), finding(3)];
+      asked.items = [finding(2, { severity: "critical" }), finding(3)];
+      asked.find = (id) => (id === "f-1" ? finding(1, { status: "muted" }) : undefined);
+      throw new TypeError("Failed to fetch");
+    };
+    const user = userEvent.setup();
+    renderApp("/findings");
+    await rows();
+    await select(user, "Spike number 1");
+    await select(user, "Spike number 3");
+    await user.click(screen.getByRole("button", { name: "Mute…" }));
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByRole("textbox", { name: "Reason" }), "sensor swap");
+    await user.click(within(dialog).getByRole("button", { name: "Mute" }));
+    // One was muted after all, one no longer exists: both are said, and nothing stays selected.
+    await waitFor(() =>
+      expect(status()).toBe("1 finding muted. 1 could not be changed: 1 no longer exists. The request failed: Failed to fetch."),
+    );
+    expect(asked.gets).toEqual(expect.arrayContaining(["/api/findings/f-1", "/api/findings/f-3"]));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("Spike number 1")).toBeNull());
+    expect(screen.queryByRole("group", { name: "Actions on the selected findings" })).toBeNull();
+  });
+
+  it("shows the error and keeps the selection when a lost answer changed nothing", async () => {
+    const asked = backend(THREE, asRole("editor"));
+    asked.bulk = () => {
       throw new TypeError("Failed to fetch");
     };
     const user = userEvent.setup();
@@ -250,11 +278,40 @@ describe("findings.inbox", () => {
     const before = listRequests(asked).length;
     await user.click(screen.getByRole("button", { name: "Acknowledge" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/^Could not change the findings: /);
-    // The list was asked again and shows what the server did; the selection is kept.
+    expect(asked.gets).toContain("/api/findings/f-1");
     await waitFor(() => expect(listRequests(asked).length).toBeGreaterThan(before));
-    const row = (await screen.findByText("Spike number 1")).closest('[role="row"]') as HTMLElement;
-    await waitFor(() => expect(within(row).getAllByRole("cell")[5]?.textContent).toBe("acked"));
     expect(screen.getByText("1 selected")).toBeTruthy();
+  });
+
+  it("does not look findings up after the server refused the request", async () => {
+    const asked = backend(THREE, asRole("editor"));
+    asked.bulk = () => json({ detail: "Your role does not allow this." }, 403);
+    const user = userEvent.setup();
+    renderApp("/findings");
+    await rows();
+    await select(user, "Spike number 1");
+    await user.click(screen.getByRole("button", { name: "Acknowledge" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/^Could not change the findings: /);
+    expect(asked.gets.some((url) => url.startsWith("/api/findings/f-"))).toBe(false);
+  });
+
+  it("keeps a finding selected that was ticked while a change was running", async () => {
+    const asked = backend(THREE, asRole("editor"));
+    let answer: (value: Response) => void = () => undefined;
+    asked.bulk = () => new Promise<Response>((resolve) => (answer = resolve)) as unknown as Response;
+    const user = userEvent.setup();
+    renderApp("/findings");
+    await rows();
+    await select(user, "Spike number 1");
+    await user.click(screen.getByRole("button", { name: "Acknowledge" }));
+    await waitFor(() => expect(asked.bulks).toHaveLength(1));
+    await select(user, "Spike number 2");
+    answer(json({ updated: ["f-1"], failed: [] }));
+    await waitFor(() => expect(status()).toBe("1 finding acknowledged."));
+    expect(asked.bulks[0]?.ids).toEqual(["f-1"]);
+    expect(screen.getByText("1 selected")).toBeTruthy();
+    const row = screen.getByText("Spike number 2").closest('[role="row"]') as HTMLElement;
+    expect((within(row).getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
   });
 
   it("does not select again a finding that left the list and came back", async () => {
@@ -305,8 +362,11 @@ describe("findings.inbox", () => {
     const app = renderApp("/findings");
     await rows();
     await user.click(await screen.findByRole("button", { name: "Saved filters (1)" }));
+    // Both events are dispatched in the same task, so the typed text is still waiting when the
+    // saved filter is applied, however slow the runner is.
+    const feeders = screen.getByRole("button", { name: "Feeders" });
     fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "pump" } });
-    await user.click(screen.getByRole("button", { name: "Feeders" }));
+    fireEvent.click(feeders);
     await waitFor(() => expect(searchOf(app)).toEqual({ q: "feeder" }));
     expect((screen.getByRole("textbox", { name: "Search" }) as HTMLInputElement).value).toBe("feeder");
     await new Promise((resolve) => setTimeout(resolve, 250));

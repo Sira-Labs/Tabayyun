@@ -174,15 +174,20 @@ Each finding in a response gains `series_name`, `asset_path`, `assignee`
   - The CSV uses CRLF line ends, so a cell with a carriage return is quoted and cannot break
     a record; cells that start with a tab or a carriage return are prefixed too.
   - When a later request of a bulk change over more than 500 findings fails, what was
-    changed is reported and reloaded, and only the findings not sent stay selected.
+    changed is reported and reloaded, and the findings whose request was not sent stay
+    selected.
   - A dialog stays open, with Cancel disabled, while its request runs.
   - The stored selection is pruned whenever the loaded findings change, so a finding that
     left the list and came back is not selected again.
   - A value that replaces the search text from outside drops a commit of typed text that
     was still waiting.
-  - A bulk request without an answer has an unknown outcome (the server may have applied it
-    and the response was lost): the list is reloaded also when the first request fails, and
-    the message asks to check it before trying again.
+  - A bulk request without an answer of the server (a lost response, a 5xx) has an unknown
+    outcome. The page then asks for each of its findings by id, eight at a time, whatever
+    the filter shows, and reports them as what they are: changed after all, unchanged (they
+    stay selected) or gone. Only what cannot be looked up either is reported as unknown. A
+    refusal (4xx) is an answer and starts no lookup. The list is reloaded in every case.
+  - A bulk change takes out of the selection only the findings it was sent for, so a row
+    ticked while the request was running stays ticked.
 
 ## Out of scope
 

@@ -12,34 +12,44 @@ const UNASSIGN = "none";
 /** A change with the words that say it was done: `12 findings <done>.` */
 type Action = { change: FindingChange; done: string };
 type Send = (action: Action) => void;
+/** A change as it goes out: the ids it was started with, which the selection may leave. */
+type Sent = { action: Action; ids: readonly string[] };
+/** Reports a bulk change: its result in words, the ids it was sent for and those of them
+ * that stay selected. */
+export type BulkDone = (message: string, sent: readonly string[], keep?: readonly string[]) => void;
+
+const stay = (n: number, one: string, many: string) => `${formatNumber(n)} ${n === 1 ? one : many}`;
 
 /** The actions on the selected findings, for editors (spec 029): acknowledge, mute, resolve,
  * reopen, assign, false positive. Each is one bulk change; `onDone` gets the result in words
  * once the list and the groups have been asked to reload. */
-export function BulkActions({ ids, onDone }: { ids: readonly string[]; onDone: (message: string, keep?: readonly string[]) => void }) {
+export function BulkActions({ ids, onDone }: { ids: readonly string[]; onDone: BulkDone }) {
   const client = useQueryClient();
   const [dialog, setDialog] = useState<"mute" | "resolve" | "assign" | null>(null);
   const bulk = useMutation({
-    mutationFn: (action: Action) => inboxApi.bulk(ids, action.change),
-    onSuccess: (outcome, action) => {
+    mutationFn: (sent: Sent) => inboxApi.bulk(sent.ids, sent.action.change),
+    onSuccess: (outcome, { action, ids: sent }) => {
       void client.invalidateQueries({ queryKey: inboxKeys.all });
       setDialog(null);
       if (outcome.error === null) {
-        onDone(bulkMessage(action.done, outcome));
+        onDone(bulkMessage(action.done, outcome), sent);
         return;
       }
-      // A later request failed: what was changed is reported. The rest got no answer, which
-      // does not say it was not applied; it stays selected, and the reloaded list shows it.
+      // A request failed. What it left unchanged stays selected for another try; what got no
+      // answer was looked up, and only what could not be looked up either is still unknown.
       const why = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
-      const n = outcome.unanswered.length;
-      const left = `${formatNumber(n)} got no answer and ${n === 1 ? "stays" : "stay"} selected: check the reloaded list before trying again (${why}).`;
-      onDone(`${bulkMessage(action.done, outcome)} ${left}`, outcome.unanswered);
+      const words = [bulkMessage(action.done, outcome)];
+      if (outcome.left.length > 0) words.push(`${stay(outcome.left.length, "was not changed and stays", "were not changed and stay")} selected.`);
+      if (outcome.unchecked.length > 0) {
+        words.push(`${stay(outcome.unchecked.length, "got no answer and could not be checked: look at it", "got no answer and could not be checked: look at them")} before trying again.`);
+      }
+      onDone(`${words.join(" ")} The request failed: ${why}.`, sent, [...outcome.left, ...outcome.unchecked]);
     },
-    // The first request failed. The server may have applied it all the same (a response that
-    // was lost), so the list and the groups are reloaded before anyone tries again.
+    // Nothing was found changed. The list and the groups are reloaded all the same, so what
+    // is on the page is what the server has before anyone tries again.
     onError: () => void client.invalidateQueries({ queryKey: inboxKeys.all }),
   });
-  const send: Send = (action) => bulk.mutate(action);
+  const send: Send = (action) => bulk.mutate({ action, ids });
   // A request that was sent cannot be taken back: while it runs the dialog stays, so its
   // result is reported in the dialog that started it and no second change starts beside it.
   const close = () => {

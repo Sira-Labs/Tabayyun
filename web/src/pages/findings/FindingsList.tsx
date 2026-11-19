@@ -3,7 +3,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { formatNumber } from "../../format";
 import { inboxApi, inboxKeys, toggled, toggledAll, type GroupFilter, type InboxSearch } from "../../findingsInbox";
 import { ErrorLine, linkButtonClass } from "../admin/ui";
-import { BulkActions } from "./BulkActions";
+import { BulkActions, type BulkDone } from "./BulkActions";
 import { FindingsTable } from "./FindingsTable";
 import { mutedClass } from "./parts";
 
@@ -45,8 +45,12 @@ export function FindingsList({
   }
   const chosen = useMemo(() => ids.filter((id) => selected.has(id)), [ids, selected]);
 
-  const done = (message: string, keep: readonly string[] = []) => {
-    setSelected(new Set(keep));
+  // Only what the change was sent for leaves the selection: a row ticked while the request
+  // was running stays ticked.
+  const done: BulkDone = (message, sent, keep = []) => {
+    const gone = new Set(sent);
+    for (const id of keep) gone.delete(id);
+    setSelected((now) => new Set([...now].filter((id) => !gone.has(id))));
     onNotice(message);
     // The actions bar goes with the selection: keep the focus in the list.
     frame.current?.focus();

@@ -56,6 +56,8 @@ export type Backend = {
   gets: string[];
   bulks: { ids: string[]; change: FindingChange }[];
   bulk: (ids: string[]) => BulkResult | Response;
+  /** One finding by id, whatever the list shows; the default looks in `items`. */
+  find: (id: string) => InboxFinding | undefined;
   saves: { name: string; query: string }[];
   save: () => Response | null;
   deleted: string[];
@@ -72,6 +74,7 @@ export function backend(items: InboxFinding[], options: Parameters<typeof stubFe
     gets: [],
     bulks: [],
     bulk: (ids) => ({ updated: ids, failed: [] }),
+    find: (id) => state.items.find((f) => f.id === id),
     saves: [],
     save: () => null,
     deleted: [],
@@ -91,6 +94,9 @@ export function backend(items: InboxFinding[], options: Parameters<typeof stubFe
       return state.bulk(sent.ids);
     }
     if (path === "/api/findings") return state.list(new URLSearchParams(query));
+    if (path.startsWith("/api/findings/") && method === "GET") {
+      return state.find(decodeURIComponent(path.slice("/api/findings/".length))) ?? json({ detail: "not_found" }, 404);
+    }
     if (path === "/api/finding-filters" && method === "GET") return { items: state.filters };
     if (path === "/api/finding-filters" && method === "POST") {
       const sent = body as { name: string; query: string };
