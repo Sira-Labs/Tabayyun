@@ -92,6 +92,31 @@ describe("live.events", () => {
     expect(lists).toBe(2);
   });
 
+  it("asks again only the query that was still on its first request", async () => {
+    const opened = fakeEventSource();
+    const asked = backend([finding(1)]);
+    const app = renderApp("/findings");
+    const source = await stream(opened);
+    await screen.findByText("Spike number 1");
+    await accepted(source, asked);
+    // A second query of the same group that never gets its first answer.
+    let slow = 0;
+    void app.client.prefetchQuery({
+      queryKey: ["findings", "slow"],
+      queryFn: () => {
+        slow += 1;
+        return new Promise<never>(() => undefined);
+      },
+    });
+    const before = listRequests(asked).length;
+    source.emit("finding.created", { run_id: "r1", count: 1 });
+    await waitFor(() => expect(listRequests(asked).length).toBe(before + 1));
+    // The slow one keeps being waited for; the list that has its data is not asked again.
+    await settle(120);
+    expect(listRequests(asked).length).toBe(before + 1);
+    expect(slow).toBe(1);
+  });
+
   it("gathers the events of a moment into one reload", async () => {
     const opened = fakeEventSource();
     const asked = backend([finding(1)]);

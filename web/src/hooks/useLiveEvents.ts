@@ -26,6 +26,8 @@ export function eventsUrl(workspaceId: string): string {
  * a page's own requests and the moment its stream was listening. */
 export function connectLiveEvents(client: QueryClient, workspaceId: string): () => void {
   const pending = new Set<string>();
+  /** Queries that were on their first request when their reload was asked for. */
+  let waiting = new Set<Query>();
   let gather: ReturnType<typeof setTimeout> | undefined;
   let reopen: ReturnType<typeof setTimeout> | undefined;
   let source: EventSource | undefined;
@@ -34,19 +36,24 @@ export function connectLiveEvents(client: QueryClient, workspaceId: string): () 
     gather = undefined;
     const roots = new Set(pending);
     pending.clear();
-    const asked = (query: Query) => roots.has(String(query.queryKey[0]));
+    const late = waiting;
+    waiting = new Set();
+    const asked = (query: Query) => roots.has(String(query.queryKey[0])) || late.has(query);
     // A query still on its first request cannot be reloaded now: the library lets that
-    // request finish and takes its answer, which may be older than the event. Its reload is
-    // asked for again once the request is over.
-    const loading = client
-      .getQueryCache()
-      .findAll({ predicate: (query) => asked(query) && query.state.fetchStatus === "fetching" && query.state.data === undefined });
+    // request finish and takes its answer, which may be older than the event. Those
+    // queries, and only those, are asked again once the request is over.
+    for (const query of client.getQueryCache().findAll({ predicate: asked })) {
+      if (query.state.fetchStatus === "fetching" && query.state.data === undefined) waiting.add(query);
+    }
     void client.invalidateQueries({ predicate: asked });
-    if (loading.length > 0) reload(loading.map((query) => String(query.queryKey[0])));
+    if (waiting.size > 0) schedule();
+  };
+  const schedule = () => {
+    gather ??= setTimeout(flush, live.gatherMs);
   };
   const reload = (roots: readonly string[]) => {
     for (const root of roots) pending.add(root);
-    gather ??= setTimeout(flush, live.gatherMs);
+    schedule();
   };
   const open = () => {
     reopen = undefined;
