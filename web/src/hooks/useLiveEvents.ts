@@ -1,6 +1,6 @@
 // The live event stream of the current workspace (spec 030): when the API says that a run
 // finished or findings were stored, the queries that show them are reloaded.
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQueryClient, type Query, type QueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
 /** First key segments of the queries a finished run can change. */
@@ -34,7 +34,15 @@ export function connectLiveEvents(client: QueryClient, workspaceId: string): () 
     gather = undefined;
     const roots = new Set(pending);
     pending.clear();
-    void client.invalidateQueries({ predicate: (query) => roots.has(String(query.queryKey[0])) });
+    const asked = (query: Query) => roots.has(String(query.queryKey[0]));
+    // A query still on its first request cannot be reloaded now: the library lets that
+    // request finish and takes its answer, which may be older than the event. Its reload is
+    // asked for again once the request is over.
+    const loading = client
+      .getQueryCache()
+      .findAll({ predicate: (query) => asked(query) && query.state.fetchStatus === "fetching" && query.state.data === undefined });
+    void client.invalidateQueries({ predicate: asked });
+    if (loading.length > 0) reload(loading.map((query) => String(query.queryKey[0])));
   };
   const reload = (roots: readonly string[]) => {
     for (const root of roots) pending.add(root);

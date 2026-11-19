@@ -68,6 +68,30 @@ describe("live.events", () => {
     expect(await screen.findByText("Spike number 2")).toBeTruthy();
   });
 
+  it("reloads a list whose first request was still running when the stream opened", async () => {
+    const opened = fakeEventSource();
+    const asked = backend([finding(1)]);
+    // The first list request is answered late, with what the server had when it was asked.
+    let answer: (page: { items: ReturnType<typeof finding>[]; next_cursor: null }) => void = () => undefined;
+    let lists = 0;
+    asked.list = () => {
+      lists += 1;
+      if (lists > 1) return { items: asked.items, next_cursor: null };
+      return new Promise((resolve) => (answer = resolve)) as unknown as ReturnType<typeof asked.list>;
+    };
+    renderApp("/findings");
+    const source = await stream(opened);
+    await waitFor(() => expect(lists).toBe(1));
+    asked.items = [finding(2), finding(1)];
+    source.accept();
+    // The reload the open asks for comes while the first request is still out.
+    await settle(60);
+    expect(lists).toBe(1);
+    answer({ items: [finding(1)], next_cursor: null });
+    expect(await screen.findByText("Spike number 2")).toBeTruthy();
+    expect(lists).toBe(2);
+  });
+
   it("gathers the events of a moment into one reload", async () => {
     const opened = fakeEventSource();
     const asked = backend([finding(1)]);

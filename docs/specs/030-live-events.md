@@ -188,6 +188,9 @@ at most one per second.
     its stream opens, the first time included: between a page's own requests and the
     moment its stream is listened for, an event can pass that nothing replays. The cost is
     one extra reload of the visible queries per page load.
+  - A query that is still on its first request when a reload is asked for cannot be
+    reloaded then (the query library lets the request finish and takes its answer); the web
+    app asks again once that request is over.
   - An upload's cache and coverage are written after the run completed, outside its
     transaction; `run.updated` tells the pages that reloaded on `run.completed` to do so
     once more.
