@@ -183,9 +183,13 @@ Each finding in a response gains `series_name`, `asset_path`, `assignee`
     was still waiting.
   - A bulk request without an answer of the server (a lost response, a 5xx) has an unknown
     outcome. The page then asks for each of its findings by id, eight at a time, whatever
-    the filter shows, and reports them as what they are: changed after all, unchanged (they
-    stay selected) or gone. Only what cannot be looked up either is reported as unknown. A
-    refusal (4xx) is an answer and starts no lookup. The list is reloaded in every case.
+    the filter shows. One that is now as the change asked (status with the reason and the
+    end that were sent, assignee, feedback) is reported as being so now, not as changed by
+    the request: a lookup cannot tell who made it so. An unchanged one stays selected, one
+    that is gone is said to be gone. One that cannot be looked up either is reported as
+    unknown and stays selected until the next change, also when the list no longer shows
+    it, so trying again tells what became of it. A refusal (4xx) is an answer and starts no
+    lookup. The list is reloaded in every case.
   - A bulk change takes out of the selection only the findings it was sent for, so a row
     ticked while the request was running stays ticked.
 

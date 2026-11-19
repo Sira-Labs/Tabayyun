@@ -244,7 +244,7 @@ describe("findings.inbox", () => {
     // response never arrives.
     asked.bulk = () => {
       asked.items = [finding(2, { severity: "critical" }), finding(3)];
-      asked.find = (id) => (id === "f-1" ? finding(1, { status: "muted" }) : undefined);
+      asked.find = (id) => (id === "f-1" ? finding(1, { status: "muted", status_reason: "sensor swap" }) : undefined);
       throw new TypeError("Failed to fetch");
     };
     const user = userEvent.setup();
@@ -258,7 +258,9 @@ describe("findings.inbox", () => {
     await user.click(within(dialog).getByRole("button", { name: "Mute" }));
     // One was muted after all, one no longer exists: both are said, and nothing stays selected.
     await waitFor(() =>
-      expect(status()).toBe("1 finding muted. 1 could not be changed: 1 no longer exists. The request failed: Failed to fetch."),
+      expect(status()).toBe(
+        "No findings muted. 1 could not be changed: 1 no longer exists. 1 finding got no answer and is now muted. The request failed: Failed to fetch.",
+      ),
     );
     expect(asked.gets).toEqual(expect.arrayContaining(["/api/findings/f-1", "/api/findings/f-3"]));
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -280,6 +282,58 @@ describe("findings.inbox", () => {
     expect((await screen.findByRole("alert")).textContent).toMatch(/^Could not change the findings: /);
     expect(asked.gets).toContain("/api/findings/f-1");
     await waitFor(() => expect(listRequests(asked).length).toBeGreaterThan(before));
+    expect(screen.getByText("1 selected")).toBeTruthy();
+  });
+
+  it("keeps findings selected that got no answer and could not be looked up, also off the list", async () => {
+    const asked = backend(THREE, asRole("editor"));
+    // The server resolves the finding; neither the response nor the lookup gets through.
+    asked.bulk = () => {
+      asked.items = [finding(2, { severity: "critical" }), finding(3)];
+      asked.find = () => {
+        throw new TypeError("Failed to fetch");
+      };
+      throw new TypeError("Failed to fetch");
+    };
+    const user = userEvent.setup();
+    renderApp("/findings");
+    await rows();
+    await select(user, "Spike number 1");
+    await user.click(screen.getByRole("button", { name: "Resolve…" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Resolve" }));
+    await waitFor(() =>
+      expect(status()).toBe(
+        "1 got no answer and could not be checked: it stays selected, also when the list no longer shows it. The request failed: Failed to fetch.",
+      ),
+    );
+    // The reloaded list no longer shows it; it is still selected, and trying again says what it is.
+    await waitFor(() => expect(screen.queryByText("Spike number 1")).toBeNull());
+    expect(screen.getByText("1 selected")).toBeTruthy();
+    asked.bulk = (ids) => ({ updated: [], failed: ids.map((id) => ({ id, error: "transition", status: "resolved" })) });
+    await user.click(screen.getByRole("button", { name: "Resolve…" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Resolve" }));
+    await waitFor(() => expect(status()).toBe("No findings resolved. 1 could not be changed: 1 is resolved."));
+    expect(asked.bulks[1]?.ids).toEqual(["f-1"]);
+    expect(screen.queryByRole("group", { name: "Actions on the selected findings" })).toBeNull();
+  });
+
+  it("does not take a finding that already was as asked for one the request changed", async () => {
+    // Muted before, muted again with another reason, and the response is lost: the lookup
+    // finds it muted, but not with what was sent, so it counts as not changed.
+    const asked = backend([finding(1, { status: "muted", status_reason: "old reason" }), finding(2)], asRole("editor"));
+    asked.bulk = () => {
+      throw new TypeError("Failed to fetch");
+    };
+    const user = userEvent.setup();
+    renderApp("/findings?status=muted");
+    await rows();
+    await select(user, "Spike number 1");
+    await user.click(screen.getByRole("button", { name: "Mute…" }));
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByRole("textbox", { name: "Reason" }), "new reason");
+    await user.click(within(dialog).getByRole("button", { name: "Mute" }));
+    expect((await within(dialog).findByRole("alert")).textContent).toMatch(/^Could not change the findings: /);
+    expect(asked.gets).toContain("/api/findings/f-1");
     expect(screen.getByText("1 selected")).toBeTruthy();
   });
 

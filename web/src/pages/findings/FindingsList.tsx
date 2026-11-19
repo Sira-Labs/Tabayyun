@@ -35,19 +35,27 @@ export function FindingsList({
   const ids = useMemo(() => items.map((f) => f.id), [items]);
   const { fetchNextPage, hasNextPage } = findings;
   const loadMore = useCallback(() => void fetchNextPage(), [fetchNextPage]);
+  // Findings whose last change got no answer and could not be looked up: they stay selected
+  // until the next change, also when the list no longer shows them, so trying again tells
+  // what became of them.
+  const [unknown, setUnknown] = useState<ReadonlySet<string>>(() => new Set());
   // Findings a reload dropped are no longer selected, also when a later reload brings them
   // back: the stored selection is pruned whenever the loaded findings change.
   const [pruned, setPruned] = useState(ids);
   if (ids !== pruned) {
     setPruned(ids);
-    const loaded = new Set(ids);
-    if ([...selected].some((id) => !loaded.has(id))) setSelected(new Set([...selected].filter((id) => loaded.has(id))));
+    const kept = new Set([...ids, ...unknown]);
+    if ([...selected].some((id) => !kept.has(id))) setSelected(new Set([...selected].filter((id) => kept.has(id))));
   }
-  const chosen = useMemo(() => ids.filter((id) => selected.has(id)), [ids, selected]);
+  const chosen = useMemo(() => {
+    const loaded = new Set(ids);
+    return [...ids.filter((id) => selected.has(id)), ...[...unknown].filter((id) => selected.has(id) && !loaded.has(id))];
+  }, [ids, selected, unknown]);
 
   // Only what the change was sent for leaves the selection: a row ticked while the request
   // was running stays ticked.
-  const done: BulkDone = (message, sent, keep = []) => {
+  const done: BulkDone = (message, sent, keep = [], unchecked = []) => {
+    setUnknown(new Set(unchecked));
     const gone = new Set(sent);
     for (const id of keep) gone.delete(id);
     setSelected((now) => new Set([...now].filter((id) => !gone.has(id))));

@@ -14,9 +14,9 @@ type Action = { change: FindingChange; done: string };
 type Send = (action: Action) => void;
 /** A change as it goes out: the ids it was started with, which the selection may leave. */
 type Sent = { action: Action; ids: readonly string[] };
-/** Reports a bulk change: its result in words, the ids it was sent for and those of them
- * that stay selected. */
-export type BulkDone = (message: string, sent: readonly string[], keep?: readonly string[]) => void;
+/** Reports a bulk change: its result in words, the ids it was sent for, those of them that
+ * stay selected, and those of them whose outcome is unknown. */
+export type BulkDone = (message: string, sent: readonly string[], keep?: readonly string[], unknown?: readonly string[]) => void;
 
 const stay = (n: number, one: string, many: string) => `${formatNumber(n)} ${n === 1 ? one : many}`;
 
@@ -35,18 +35,22 @@ export function BulkActions({ ids, onDone }: { ids: readonly string[]; onDone: B
         onDone(bulkMessage(action.done, outcome), sent);
         return;
       }
-      // A request failed. What it left unchanged stays selected for another try; what got no
-      // answer was looked up, and only what could not be looked up either is still unknown.
+      // A request failed. What got no answer was looked up: a finding found as asked is said
+      // to be so now (a lookup cannot tell who made it so), an unchanged one stays selected
+      // for another try, and one that could not be looked up either stays selected as unknown.
       const why = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
-      const words = [bulkMessage(action.done, outcome)];
-      if (outcome.left.length > 0) words.push(`${stay(outcome.left.length, "was not changed and stays", "were not changed and stay")} selected.`);
-      if (outcome.unchecked.length > 0) {
-        words.push(`${stay(outcome.unchecked.length, "got no answer and could not be checked: look at it", "got no answer and could not be checked: look at them")} before trying again.`);
+      const { found, left, unchecked } = outcome;
+      const words: string[] = [];
+      if (outcome.updated.length + outcome.failed.length > 0) words.push(bulkMessage(action.done, outcome));
+      if (found.length > 0) words.push(`${stay(found.length, "finding got no answer and is", "findings got no answer and are")} now ${action.done}.`);
+      if (left.length > 0) words.push(`${stay(left.length, "was not changed and stays", "were not changed and stay")} selected.`);
+      if (unchecked.length > 0) {
+        words.push(`${stay(unchecked.length, "got no answer and could not be checked: it stays", "got no answer and could not be checked: they stay")} selected, also when the list no longer shows ${unchecked.length === 1 ? "it" : "them"}.`);
       }
-      onDone(`${words.join(" ")} The request failed: ${why}.`, sent, [...outcome.left, ...outcome.unchecked]);
+      onDone(`${words.join(" ")} The request failed: ${why}.`, sent, [...left, ...unchecked], unchecked);
     },
-    // Nothing was found changed. The list and the groups are reloaded all the same, so what
-    // is on the page is what the server has before anyone tries again.
+    // Every finding was found unchanged. The list and the groups are reloaded all the same,
+    // so what is on the page is what the server has before anyone tries again.
     onError: () => void client.invalidateQueries({ queryKey: inboxKeys.all }),
   });
   const send: Send = (action) => bulk.mutate({ action, ids });

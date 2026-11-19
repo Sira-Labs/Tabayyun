@@ -199,17 +199,22 @@ export type FindingChange = {
 export type BulkFailure = { id: string; error: "not_found" | "transition"; status: string | null };
 export type BulkResult = { updated: string[]; failed: BulkFailure[] };
 /** What a bulk change over several requests did. `updated` and `failed` are what the server
- * said, or what looking the findings up showed after a request without an answer. `left` were
- * not changed (their request was never sent, or the lookup found them as they were);
- * `unchecked` got no answer and could not be looked up either. `error` is the failure that
- * stopped the requests, or null. */
-export type BulkOutcome = BulkResult & { left: string[]; unchecked: string[]; error: unknown };
+ * said. After a request without an answer its findings are looked up: `found` are now as the
+ * change asked (which the request may have done, or something before it), `left` are not
+ * (as are those whose request was never sent), a finding that is gone joins `failed`, and
+ * `unchecked` could not be looked up either. `error` is the failure that stopped the
+ * requests, or null. */
+export type BulkOutcome = BulkResult & { found: string[]; left: string[]; unchecked: string[]; error: unknown };
 /** Lookups that run at a time when a request without an answer is checked. */
 const LOOKUPS = 8;
 
-/** Whether the finding is as the change would leave it. */
+/** Whether the finding is as the change would leave it: its status with the reason and the
+ * end of the mute that were sent, the assignee and the feedback. It says what the finding is,
+ * not who made it so. */
 export function applied(finding: InboxFinding, change: FindingChange): boolean {
   if (change.status !== undefined && finding.status !== change.status) return false;
+  if (change.reason !== undefined && finding.status_reason !== change.reason) return false;
+  if (change.muted_until !== undefined && Date.parse(finding.muted_until ?? "") !== Date.parse(change.muted_until)) return false;
   if (change.assignee_id !== undefined && (finding.assignee?.id ?? null) !== change.assignee_id) return false;
   if (change.feedback !== undefined && finding.feedback !== change.feedback) return false;
   return true;
@@ -300,7 +305,7 @@ async function lookUp(ids: readonly string[], change: FindingChange, outcome: Bu
     for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
       try {
         const now = await apiGet<InboxFinding>(finding(id));
-        (applied(now, change) ? outcome.updated : outcome.left).push(id);
+        (applied(now, change) ? outcome.found : outcome.left).push(id);
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) outcome.failed.push({ id, error: "not_found", status: null });
         else outcome.unchecked.push(id);
@@ -319,11 +324,11 @@ export const inboxApi = {
   /** One change to many findings: at most 500 ids a request, one request after the other.
    * After a request that fails, no further one is sent. A failure without an answer of the
    * server (a lost response, a 5xx) does not say the change was not applied, so those
-   * findings are looked up one by one, whatever the list's filter shows, and counted as what
-   * they turned out to be. It throws only when the first request failed and no finding was
-   * found changed, so nothing is to report but the error. */
+   * findings are looked up one by one, whatever the list's filter shows, and reported as what
+   * they turned out to be. It throws only when the first request failed and every finding
+   * was found unchanged, so nothing is to report but the error. */
   bulk: async (ids: readonly string[], change: FindingChange): Promise<BulkOutcome> => {
-    const outcome: BulkOutcome = { updated: [], failed: [], left: [], unchecked: [], error: null };
+    const outcome: BulkOutcome = { updated: [], failed: [], found: [], left: [], unchecked: [], error: null };
     const parts = chunks(ids, BULK_MAX);
     for (const [index, part] of parts.entries()) {
       try {
@@ -335,7 +340,8 @@ export const inboxApi = {
         outcome.left = parts.slice(index + 1).flat();
         if (refused(error)) outcome.left.unshift(...part);
         else await lookUp(part, change, outcome);
-        if (outcome.updated.length === 0 && outcome.failed.length === 0) throw error;
+        const known = outcome.updated.length + outcome.failed.length + outcome.found.length + outcome.unchecked.length;
+        if (known === 0) throw error;
         break;
       }
     }
