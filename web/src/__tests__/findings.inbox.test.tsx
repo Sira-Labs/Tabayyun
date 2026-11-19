@@ -440,6 +440,53 @@ describe("findings.inbox", () => {
     expect(screen.getByText("1 selected")).toBeTruthy();
   });
 
+  it("keeps a refusal on the page when a reload dropped the finding it was sent for", async () => {
+    const asked = backend(THREE, asRole("editor"));
+    let answer: (value: Response) => void = () => undefined;
+    asked.bulk = () => new Promise<Response>((resolve) => (answer = resolve)) as unknown as Response;
+    const user = userEvent.setup();
+    const app = renderApp("/findings");
+    await rows();
+    await select(user, "Spike number 1");
+    await user.click(screen.getByRole("button", { name: "Acknowledge" }));
+    await waitFor(() => expect(asked.bulks).toHaveLength(1));
+    asked.items = [finding(2, { severity: "critical" }), finding(3)];
+    await app.client.invalidateQueries();
+    await waitFor(() => expect(screen.queryByText("Spike number 1")).toBeNull());
+    answer(json({ detail: "Your role does not allow this." }, 403));
+    expect((await screen.findByRole("alert")).textContent).toBe("Could not change the findings: Your role does not allow this.");
+    // The reload after the refusal does not take the message or the selection away.
+    await waitFor(() => expect((screen.getAllByRole("checkbox", { name: /^Select / }) as HTMLInputElement[]).some((box) => box.disabled)).toBe(false));
+    expect(screen.getByRole("alert").textContent).toBe("Could not change the findings: Your role does not allow this.");
+    expect(screen.getByText("1 selected")).toBeTruthy();
+  });
+
+  it("keeps a refusal on the page when the only selected finding is one the list no longer shows", async () => {
+    const asked = backend(THREE, asRole("editor"));
+    // First the answer and the lookup are lost, and the list drops the finding: it stays selected.
+    asked.bulk = () => {
+      asked.items = [finding(2, { severity: "critical" }), finding(3)];
+      asked.find = () => {
+        throw new TypeError("Failed to fetch");
+      };
+      throw new TypeError("Failed to fetch");
+    };
+    const user = userEvent.setup();
+    renderApp("/findings");
+    await rows();
+    await select(user, "Spike number 1");
+    await user.click(screen.getByRole("button", { name: "Acknowledge" }));
+    await waitFor(() => expect(status()).toMatch(/^1 got no answer and could not be checked/));
+    await waitFor(() => expect(screen.queryByText("Spike number 1")).toBeNull());
+    // Trying again is refused: the refusal is shown and stays.
+    asked.bulk = () => json({ detail: "Your role does not allow this." }, 403);
+    await user.click(screen.getByRole("button", { name: "Acknowledge" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("Could not change the findings: Your role does not allow this.");
+    await waitFor(() => expect((screen.getByRole("button", { name: "Acknowledge" }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.getByRole("alert").textContent).toBe("Could not change the findings: Your role does not allow this.");
+    expect(screen.getByText("1 selected")).toBeTruthy();
+  });
+
   it("unlocks the selection and shows the error when the server refuses a change", async () => {
     const asked = backend(THREE, asRole("editor"));
     asked.bulk = () => json({ detail: "Your role does not allow this." }, 403);

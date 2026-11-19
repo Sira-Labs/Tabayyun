@@ -30,7 +30,7 @@ export function BulkActions({
 }: {
   ids: readonly string[];
   onDone: BulkDone;
-  /** Called when a change starts (its ids, running) and when the server refused it (no ids,
+  /** Called when a change starts (its ids, running) and when the server refused it (its ids,
    * not running); `onDone` ends every other change. */
   onHold: (ids: readonly string[], running: boolean) => void;
 }) {
@@ -64,9 +64,10 @@ export function BulkActions({
       onDone(`${words.join(" ")} The request failed: ${why}.`, sent, [...differing, ...unchecked, ...unsent]);
     },
     // The server refused the request, so nothing was changed. The list and the groups are
-    // reloaded all the same, and the selection is no longer held.
-    onError: () => {
-      onHold([], false);
+    // reloaded all the same. The sent findings stay held, also when the list no longer shows
+    // them: they stay selected, so these actions and the refusal they show stay on the page.
+    onError: (_error, sent) => {
+      onHold(sent.ids, false);
       void client.invalidateQueries({ queryKey: inboxKeys.all });
     },
   });

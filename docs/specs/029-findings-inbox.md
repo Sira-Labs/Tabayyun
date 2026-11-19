@@ -193,7 +193,8 @@ Each finding in a response gains `series_name`, `asset_path`, `assignee`
     and starts no lookup. The list is reloaded in every case.
   - One bulk change at a time: while one runs, the checkboxes are disabled and the actions
     stay on the page, so no second change can start beside it and a refusal has a place to
-    show. The findings of the running change stay selected until its result is reported,
+    show. After a refusal the findings it was sent for stay selected, also when the list no
+    longer shows them, so the refusal stays on the page. The findings of the running change stay selected until its result is reported,
     also when a reload drops them in between; "select all loaded" adds and removes the
     loaded rows only.
 
