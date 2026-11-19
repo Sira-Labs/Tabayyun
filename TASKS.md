@@ -564,6 +564,23 @@ starts; the plan is the backlog until then.
         the migration's transaction.
       - Not exercised here: the mute-expiry task on a live worker queue, and the page with
         10 000 findings in a real browser (the test shows only a screenful is drawn).
+- [x] **030 Live events** — `docs/specs/030-live-events.md` (S10-4, 19 Nov). Every criterion
+      is met.
+      - Events travel through Postgres `LISTEN`/`NOTIFY`, published in the transaction that
+        completes the run: no broker to run, no table, and nothing is told that was rolled
+        back. Each api process listens on one extra connection, opened with its first stream.
+      - `finding.created` is one event per run with a count, not one per finding.
+      - No replay: a client that was away, or whose buffer overflowed, gets `resync` and
+        reloads what it shows.
+      - The stream names its workspace in the query (`EventSource` sends no headers), checks
+        the role in a short transaction and then holds no database connection. It ends after
+        15 minutes, which is how a revoked session or role stops receiving.
+      - The web app reloads queries by their first key segment and gathers reloads to one a
+        second; the run page keeps its polling as the fallback.
+      - Seen in a browser against a local api: the inbox grew from 30 to 41 findings after an
+        upload, with one list request and no reload. Not exercised here: the stream through
+        staging's proxy before the merge, and a worker in another process than the api (the
+        tests publish and listen on separate connections).
 - [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
       `tabayyun-api` and `tabayyun-worker` on staging; then a `synthetic` source with
       `poll_interval_s` gives staging a live, polling source for demos.

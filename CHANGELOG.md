@@ -43,6 +43,18 @@ All notable changes to this project are documented here. The format follows
   - `GET /api/findings` gained filters and returns series name, asset path, assignee, the end
     of a mute and feedback; new are `/api/findings/groups`, `/bulk`, `/assignees`, `/export`
     and `/api/finding-filters`. Migration 0015 adds the columns and `finding_filters`.
+- Live events (spec 030):
+  - `GET /api/events` is a server-sent event stream of the workspace: `run.completed` when a
+    run succeeded or failed (also when the reaper fails a lost run) and `finding.created`
+    when a run stored new findings. Events travel through Postgres `LISTEN`/`NOTIFY`, so the
+    worker's runs reach the browsers of every api process, and only with the commit that
+    stored them.
+  - The web app holds one stream per page frame and reloads runs, findings, series and
+    suites when their events arrive: the findings inbox and the runs list update without a
+    reload. Without the stream the pages work as before.
+  - `TABAYYUN_EVENTS_MAX_STREAMS` (200), `TABAYYUN_EVENTS_HEARTBEAT_S` (15) and
+    `TABAYYUN_EVENTS_MAX_AGE_S` (900) bound the streams of an api process. Migration 0016
+    replaces the reaper function; no table changes.
 
 ### Changed
 - `PATCH /api/findings/{id}` refuses fields it does not know (it ignored them before).
