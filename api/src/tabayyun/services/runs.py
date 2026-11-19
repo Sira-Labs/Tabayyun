@@ -25,7 +25,7 @@ from sqlalchemy import delete, func, select, text, tuple_, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from tabayyun import core
+from tabayyun import core, events
 from tabayyun.authz.scope import Scope
 from tabayyun.db.models import Run, Score, Upload
 from tabayyun.jobs.names import RUN_CHECKS_TASK, RUNS_QUEUE
@@ -259,12 +259,18 @@ def run_to_dict(run: Run) -> dict[str, Any]:
 async def mark_failed(factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID, message: str) -> None:
     """Fail a queued or running run with `message` and drop its upload, in its own transaction."""
     async with factory() as session, session.begin():
-        await session.execute(
-            update(Run)
-            .where(Run.id == run_id, Run.status.in_(("queued", "running")))
-            .values(status="failed", error=message[:1000], finished_at=utc_now())
-        )
+        failed = (
+            await session.execute(
+                update(Run)
+                .where(Run.id == run_id, Run.status.in_(("queued", "running")))
+                .values(status="failed", error=message[:1000], finished_at=utc_now())
+                .returning(Run.org_id, Run.workspace_id)
+            )
+        ).first()
         await session.execute(delete(Upload).where(Upload.run_id == run_id))
+        if failed is not None:
+            scope = Scope(org_id=failed.org_id, workspace_id=failed.workspace_id)
+            await events.publish_run_completed(session, scope, run_id, "failed")
     log.error("run.failed", run_id=str(run_id), error=message)
 
 
@@ -394,6 +400,8 @@ async def execute_run(
             }
             await session.execute(update(Run).where(Run.id == run_id).values(stats=stats))
             await session.execute(delete(Upload).where(Upload.run_id == run_id))
+            # Delivered with the commit, so nobody hears of a run that was rolled back (spec 030).
+            await events.publish_run_completed(session, scope, run_id, "succeeded", new_findings=outcome.new)
     except series_service.MetadataError as exc:
         # Rolled back: the series changed since the run started and no longer fits the upload.
         await mark_failed(factory, run_id, f"invalid series metadata: {exc}")

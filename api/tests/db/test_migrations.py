@@ -507,3 +507,34 @@ def test_0015_adds_the_triage_columns_and_downgrades(db_url, fresh_schema):
     finally:
         engine.dispose()
         fresh_schema("auto")
+
+
+def test_0016_replaces_the_reaper_and_downgrades(db_url, fresh_schema):
+    """0016 makes the reaper publish `run.completed`; only the app role may still call it, and
+    its downgrade puts the silent version back."""
+    fresh_schema("auto")
+    engine = create_engine(db_url)
+    source = text("SELECT prosrc FROM pg_proc WHERE proname = 'tabayyun_reap_stale_runs'")
+    signature = "tabayyun_reap_stale_runs(interval)"
+    may_call = text("SELECT has_function_privilege(:role, :f, 'EXECUTE')")
+
+    def check_grants(conn) -> None:
+        assert conn.execute(may_call, {"role": "tabayyun_app", "f": signature}).scalar_one() is True
+        assert conn.execute(may_call, {"role": "public", "f": signature}).scalar_one() is False
+
+    try:
+        with engine.connect() as conn:
+            assert "pg_notify('tabayyun_events'" in conn.execute(source).scalar_one()
+            check_grants(conn)
+        migrate.downgrade(db_url, "0015")
+        assert _current_revision(db_url) == "0015"
+        with engine.connect() as conn:
+            assert "pg_notify" not in conn.execute(source).scalar_one()
+            check_grants(conn)
+        migrate.upgrade(db_url, "head", timescale="auto")
+        with engine.connect() as conn:
+            assert "pg_notify('tabayyun_events'" in conn.execute(source).scalar_one()
+            check_grants(conn)
+    finally:
+        engine.dispose()
+        fresh_schema("auto")

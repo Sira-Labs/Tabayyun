@@ -36,7 +36,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from tabayyun import connectors, core
+from tabayyun import connectors, core, events
 from tabayyun.authz.scope import Scope
 from tabayyun.db.models import DatasetSeries, Run, Score, Series, Source
 from tabayyun.services import baselines as baselines_service
@@ -477,4 +477,7 @@ async def _persist(
             **({"fetch_errors": plan.fetch_errors} if plan.fetch_errors else {}),
         }
         await session.execute(update(Run).where(Run.id == run_id).values(stats=stats))
+        await events.publish_run_completed(
+            session, plan.scope, run_id, "succeeded", new_findings=totals["n_findings_new"]
+        )
     return stats
