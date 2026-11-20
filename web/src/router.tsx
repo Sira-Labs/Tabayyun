@@ -79,6 +79,27 @@ const editSuiteRoute = createRoute({
   path: "/suites/$suiteId/edit",
   component: lazyRouteComponent(() => import("./pages/suites/SuiteEdit"), "SuiteEdit"),
 });
+// The alerts pages load on their first visit too.
+const alertsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/alerts",
+  component: lazyRouteComponent(() => import("./pages/alerts/AlertsList"), "AlertsList"),
+});
+const newAlertRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/alerts/new",
+  component: lazyRouteComponent(() => import("./pages/alerts/AlertNew"), "AlertNew"),
+});
+const alertRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/alerts/$alertId",
+  component: lazyRouteComponent(() => import("./pages/alerts/AlertDetail"), "AlertDetail"),
+});
+const editAlertRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/alerts/$alertId/edit",
+  component: lazyRouteComponent(() => import("./pages/alerts/AlertEdit"), "AlertEdit"),
+});
 // The findings inbox loads on its first visit too.
 const findingsRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -119,6 +140,10 @@ export const routeTree = rootRoute.addChildren([
     newSuiteRoute,
     suiteRoute,
     editSuiteRoute,
+    alertsRoute,
+    newAlertRoute,
+    alertRoute,
+    editAlertRoute,
     findingsRoute,
     accountRoute,
     adminRoute,
