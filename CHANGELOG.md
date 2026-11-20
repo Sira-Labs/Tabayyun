@@ -56,6 +56,23 @@ All notable changes to this project are documented here. The format follows
   - `TABAYYUN_EVENTS_MAX_STREAMS` (200), `TABAYYUN_EVENTS_HEARTBEAT_S` (15) and
     `TABAYYUN_EVENTS_MAX_AGE_S` (900) bound the streams of an api process. Migration 0016
     replaces the reaper function; no table changes.
+- Alerts (spec 031):
+  - An alert rule tells people outside the app what a run found: new findings from a
+    severity upwards (optionally of certain checks, dimensions or assets), or a series whose
+    score fell below a threshold. A finding that only recurred, and a score that stays below,
+    tell nothing again.
+  - Channels are email (needs `TABAYYUN_SMTP_HOST`) and webhook: a JSON `POST` with
+    `X-Tabayyun-Event`, `X-Tabayyun-Delivery` and, when the rule has a secret, an HMAC-SHA256
+    `X-Tabayyun-Signature` (needs `TABAYYUN_MASTER_KEY`, which seals the secret). Webhooks
+    obey the connectors' address policy and follow no redirects.
+  - A rule sends at most one notification per throttle time (default 60 minutes); matches in
+    between are gathered into the next one. Sends are retried three times; every
+    notification is kept with its outcome.
+  - `/alerts` lists the rules with their last notification; workspace admins create, edit,
+    enable, delete and test them, and everyone with access sees a rule's notifications.
+  - `/api/alerts` (list, create, read, change, delete, `/channels`, `POST …/test`,
+    `GET …/notifications`). Changes are written to the audit log without the secret or the
+    full URL. Migration 0017 adds `alert_rules` and `alert_notifications`.
 
 ### Changed
 - `PATCH /api/findings/{id}` refuses fields it does not know (it ignored them before).
