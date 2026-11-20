@@ -879,3 +879,63 @@ async def test_stuck_notifications_are_requeued(admin_env, smtp):  # noqa: F811
             == "failed"
         )
         assert world.notifications(rule["id"])[0][4] == 3
+
+
+async def test_late_worker_does_not_overwrite_a_later_claim(admin_env, smtp, monkeypatch):  # noqa: F811
+    """A send that outlasts its claim: the notification is taken again and sent by another
+    worker. When the first one comes back with a failure, its outcome is dropped: `sent`
+    stays, and nothing is sent again."""
+    async with admin_env.client() as c:
+        world = World(admin_env, c)
+        series = await world.series("feeder")
+        rule = await world.rule(**EMAIL_RULE)
+        run = world.run()
+        world.finding(run, series)
+        [started] = await world.evaluate(run, T0)
+        later = T0 + delivery.STUCK_AFTER
+        real_send = delivery._send_email
+
+        async def slow_then_refused(claimed, dependencies):
+            # While the first worker is still sending, the second takes the notification over.
+            monkeypatch.setattr(delivery, "_send_email", real_send)
+            second = await delivery.deliver(
+                world.factory, started.id, deps(smtp), final_attempt=False, now=later
+            )
+            assert second == "sent"
+            return delivery._Outcome("failed", "421 try again later", retry=True)
+
+        monkeypatch.setattr(delivery, "_send_email", slow_then_refused)
+        first = await delivery.deliver(world.factory, started.id, deps(smtp), final_attempt=False, now=T0)
+        assert first is None
+        row = world.notifications(rule["id"])[0]
+        assert (row[1], row[4], row[5]) == ("sent", 2, None)
+        assert len(smtp.messages) == 1
+
+
+async def test_kind_change_during_a_send_skips_the_retry(admin_env, smtp):  # noqa: F811
+    """The kind changes while a notification is being sent: the change cannot skip it, so
+    the retry does, instead of telling findings as scores."""
+    async with admin_env.client() as c:
+        world = World(admin_env, c)
+        series = await world.series("feeder")
+        rule = await world.rule(**EMAIL_RULE)
+        run = world.run()
+        world.finding(run, series)
+        [started] = await world.evaluate(run, T0)
+        smtp.refuse.add("ops@example.org")
+        with pytest.raises(delivery.DeliveryError):
+            await delivery.deliver(world.factory, started.id, deps(smtp), final_attempt=False, now=T0)
+        # As if the change had come while it was `sending`: it is `pending` again and kept.
+        admin_env.sql(
+            "UPDATE alert_rules SET kind = 'score', condition = CAST(:c AS jsonb) WHERE id = :i",
+            c=json.dumps({"metric": "overall", "below": 70}),
+            i=rule["id"],
+        )
+        smtp.refuse.clear()
+        assert (
+            await delivery.deliver(world.factory, started.id, deps(smtp), final_attempt=False, now=T0)
+            == "skipped"
+        )
+        row = world.notifications(rule["id"])[0]
+        assert (row[1], row[5]) == ("skipped", rules.KIND_CHANGED)
+    assert smtp.messages == []

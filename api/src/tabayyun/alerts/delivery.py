@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import httpx
 import structlog
@@ -73,7 +74,6 @@ class _Claimed:
     recipients: list[str]
     url: str | None
     secret: str | None
-    attempts: int
 
 
 @dataclass(frozen=True)
@@ -87,11 +87,20 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _items_kind(items: list[dict[str, Any]]) -> str | None:
+    """The rule kind that matched these items: a score's crossing names its metric."""
+    if not items:
+        return None
+    return "score" if "metric" in items[0] else "finding"
+
+
 async def _claim(
     session: AsyncSession, notification_id: uuid.UUID, deps: Deps, now: datetime
-) -> _Claimed | _Outcome | None:
+) -> tuple[int, _Claimed | _Outcome] | None:
     """Mark the notification `sending` and read what it tells. None when there is nothing to
-    do (gone, done, not due, or another worker has it); an outcome when it cannot be sent."""
+    do (gone, done, not due, or another worker has it). Otherwise the claim's number (the
+    notification's count of attempts, which every claim raises) with what to send, or with
+    the outcome when it cannot be sent."""
     notification = await session.scalar(
         select(AlertNotification).where(AlertNotification.id == notification_id).with_for_update()
     )
@@ -110,11 +119,17 @@ async def _claim(
         return None
     notification.status, notification.claimed_at = "sending", now
     notification.attempts += 1
+    if _items_kind(notification.items) not in (None, rule.kind):
+        # The rule's kind changed while this one was being sent or waited for a retry: its
+        # matches are of the other kind and are never told as this one.
+        return notification.attempts, _Outcome("skipped", rules.KIND_CHANGED)
     try:
         secret = rules.open_secret(rule, deps.keyring) if rule.channel == "webhook" else None
     except (CredentialsUnavailableError, CredentialsError) as exc:
         # Never sent unsigned to an endpoint that expects a signature.
-        return _Outcome("failed", f"the signing secret cannot be read: {exc}"[:MAX_ERROR])
+        return notification.attempts, _Outcome(
+            "failed", f"the signing secret cannot be read: {exc}"[:MAX_ERROR]
+        )
     content = messages.Content(
         delivery=notification.id,
         event=notification.kind,
@@ -129,7 +144,7 @@ async def _claim(
         sent_at=now,
         link=messages.link_for(deps.public_url, rule.kind),
     )
-    return _Claimed(content, rule.channel, list(rule.recipients), rule.url, secret, notification.attempts)
+    return notification.attempts, _Claimed(content, rule.channel, list(rule.recipients), rule.url, secret)
 
 
 async def _send_email(claimed: _Claimed, deps: Deps) -> _Outcome:
@@ -188,10 +203,13 @@ async def _record(
     notification_id: uuid.UUID,
     outcome: _Outcome,
     *,
+    claim: int,
     final: bool,
     at: datetime,
-) -> str:
-    """Store the outcome; a failure that may pass and has attempts left waits as `pending`."""
+) -> str | None:
+    """Store the outcome; a failure that may pass and has attempts left waits as `pending`.
+    None when the claim is no longer this one's: the notification was taken again meanwhile
+    (this send took longer than `STUCK_AFTER`), and the later claim's outcome stands."""
     again = outcome.status == "failed" and outcome.retry and not final
     status = "pending" if again else outcome.status
     async with factory() as session, session.begin():
@@ -199,7 +217,10 @@ async def _record(
             select(AlertNotification).where(AlertNotification.id == notification_id).with_for_update()
         )
         if notification is None:
-            return "gone"
+            return None
+        if notification.status != "sending" or notification.attempts != claim:
+            log.warning("alert.delivery_superseded", notification_id=str(notification_id), claim=claim)
+            return None
         notification.status, notification.error = status, outcome.error
         if status == "sent":
             notification.sent_at = at
@@ -225,14 +246,14 @@ async def deliver(
         claimed = await _claim(session, notification_id, deps, now)
     if claimed is None:
         return None
-    if isinstance(claimed, _Outcome):
-        outcome = claimed
-    else:
-        outcome = await _send(claimed, deps)
-        # A notification taken again after a lost worker starts a new job: its own count of
-        # attempts ends the retries, whatever the job's says.
-        final_attempt = final_attempt or claimed.attempts >= ATTEMPTS
-    status = await _record(factory, notification_id, outcome, final=final_attempt, at=now)
+    claim, what = claimed
+    outcome = what if isinstance(what, _Outcome) else await _send(what, deps)
+    # A notification taken again after a lost worker starts a new job: its own count of
+    # attempts ends the retries, whatever the job's says.
+    final = final_attempt or claim >= ATTEMPTS
+    status = await _record(factory, notification_id, outcome, claim=claim, final=final, at=now)
+    if status is None:
+        return None
     log.info("alert.delivery", notification_id=str(notification_id), status=status, error=outcome.error)
     if status == "pending":
         raise DeliveryError(outcome.error or "delivery failed")

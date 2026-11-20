@@ -214,7 +214,8 @@ A score match is `{"series_id", "series_name", "asset_path", "metric", "score", 
   `retries_then_failed_and_stuck_sending_is_retaken`,
   `deferred_delivery_is_queued_for_its_due_time`, `inline_mode_queues_what_is_due_later`,
   `kind_change_skips_what_waits`, `unexpected_send_error_is_recorded`,
-  `stuck_notifications_are_requeued`,
+  `stuck_notifications_are_requeued`, `late_worker_does_not_overwrite_a_later_claim`,
+  `kind_change_during_a_send_skips_the_retry`,
   `email_not_configured_is_skipped`, `routes_validation_roles_and_url_visibility`,
   `test_notification_and_audit`, `rotation_reseals_rule_secrets`,
   `evaluation_error_does_not_fail_the_run`.
@@ -262,6 +263,11 @@ A score match is `{"series_id", "series_name", "asset_path", "metric", "score", 
     ends its body cannot hold a worker.
   - Rule names are one line (they become the email subject), and a URL the parser refuses
     is a field error, not a 500.
+  - An outcome is written only by the claim that is still the notification's own (its
+    count of attempts): a worker that comes back after the notification was taken again
+    cannot turn `sent` into `pending`.
+  - A claim whose items are of another kind than the rule now has is `skipped`: a change of
+    kind during a send or between retries is caught where the message would be built.
   - The form drops a field's error when the field changes, and every control of a finding
     condition names the condition's error.
 
