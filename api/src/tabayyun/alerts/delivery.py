@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tabayyun import __version__, mail
@@ -28,6 +28,8 @@ WEBHOOK_TIMEOUT_S = 10.0
 STUCK_AFTER = timedelta(minutes=10)
 MAX_ERROR = 300
 EMAIL_OFF = "email is not configured on this server"
+# Crosses orgs, so it is a SECURITY DEFINER function (migration 0017).
+REQUEUE_SQL = text("SELECT id, org_id FROM tabayyun_requeue_stuck_alerts(:before)")
 
 
 class DeliveryError(Exception):
@@ -71,6 +73,7 @@ class _Claimed:
     recipients: list[str]
     url: str | None
     secret: str | None
+    attempts: int
 
 
 @dataclass(frozen=True)
@@ -126,7 +129,7 @@ async def _claim(
         sent_at=now,
         link=messages.link_for(deps.public_url, rule.kind),
     )
-    return _Claimed(content, rule.channel, list(rule.recipients), rule.url, secret)
+    return _Claimed(content, rule.channel, list(rule.recipients), rule.url, secret, notification.attempts)
 
 
 async def _send_email(claimed: _Claimed, deps: Deps) -> _Outcome:
@@ -150,21 +153,43 @@ async def _send_webhook(claimed: _Claimed, deps: Deps) -> _Outcome:
     except TargetRefusedError as exc:
         return _Outcome("failed", str(exc)[:MAX_ERROR])
     try:
-        async with client:
-            response = await client.post(url, content=body, headers=headers, timeout=WEBHOOK_TIMEOUT_S)
+        # Only the status is read: the body is never loaded, so a receiver cannot hold the
+        # delivery or fill the memory by sending one without end.
+        async with (
+            client,
+            client.stream("POST", url, content=body, headers=headers, timeout=WEBHOOK_TIMEOUT_S) as response,
+        ):
+            status_code = response.status_code
     except TargetRefusedError as exc:
         return _Outcome("failed", str(exc)[:MAX_ERROR])
     except httpx.HTTPError as exc:
         return _Outcome("failed", f"{type(exc).__name__}: {exc}"[:MAX_ERROR], retry=True)
-    if response.is_success:
+    if 200 <= status_code < 300:
         return _Outcome("sent")
     # 4xx says the request is wrong as it is; anything else may pass.
-    retry = response.status_code >= 500 or response.status_code in (408, 429)
-    return _Outcome("failed", f"the webhook answered {response.status_code}", retry=retry)
+    retry = status_code >= 500 or status_code in (408, 429)
+    return _Outcome("failed", f"the webhook answered {status_code}", retry=retry)
+
+
+async def _send(claimed: _Claimed, deps: Deps) -> _Outcome:
+    """Send by the rule's channel. An error nothing here expects is the notification's
+    outcome too: it is claimed, and nothing else would record what became of it."""
+    try:
+        if claimed.channel == "email":
+            return await _send_email(claimed, deps)
+        return await _send_webhook(claimed, deps)
+    except Exception as exc:  # noqa: BLE001  (recorded on the notification and logged, not swallowed)
+        log.exception("alert.delivery_error", notification_id=str(claimed.content.delivery))
+        return _Outcome("failed", f"{type(exc).__name__}: {exc}"[:MAX_ERROR])
 
 
 async def _record(
-    factory: async_sessionmaker[AsyncSession], notification_id: uuid.UUID, outcome: _Outcome, *, final: bool
+    factory: async_sessionmaker[AsyncSession],
+    notification_id: uuid.UUID,
+    outcome: _Outcome,
+    *,
+    final: bool,
+    at: datetime,
 ) -> str:
     """Store the outcome; a failure that may pass and has attempts left waits as `pending`."""
     again = outcome.status == "failed" and outcome.retry and not final
@@ -177,7 +202,7 @@ async def _record(
             return "gone"
         notification.status, notification.error = status, outcome.error
         if status == "sent":
-            notification.sent_at = _now()
+            notification.sent_at = at
     return status
 
 
@@ -202,15 +227,28 @@ async def deliver(
         return None
     if isinstance(claimed, _Outcome):
         outcome = claimed
-    elif claimed.channel == "email":
-        outcome = await _send_email(claimed, deps)
     else:
-        outcome = await _send_webhook(claimed, deps)
-    status = await _record(factory, notification_id, outcome, final=final_attempt)
+        outcome = await _send(claimed, deps)
+        # A notification taken again after a lost worker starts a new job: its own count of
+        # attempts ends the retries, whatever the job's says.
+        final_attempt = final_attempt or claimed.attempts >= ATTEMPTS
+    status = await _record(factory, notification_id, outcome, final=final_attempt, at=now)
     log.info("alert.delivery", notification_id=str(notification_id), status=status, error=outcome.error)
     if status == "pending":
         raise DeliveryError(outcome.error or "delivery failed")
     return status
+
+
+async def requeue_stuck(factory: async_sessionmaker[AsyncSession], now: datetime | None = None) -> int:
+    """Put the notifications left `sending` for longer than `STUCK_AFTER` back to `pending`,
+    in every org, and queue their delivery: a worker that died after claiming one, or lost
+    the database before recording its outcome, leaves no job behind. Returns how many."""
+    now = now or _now()
+    async with factory() as session, session.begin():
+        rows = (await session.execute(REQUEUE_SQL, {"before": now - STUCK_AFTER})).all()
+        for notification_id, org_id in rows:
+            await evaluate.defer_job(session, notification_id, org_id, now)
+    return len(rows)
 
 
 async def deliver_inline(

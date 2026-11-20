@@ -27,18 +27,15 @@ async def execute(
     alerts: delivery.Dispatch | None = None,
 ) -> None:
     """Run the executor matching the run's trigger. Never raises; failures land on the run.
-    With `alerts`, a run this call brought to `succeeded` has the alert rules evaluated."""
+    With `alerts`, a run that succeeded has the alert rules evaluated, once: the evaluation
+    claims the run, so a job delivered twice or two calls that raced evaluate it one time."""
     async with factory() as session:
-        before = (
-            await session.execute(select(Run.trigger, Run.status).where(Run.id == run_id))
-        ).one_or_none()
-    trigger = None if before is None else before.trigger
+        trigger = await session.scalar(select(Run.trigger).where(Run.id == run_id))
     if trigger in dataset_runs.DATASET_TRIGGERS:
         await dataset_runs.execute_dataset_run(factory, run_id, cache, run_fetch)
     else:
         await runs.execute_run(factory, run_id, cache)
-    # A job delivered twice finds the run done and executes nothing: no second evaluation.
-    if alerts is None or before is None or before.status != "queued":
+    if alerts is None:
         return
     async with factory() as session:
         after = (

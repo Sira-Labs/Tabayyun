@@ -97,7 +97,8 @@ def email_message(content: Content, *, sender: str, recipients: list[str]) -> Em
     message = EmailMessage()
     message["From"] = sender
     message["To"] = ", ".join(recipients)
-    message["Subject"] = f"[Tabayyun] {content.rule_name}: {headline(content)}"
+    # A header is one line; names stored before the rule refused line breaks may hold one.
+    message["Subject"] = " ".join(f"[Tabayyun] {content.rule_name}: {headline(content)}".split())
     message["Date"] = formatdate(localtime=False)
     message["Message-ID"] = make_msgid(domain=parseaddr(sender)[1].rpartition("@")[2] or None)
     message["Auto-Submitted"] = "auto-generated"

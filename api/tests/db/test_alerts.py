@@ -168,6 +168,14 @@ class World:
         )
 
 
+class Unread(httpx.AsyncByteStream):
+    """A response body that fails the test when anything reads it."""
+
+    async def __aiter__(self):
+        raise AssertionError("the webhook's answer was read")
+        yield b""  # pragma: no cover
+
+
 def hook_net(handler) -> NetPolicy:
     """An address policy whose network is `handler`; names resolve to a public address."""
 
@@ -232,8 +240,13 @@ async def test_recurrence_and_non_matching_send_nothing(admin_env):
         assert await world.evaluate(run, T0) == []
         assert world.notifications() == []
 
+        # A run is evaluated once: asking again tells nothing, whatever it holds by then.
+        world.finding(run, feeder)
+        assert await world.evaluate(run, T0) == []
+        run = world.run()
         world.finding(run, feeder)
         world.finding(run, feeder, severity="high")
+        world.finding(run, mill)
         [started] = await world.evaluate(run, T0)
         assert (started.rule_id, started.n_matches, started.due_at) == (uuid.UUID(rule["id"]), 2, T0)
         assert [i["severity"] for i in started.items] == ["critical", "high"]
@@ -353,9 +366,21 @@ async def test_throttle_gathers_matches(admin_env, smtp):  # noqa: F811
         assert (
             await delivery.deliver(world.factory, waiting[0], deps(smtp), final_attempt=True, now=due) is None
         )
-        # The next one counts from the due time of the one before.
+        # The next one counts from when the one before was sent.
         [fourth] = [n for n in await match(70) if n.rule_id == uuid.UUID(rule["id"])]
         assert fourth.due_at == T0 + timedelta(minutes=120)
+        # Sent late (a worker was down): the throttle counts from the send, not the due time.
+        late = T0 + timedelta(minutes=170)
+        assert (
+            await delivery.deliver(world.factory, fourth.id, deps(smtp), final_attempt=True, now=late)
+            == "sent"
+        )
+        [fifth] = [n for n in await match(180) if n.rule_id == uuid.UUID(rule["id"])]
+        assert fifth.due_at == late + timedelta(minutes=60)
+        # One that failed told nobody and holds nothing back.
+        admin_env.sql("UPDATE alert_notifications SET status = 'failed' WHERE id = :i", i=fifth.id)
+        [sixth] = [n for n in await match(185) if n.rule_id == uuid.UUID(rule["id"])]
+        assert sixth.due_at == late + timedelta(minutes=60)
 
 
 async def test_deferred_delivery_is_queued_for_its_due_time(admin_env):
@@ -386,7 +411,8 @@ async def test_webhook_delivery_headers_and_signature(admin_env):
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(204)
+        # The answer's body is never read: a receiver cannot hold a delivery with one.
+        return httpx.Response(204, stream=Unread())
 
     keyring = Keyring(base64.b64decode(KEY))
     async with admin_env.client(master_key=KEY) as c:
@@ -745,3 +771,111 @@ async def test_evaluation_error_does_not_fail_the_run(admin_env, monkeypatch):
         run = (await c.get(f"/api/runs/{r.json()['id']}")).json()
     assert run["status"] == "succeeded" and run["stats"]["n_findings_new"] > 0
     assert admin_env.scalar("SELECT count(*) FROM alert_notifications") == 0
+
+
+async def test_inline_mode_queues_what_is_due_later(admin_env):
+    """Without `defer` the caller delivers what is due now; a notification due later still
+    gets its job, or nothing would ever deliver it."""
+    async with admin_env.client() as c:
+        world = World(admin_env, c)
+        series = await world.series("feeder")
+        await world.rule(**EMAIL_RULE, throttle_minutes=30)
+        admin_env.sql("DELETE FROM procrastinate_jobs")
+        for minute in (0, 5):
+            run = world.run()
+            world.finding(run, series)
+            [started] = await world.evaluate(run, T0 + timedelta(minutes=minute))
+            admin_env.sql("UPDATE alert_notifications SET status = 'sent' WHERE id = :i", i=started.id)
+    jobs = admin_env.sql("SELECT args, scheduled_at FROM procrastinate_jobs")
+    assert jobs == [
+        ({"notification_id": str(started.id), "org_id": str(DEFAULT_ORG_ID)}, T0 + timedelta(minutes=30))
+    ]
+
+
+async def test_kind_change_skips_what_waits(admin_env, smtp):  # noqa: F811
+    """A waiting notification holds matches of the rule's old kind: changing the kind skips
+    it instead of telling findings as scores."""
+    async with admin_env.client() as c:
+        world = World(admin_env, c)
+        series = await world.series("feeder")
+        rule = await world.rule(**EMAIL_RULE)
+        run = world.run()
+        world.finding(run, series)
+        [started] = await world.evaluate(run, T0)
+        changed = await c.patch(
+            f"/api/alerts/{rule['id']}",
+            json={"kind": "score", "condition": {"metric": "overall", "below": 70}},
+        )
+        assert changed.status_code == 200, changed.text
+        row = world.notifications(rule["id"])[0]
+        assert (row[1], row[5]) == ("skipped", rules.KIND_CHANGED)
+        assert (
+            await delivery.deliver(world.factory, started.id, deps(smtp), final_attempt=True, now=T0) is None
+        )
+    assert smtp.messages == []
+
+
+async def test_unexpected_send_error_is_recorded(admin_env, smtp, monkeypatch):  # noqa: F811
+    """An error the send does not expect ends the notification `failed` with the reason; it
+    is not left `sending`."""
+
+    async def broken(*args, **kwargs):
+        raise TypeError("cannot format this")
+
+    async with admin_env.client() as c:
+        world = World(admin_env, c)
+        series = await world.series("feeder")
+        rule = await world.rule(**EMAIL_RULE)
+        run = world.run()
+        world.finding(run, series)
+        [started] = await world.evaluate(run, T0)
+        monkeypatch.setattr(delivery, "_send_email", broken)
+        assert (
+            await delivery.deliver(world.factory, started.id, deps(smtp), final_attempt=False, now=T0)
+            == "failed"
+        )
+        row = world.notifications(rule["id"])[0]
+        assert (row[1], row[5]) == ("failed", "TypeError: cannot format this")
+
+
+async def test_stuck_notifications_are_requeued(admin_env, smtp):  # noqa: F811
+    """The periodic task puts a notification a lost worker left `sending` back to `pending`
+    and queues its delivery, across orgs; a fresh claim is left alone, and the retaken one
+    ends after its own third attempt."""
+    async with admin_env.client() as c:
+        world = World(admin_env, c)
+        series = await world.series("feeder")
+        rule = await world.rule(**EMAIL_RULE, throttle_minutes=0)
+        ids = []
+        for claimed in (T0, T0 + timedelta(minutes=9)):
+            run = world.run()
+            world.finding(run, series)
+            [started] = await world.evaluate(run, T0)
+            admin_env.sql(
+                "UPDATE alert_notifications SET status = 'sending', claimed_at = :t, attempts = 2 "
+                "WHERE id = :i",
+                t=claimed,
+                i=started.id,
+            )
+            ids.append(started.id)
+        admin_env.sql("DELETE FROM procrastinate_jobs")
+        now = T0 + timedelta(minutes=12)
+        assert await delivery.requeue_stuck(world.app.state.session_factory, now) == 1
+        assert await delivery.requeue_stuck(world.app.state.session_factory, now) == 0
+        statuses = dict(admin_env.sql("SELECT id, status FROM alert_notifications"))
+        assert (statuses[ids[0]], statuses[ids[1]]) == ("pending", "sending")
+        jobs = admin_env.sql("SELECT task_name, queue_name, args FROM procrastinate_jobs")
+        assert jobs == [
+            (
+                "tabayyun.deliver_alert",
+                "mail",
+                {"notification_id": str(ids[0]), "org_id": str(DEFAULT_ORG_ID)},
+            )
+        ]
+        # The new job counts its attempts from zero; the notification's own count ends them.
+        smtp.refuse.add("ops@example.org")
+        assert (
+            await delivery.deliver(world.factory, ids[0], deps(smtp), final_attempt=False, now=now)
+            == "failed"
+        )
+        assert world.notifications(rule["id"])[0][4] == 3

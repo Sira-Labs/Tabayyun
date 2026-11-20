@@ -8,13 +8,13 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import structlog
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tabayyun.alerts.matching import ScoreValues, finding_matches, score_crossing
 from tabayyun.authz.scope import Scope
-from tabayyun.db.models import AlertNotification, AlertRule, Finding, Score, Series
+from tabayyun.db.models import AlertNotification, AlertRule, Finding, Run, Score, Series
 
 log = structlog.get_logger()
 
@@ -27,21 +27,28 @@ DEFER_AT_SQL = text(
 )
 
 
-async def defer_delivery(session: AsyncSession, notification: AlertNotification) -> None:
-    """Queue the notification's delivery for when it is due, in the caller's transaction."""
+async def defer_job(
+    session: AsyncSession, notification_id: uuid.UUID, org_id: uuid.UUID, scheduled_at: datetime
+) -> None:
+    """Queue a delivery job for `scheduled_at`, in the caller's transaction."""
     # Imported here: `tabayyun.jobs` loads its tasks, which import this package.
     from tabayyun.jobs.names import DELIVER_ALERT_TASK, MAIL_QUEUE
 
-    args = {"notification_id": str(notification.id), "org_id": str(notification.org_id)}
+    args = {"notification_id": str(notification_id), "org_id": str(org_id)}
     await session.execute(
         DEFER_AT_SQL,
         {
             "queue": MAIL_QUEUE,
             "task": DELIVER_ALERT_TASK,
             "args": json.dumps(args),
-            "scheduled_at": notification.due_at,
+            "scheduled_at": scheduled_at,
         },
     )
+
+
+async def defer_delivery(session: AsyncSession, notification: AlertNotification) -> None:
+    """Queue the notification's delivery for when it is due, in the caller's transaction."""
+    await defer_job(session, notification.id, notification.org_id, notification.due_at)
 
 
 async def _new_findings(session: AsyncSession, scope: Scope, run_id: uuid.UUID) -> list[dict[str, Any]]:
@@ -148,20 +155,32 @@ async def gather(
     once or the throttle after the one before. Returns the notification when it is new."""
     # One evaluation at a time per rule, so two runs do not both start a notification.
     await session.execute(select(AlertRule.id).where(AlertRule.id == rule.id).with_for_update())
-    latest = await session.scalar(
+    # The lock above lets at most one notification of a rule wait, so it is looked up by its
+    # status: no ordering by a time an evaluation that waited for the lock could have reversed.
+    own = (AlertNotification.rule_id == rule.id, AlertNotification.kind == "alert")
+    waiting = await session.scalar(
         select(AlertNotification)
-        .where(AlertNotification.rule_id == rule.id, AlertNotification.kind == "alert")
-        .order_by(AlertNotification.created_at.desc(), AlertNotification.id)
+        .where(*own, AlertNotification.status == "pending")
+        .order_by(AlertNotification.due_at, AlertNotification.id)
         .limit(1)
         .with_for_update()
     )
-    if latest is not None and latest.status == "pending":
-        latest.items = [*latest.items, *items][:MAX_ITEMS]
-        latest.n_matches += len(items)
+    if waiting is not None:
+        waiting.items = [*waiting.items, *items][:MAX_ITEMS]
+        waiting.n_matches += len(items)
         return None
+    # The throttle counts from the last one that told something: from when it was sent, which
+    # can be later than when it was due, or from its due time while it is on its way. A
+    # notification that failed or was skipped told nobody and holds nothing back.
+    told = func.greatest(
+        AlertNotification.due_at, func.coalesce(AlertNotification.sent_at, AlertNotification.due_at)
+    )
+    last_told = await session.scalar(
+        select(func.max(told)).where(*own, AlertNotification.status.in_(("sending", "sent")))
+    )
     due_at = now
-    if latest is not None:
-        due_at = max(now, latest.due_at + timedelta(minutes=rule.throttle_minutes))
+    if last_told is not None:
+        due_at = max(now, last_told + timedelta(minutes=rule.throttle_minutes))
     notification = AlertNotification(
         id=uuid.uuid4(),
         org_id=rule.org_id,
@@ -183,8 +202,22 @@ async def evaluate_run(
     session: AsyncSession, scope: Scope, run_id: uuid.UUID, *, now: datetime, defer: bool
 ) -> list[AlertNotification]:
     """Evaluate the workspace's enabled rules on what the run stored, in the caller's
-    transaction. Returns the notifications it started; with `defer` their delivery is queued
-    for the worker."""
+    transaction. Returns the notifications it started. With `defer` their delivery is queued
+    for the worker; without it only that of the ones due later is, and the caller delivers
+    the rest. A run is evaluated once: a second call for it returns nothing."""
+    claimed = await session.scalar(
+        update(Run)
+        .where(
+            Run.id == run_id,
+            Run.workspace_id == scope.workspace_id,
+            Run.status == "succeeded",
+            Run.alerts_evaluated_at.is_(None),
+        )
+        .values(alerts_evaluated_at=now)
+        .returning(Run.id)
+    )
+    if claimed is None:
+        return []
     rules = (
         await session.scalars(
             select(AlertRule)
@@ -211,7 +244,8 @@ async def evaluate_run(
         )
         if notification is not None:
             started.append(notification)
-            if defer:
+            # One due later is always queued: nothing else would deliver it when it is due.
+            if defer or notification.due_at > now:
                 await defer_delivery(session, notification)
     return started
 

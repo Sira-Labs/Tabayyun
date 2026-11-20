@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +24,7 @@ MAX_NAME = 120
 MAX_RECIPIENTS = 10
 MAX_EMAIL = 254
 MAX_URL = 2000
+KIND_CHANGED = "the rule's kind changed before this was sent"
 MAX_ASSET_PREFIX = 200
 MAX_THROTTLE_MINUTES = 1440
 DEFAULT_THROTTLE_MINUTES = 60
@@ -131,7 +132,11 @@ def _url(raw: Any, problem: Any) -> str | None:
         problem("url", "a webhook needs a URL")
         return None
     url = raw.strip()
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+    except ValueError:  # e.g. an unclosed bracket of an IPv6 host
+        problem("url", "must be an https URL")
+        return None
     if len(url) > MAX_URL or parts.scheme != "https" or not parts.hostname:
         problem("url", "must be an https URL")
     elif parts.username or parts.password:
@@ -153,6 +158,9 @@ def validate(data: RuleData) -> RuleData:
     name = data.name.strip() if isinstance(data.name, str) else ""
     if not 1 <= len(name) <= MAX_NAME:
         problem("name", f"must have 1 to {MAX_NAME} characters")
+    elif not name.isprintable():
+        # The name becomes an email subject: one line, nothing invisible.
+        problem("name", "must be one line without control characters")
     condition: dict[str, Any] = {}
     if data.kind not in ALERT_KINDS:
         problem("kind", f"must be one of {', '.join(ALERT_KINDS)}")
@@ -326,6 +334,13 @@ async def change_rule(
     data = validate(data)
     if secret is not UNSET and secret is not None:
         secret = validate_secret(secret, data.channel)
+    if data.kind != rule.kind:
+        # What waits was matched by the other kind and cannot be told as this one.
+        await session.execute(
+            update(AlertNotification)
+            .where(AlertNotification.rule_id == rule.id, AlertNotification.status == "pending")
+            .values(status="skipped", error=KIND_CHANGED)
+        )
     apply(rule, data)
     if secret is not UNSET:
         seal_secret(rule, keyring, secret)

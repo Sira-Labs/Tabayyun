@@ -2,7 +2,12 @@
 
 - `alert_rules`: a condition over a run's findings or scores, a channel (email or webhook)
   and a throttle, per workspace; the webhook's signing secret is AES-GCM ciphertext;
-- `alert_notifications`: what a rule sent or will send, with its outcome.
+- `alert_notifications`: what a rule sent or will send, with its outcome;
+- `runs.alerts_evaluated_at`: set by the one evaluation of a run, so a run is never
+  evaluated twice;
+- `tabayyun_requeue_stuck_alerts(before)`: the periodic task crosses orgs, so it puts
+  notifications a dead worker left `sending` back to `pending` through a SECURITY DEFINER
+  function, like the functions of 0008, 0012, 0014 and 0015.
 
 Both carry row-level security by `org_id`. `tabayyun_app` gets DML on them through the
 default privileges of 0004.
@@ -27,10 +32,24 @@ depends_on: str | Sequence[str] | None = None
 
 CURRENT_ORG = "nullif(current_setting('app.org_id', true), '')::uuid"
 TABLES = ("alert_rules", "alert_notifications")
+REQUEUE_FUNCTION = """
+CREATE FUNCTION tabayyun_requeue_stuck_alerts(p_before timestamptz)
+RETURNS TABLE (id uuid, org_id uuid)
+LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    UPDATE alert_notifications n
+       SET status = 'pending'
+     WHERE n.status = 'sending' AND n.claimed_at <= p_before
+    RETURNING n.id, n.org_id
+$$;
+REVOKE ALL ON FUNCTION tabayyun_requeue_stuck_alerts(timestamptz) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION tabayyun_requeue_stuck_alerts(timestamptz) TO tabayyun_app;
+"""
 
 
 def upgrade() -> None:
-    """Both tables with their policies."""
+    """Both tables with their policies, the runs' column and the function."""
+    # Nullable without a default: no rewrite of `runs`.
+    op.add_column("runs", sa.Column("alerts_evaluated_at", sa.DateTime(timezone=True), nullable=True))
     op.create_table(
         "alert_rules",
         sa.Column("org_id", sa.UUID(), nullable=False),
@@ -111,9 +130,12 @@ def upgrade() -> None:
             f"CREATE POLICY tenant ON {table} USING (org_id = {CURRENT_ORG}) "
             f"WITH CHECK (org_id = {CURRENT_ORG})"
         )
+    op.execute(REQUEUE_FUNCTION)
 
 
 def downgrade() -> None:
-    """Drop both tables: the rules and what they sent are gone."""
+    """Drop the function, the column and both tables: the rules and what they sent are gone."""
+    op.execute("DROP FUNCTION tabayyun_requeue_stuck_alerts(timestamptz)")
+    op.drop_column("runs", "alerts_evaluated_at")
     op.drop_table("alert_notifications")
     op.drop_table("alert_rules")

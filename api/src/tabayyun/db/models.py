@@ -542,6 +542,8 @@ class Run(TenantMixin, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     stats: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
     error: Mapped[str | None] = mapped_column(Text)
+    # Set by the one evaluation of the alert rules on this run (spec 031).
+    alerts_evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created_at()
 
 

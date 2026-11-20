@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import hmac
 import json
@@ -65,6 +66,8 @@ def test_validate_normalises_a_good_rule():
     [
         ({"name": "  "}, "name"),
         ({"name": "x" * 121}, "name"),
+        ({"name": "Critical\nfeeders"}, "name"),
+        ({"name": "Tab\there"}, "name"),
         ({"kind": "other"}, "kind"),
         ({"condition": {"min_severity": "urgent"}}, "condition.min_severity"),
         ({"condition": {**FINDING, "check_ids": ["tby.no_such_check"]}}, "condition.check_ids"),
@@ -83,6 +86,7 @@ def test_validate_normalises_a_good_rule():
         ({"channel": "webhook", "recipients": [], "url": None}, "url"),
         ({"channel": "webhook", "recipients": [], "url": "http://example.org/hook"}, "url"),
         ({"channel": "webhook", "recipients": [], "url": "https://user:pw@example.org/hook"}, "url"),
+        ({"channel": "webhook", "recipients": [], "url": "https://["}, "url"),
         ({"channel": "webhook", "url": "https://example.org/hook"}, "recipients"),
         ({"throttle_minutes": -1}, "throttle_minutes"),
         ({"throttle_minutes": 1441}, "throttle_minutes"),
@@ -253,3 +257,10 @@ def test_webhook_request_signs():
     signed = messages.webhook_headers(content, body, secret="s3cret-value", version="1.2.3")
     expected = hmac.new(b"s3cret-value", body, hashlib.sha256).hexdigest()
     assert signed["X-Tabayyun-Signature"] == f"sha256={expected}"
+
+
+def test_email_subject_is_one_line():
+    """A rule name stored with a line break still gives a header the mail library accepts."""
+    content = dataclasses.replace(_content(), rule_name="Critical\non  feeders")
+    message = messages.email_message(content, sender="t@example.org", recipients=["ops@example.org"])
+    assert message["Subject"] == "[Tabayyun] Critical on feeders: 1 new finding of severity critical"

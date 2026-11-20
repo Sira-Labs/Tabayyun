@@ -28,6 +28,7 @@ from tabayyun.jobs.names import (
     REAP_STALE_RUNS_TASK,
     REFRESH_BASELINES_TASK,
     REOPEN_EXPIRED_MUTES_TASK,
+    REQUEUE_STUCK_ALERTS_TASK,
     RUN_CHECKS_TASK,
     RUN_DUE_SUITES_TASK,
     RUNS_QUEUE,
@@ -227,3 +228,12 @@ async def deliver_alert(context: JobContext, notification_id: str, org_id: str) 
         runtime.alert_deps(),
         final_attempt=context.job.attempts + 1 >= alert_delivery.ATTEMPTS,
     )
+
+
+@app.periodic(cron="*/5 * * * *")
+@app.task(queue=MAINTENANCE_QUEUE, name=REQUEUE_STUCK_ALERTS_TASK, retry=False)
+async def requeue_stuck_alerts(timestamp: int) -> None:
+    """Every five minutes: notifications a lost worker left `sending` are queued again (spec 031)."""
+    requeued = await alert_delivery.requeue_stuck(runtime.session_factory())
+    if requeued:
+        log.warning("alerts.requeued", count=requeued, tick=timestamp)
