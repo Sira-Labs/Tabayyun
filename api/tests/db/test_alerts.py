@@ -1020,3 +1020,23 @@ async def test_a_rules_kind_cannot_change(admin_env):
             5,
         )
         assert world.notifications(rule["id"])[0][1] == "pending"
+
+
+async def test_inline_delivery_records_when_it_was_sent(admin_env, smtp, monkeypatch):  # noqa: F811
+    """The inline path takes what is due by the evaluation's time and, like the worker,
+    records the time after the send as `sent_at`."""
+    async with admin_env.client() as c:
+        world = World(admin_env, c)
+        series = await world.series("feeder")
+        rule = await world.rule(**EMAIL_RULE)
+        run = world.run()
+        world.finding(run, series)
+        started = await world.evaluate(run, T0)
+        done = T0 + timedelta(seconds=8)
+        monkeypatch.setattr(delivery, "_now", lambda: done)
+        await delivery.deliver_inline(world.factory, started, deps(smtp), T0)
+        assert (
+            admin_env.scalar("SELECT sent_at FROM alert_notifications WHERE rule_id = :r", r=rule["id"])
+            == done
+        )
+    assert len(smtp.messages) == 1

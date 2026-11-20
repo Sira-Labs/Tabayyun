@@ -328,10 +328,12 @@ async def deliver_inline(
     deps: Deps,
     now: datetime,
 ) -> None:
-    """Send in this process what is due now, one attempt each; the rest waits for a worker."""
+    """Send in this process what is due now, one attempt each; the rest waits for a worker.
+    `now` is the evaluation's time, which decides what is due; when each was sent is read
+    from the wall clock after its send, as in the worker."""
     for notification in notifications:
         if notification.due_at <= now:
-            await deliver(factory, notification.id, deps, final_attempt=True, now=now)
+            await deliver(factory, notification.id, deps, final_attempt=True, now=now, clock=_now)
 
 
 async def after_run(
