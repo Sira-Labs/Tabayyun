@@ -21,7 +21,10 @@ from tabayyun.authz import get_principal
 from tabayyun.connectors import NetPolicy
 from tabayyun.db import DB_OK, check_db, guard_schema, make_engine, make_session_factory, worker_commits
 from tabayyun.db.roles import check_login, is_rls_violation
+from tabayyun.events.broker import Broker
+from tabayyun.events.listener import Listener
 from tabayyun.headers import SecurityHeadersMiddleware, server_error
+from tabayyun.jobs import libpq_conninfo
 from tabayyun.jobs.names import WORKER_APPLICATION_NAME
 from tabayyun.limits import RateLimitedError
 from tabayyun.limits import response_for as rate_limited_response
@@ -31,6 +34,7 @@ from tabayyun.routers import (
     checks,
     compare,
     datasets,
+    events,
     findings,
     groups,
     invitations,
@@ -72,6 +76,7 @@ def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = No
             log.warning("rate.disabled", hint="TABAYYUN_RATE_LIMITS=false is for load tests only")
         yield
         log.info("api.stop")
+        await app.state.event_listener.stop()
         if oidc is not None:
             await oidc.aclose()
         await engine.dispose()
@@ -95,6 +100,9 @@ def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = No
     app.state.files_root = settings.files_root
     app.state.schema_revision = None
     app.state.oidc = oidc
+    # Live events (spec 030): the listener's connection is opened with the first stream.
+    app.state.event_broker = Broker(settings.events_max_streams)
+    app.state.event_listener = Listener(libpq_conninfo(settings.database_url), app.state.event_broker)
 
     app.add_middleware(
         CsrfMiddleware, public_url=settings.public_url, exempt_paths=frozenset({auth.BACKCHANNEL_PATH})
@@ -108,6 +116,7 @@ def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = No
     for router in (checks, runs, findings, series, sources, groups, datasets, workspaces, compare, suites):
         app.include_router(router.router, dependencies=signed_in)
     app.include_router(findings.filters_router, dependencies=signed_in)
+    app.include_router(events.router, dependencies=signed_in)
     # The admin router orders its own gate: session, then passkey freshness (spec 014).
     app.include_router(admin.router)
     app.include_router(invitations.router)

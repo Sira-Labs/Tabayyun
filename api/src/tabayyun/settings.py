@@ -50,6 +50,18 @@ class Settings(BaseSettings):
         description="Execute jobs in the API process (tests, single-process dev) instead of enqueueing them.",
     )
     worker_concurrency: int = Field(default=2, ge=1, description="Jobs one worker process runs concurrently.")
+    events_max_streams: int = Field(
+        default=200, ge=1, description="Live event streams (spec 030) one API process serves at a time."
+    )
+    events_heartbeat_s: float = Field(
+        default=15.0, gt=0, description="Seconds of silence before a live event stream sends a keep-alive."
+    )
+    events_max_age_s: float = Field(
+        default=900.0,
+        gt=0,
+        description="Seconds after which the API ends a live event stream; the browser connects again, "
+        "which checks the session and the role again.",
+    )
     test_database_url: str | None = Field(
         default=None,
         description="When set, pytest runs the database tests against this URL; otherwise they skip.",

@@ -136,7 +136,7 @@ async def test_full_login_per_method(env, method):
 async def test_anonymous_requests(env):
     """Without a session: 401 on API routes, while version, health and sign-in options answer."""
     async with browser(env.app) as c:
-        for path in ("/api/sources", "/api/checks", "/api/auth/me", "/api/auth/sessions"):
+        for path in ("/api/sources", "/api/checks", "/api/events", "/api/auth/me", "/api/auth/sessions"):
             response = await c.get(path)
             assert response.status_code == 401 and response.json() == {"detail": "not_authenticated"}, path
         assert (await c.get("/api/version")).status_code == 200

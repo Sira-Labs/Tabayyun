@@ -127,6 +127,19 @@ queues. Scale it with `docker compose up -d --scale worker=2`; each worker runs
 `TABAYYUN_WORKER_CONCURRENCY` jobs at once. `GET /healthz` on the api reports
 `queue: {pending, running}`.
 
+## Live events
+
+The web app holds one `text/event-stream` request to `GET /api/events` per open tab (spec
+030). The api sends a comment every `TABAYYUN_EVENTS_HEARTBEAT_S` seconds (default 15), so a
+proxy with an idle timeout of a minute keeps the stream, and ends each stream after
+`TABAYYUN_EVENTS_MAX_AGE_S` (default 900); the browser connects again. One api process
+serves at most `TABAYYUN_EVENTS_MAX_STREAMS` streams (default 200). From its first stream
+until it shuts down, also after the last tab was closed, an api process holds one database
+connection more than its pool (`application_name` `tabayyun-events`): count one per api
+process in the database's connection budget. The bundled Caddy passes the stream on as it comes;
+behind nginx the response's `X-Accel-Buffering: no` turns buffering off for it. A proxy that
+buffers or blocks the stream costs only the live updates: the pages load as before.
+
 ## Schema migrations
 
 The api image runs `python -m tabayyun.db.migrate upgrade head` (the packaged Alembic

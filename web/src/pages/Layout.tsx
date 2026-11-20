@@ -6,6 +6,7 @@ import { ApiError, api, apiGet } from "../api";
 import { authApi, signOut } from "../auth";
 import { Brand, buttonClass } from "../components/Brand";
 import { WorkspacePicker } from "../components/WorkspacePicker";
+import { useLiveEvents } from "../hooks/useLiveEvents";
 import { currentWorkspaceId, resolveWorkspace, setWorkspaceId } from "../workspace";
 import { NoAccess } from "./NoAccess";
 
@@ -21,6 +22,12 @@ function noAccessEmail(error: unknown): string | null | undefined {
   const body = error.body as { detail?: unknown; email?: unknown } | null;
   if (body?.detail !== "no_access") return undefined;
   return typeof body.email === "string" ? body.email : null;
+}
+
+/** Holds the workspace's live event stream (spec 030) for as long as the frame shows it. */
+function LiveEvents({ workspaceId }: { workspaceId: string | null }) {
+  useLiveEvents(workspaceId);
+  return null;
 }
 
 /** Page frame of the signed-in app: checks the session (spec 013) and picks the workspace
@@ -123,6 +130,7 @@ export function Layout() {
             Could not load your workspaces: {workspaces.error.message}
           </p>
         )}
+        <LiveEvents workspaceId={current?.id ?? null} />
         {workspaces.isSuccess && !current && !onAdmin ? <NoWorkspace isAdmin={!!isAdmin} /> : <Outlet />}
       </main>
       <footer className="mx-auto max-w-5xl px-4 pb-6 text-xs text-slate-600 dark:text-slate-400">
