@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -276,13 +277,20 @@ async def deliver(
     *,
     final_attempt: bool,
     now: datetime | None = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> str | None:
     """Send one notification when it is due and record the outcome: `sent`, `skipped` or
     `failed`; None when there was nothing to do. The send happens outside any transaction.
 
+    `now` is when the notification is taken. The time it was sent is read after the send
+    (from `clock`, by default the wall clock; a caller that fixes `now` and gives no clock
+    gets `now`): the throttle counts from there, and a send can take seconds.
+
     Raises:
         DeliveryError: the send failed and may pass later (not on the final attempt).
     """
+    if clock is None:
+        clock = _now if now is None else (lambda fixed=now: fixed)
     now = now or _now()
     async with factory() as session, session.begin():
         claimed = await _claim(session, notification_id, deps, now)
@@ -293,7 +301,7 @@ async def deliver(
     # A notification taken again after a lost worker starts a new job: its own count of
     # attempts ends the retries, whatever the job's says.
     final = final_attempt or claim >= ATTEMPTS
-    status = await _record(factory, notification_id, outcome, claim=claim, final=final, at=now)
+    status = await _record(factory, notification_id, outcome, claim=claim, final=final, at=clock())
     if status is None:
         return None
     log.info("alert.delivery", notification_id=str(notification_id), status=status, error=outcome.error)

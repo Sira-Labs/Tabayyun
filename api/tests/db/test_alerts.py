@@ -925,11 +925,15 @@ async def test_throttle_is_kept_when_the_one_before_is_sent_late(admin_env, smtp
         row = world.notifications(rule["id"])[1]
         assert (row[1], row[3], row[4]) == ("pending", at_last, 0) and smtp.messages == []
         assert [j[0] for j in admin_env.sql("SELECT scheduled_at FROM procrastinate_jobs")] == [at_last]
-        assert (
-            await delivery.deliver(world.factory, second.id, deps(smtp), final_attempt=False, now=at_last)
-            == "sent"
+        # The send itself takes time: the throttle counts from when it was done.
+        done = at_last + timedelta(seconds=8)
+        sent = await delivery.deliver(
+            world.factory, second.id, deps(smtp), final_attempt=False, now=at_last, clock=lambda: done
         )
-        assert len(smtp.messages) == 1
+        assert sent == "sent" and len(smtp.messages) == 1
+        assert admin_env.scalar("SELECT sent_at FROM alert_notifications WHERE id = :i", i=second.id) == done
+        [third] = await match(116)
+        assert third.due_at == done + timedelta(minutes=60)
 
 
 async def test_retry_of_the_one_before_holds_the_next_back(admin_env, smtp):  # noqa: F811
