@@ -71,20 +71,49 @@ const described = (id: string, error: string | undefined, extra?: string) => ({
   "aria-describedby": [error ? `${id}-error` : null, extra ?? null].filter(Boolean).join(" ") || undefined,
 });
 
+/** The API field each input of the form belongs to: where its error is shown and cleared. */
+const FIELD_OF: Record<keyof AlertFormModel, AlertField> = {
+  name: "name",
+  enabled: "enabled",
+  kind: "kind",
+  minSeverity: "condition",
+  checkIds: "condition",
+  dimensions: "condition",
+  assetPrefix: "condition",
+  metric: "condition",
+  below: "condition",
+  channel: "channel",
+  recipients: "recipients",
+  url: "url",
+  secret: "secret",
+  removeSecret: "secret",
+  throttle: "throttle_minutes",
+};
+
 /** The rule form. It checks what the spec states (name, addresses, https URL, throttle,
  * threshold, secret length); the API's 422 and 409 are shown at their fields. */
 export function AlertForm({ catalogue, channels, rule, submitLabel, pending, error, onSubmit }: Props) {
   const [form, setForm] = useState<AlertFormModel>(() => formOf(rule));
   const [local, setLocal] = useState<Partial<Record<AlertField, string>>>({});
+  // The API's errors of fields changed since the last submit: the error object stays until
+  // the next request, the message at a corrected field must not.
+  const [dismissed, setDismissed] = useState<ReadonlySet<AlertField>>(new Set());
   const api = alertErrors(error);
-  const err = (field: AlertField) => local[field] ?? api.fields[field];
-  const set = <K extends keyof AlertFormModel>(key: K, value: AlertFormModel[K]) => setForm((f) => ({ ...f, [key]: value }));
+  const err = (field: AlertField) => local[field] ?? (dismissed.has(field) ? undefined : api.fields[field]);
+  const set = <K extends keyof AlertFormModel>(key: K, value: AlertFormModel[K]) => {
+    const field = FIELD_OF[key];
+    setForm((f) => ({ ...f, [key]: value }));
+    // The score's own check is on the threshold: choosing another score does not answer it.
+    if (key !== "metric") setLocal((l) => Object.fromEntries(Object.entries(l).filter(([k]) => k !== field)));
+    setDismissed((d) => (d.has(field) ? d : new Set(d).add(field)));
+  };
   const toggle = <T extends string>(list: T[], item: T, on: boolean): T[] => (on ? [...list, item] : list.filter((x) => x !== item));
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const found = validateForm(form);
     setLocal(found);
+    setDismissed(new Set());
     if (Object.keys(found).length > 0) return;
     onSubmit(form);
   };
@@ -92,6 +121,9 @@ export function AlertForm({ catalogue, channels, rule, submitLabel, pending, err
   const signing = channels.webhook.signing;
   const removing = form.removeSecret && Boolean(rule?.has_secret);
   const nLocal = Object.keys(local).length;
+  // A finding condition has one error for all its controls: each names it.
+  const conditionError = form.kind === "finding" ? err("condition") : undefined;
+  const inCondition = conditionError ? { "aria-invalid": true, "aria-describedby": "alert-condition-error" } : {};
   return (
     <form onSubmit={submit} noValidate className="space-y-4">
       <div className={`${panelClass} space-y-4`}>
@@ -131,6 +163,7 @@ export function AlertForm({ catalogue, channels, rule, submitLabel, pending, err
                   id="alert-severity"
                   className={`${selectClass} min-h-11`}
                   value={form.minSeverity}
+                  {...inCondition}
                   onChange={(e) => set("minSeverity", e.target.value as AlertFormModel["minSeverity"])}
                 >
                   {SEVERITIES.map((s) => (
@@ -149,7 +182,8 @@ export function AlertForm({ catalogue, channels, rule, submitLabel, pending, err
                   id="alert-prefix"
                   className={inputClass}
                   value={form.assetPrefix}
-                  aria-describedby="alert-prefix-hint"
+                  aria-invalid={conditionError ? true : undefined}
+                  aria-describedby={conditionError ? "alert-condition-error alert-prefix-hint" : "alert-prefix-hint"}
                   onChange={(e) => set("assetPrefix", e.target.value)}
                 />
               </Field>
@@ -163,6 +197,7 @@ export function AlertForm({ catalogue, channels, rule, submitLabel, pending, err
                     <input
                       type="checkbox"
                       checked={form.checkIds.includes(check.id)}
+                      {...inCondition}
                       onChange={(e) => set("checkIds", toggle(form.checkIds, check.id, e.target.checked))}
                     />
                     <span className="font-mono text-xs">{check.id}</span>
@@ -179,6 +214,7 @@ export function AlertForm({ catalogue, channels, rule, submitLabel, pending, err
                     <input
                       type="checkbox"
                       checked={form.dimensions.includes(d)}
+                      {...inCondition}
                       onChange={(e) => set("dimensions", toggle(form.dimensions, d, e.target.checked))}
                     />
                     {d}
@@ -218,8 +254,8 @@ export function AlertForm({ catalogue, channels, rule, submitLabel, pending, err
             </Field>
           </div>
         )}
-        {form.kind === "finding" && <FieldError id="alert-condition-error" message={api.fields.condition} />}
-        <FieldError id="alert-kind-error" message={api.fields.kind} />
+        {form.kind === "finding" && <FieldError id="alert-condition-error" message={conditionError} />}
+        <FieldError id="alert-kind-error" message={err("kind")} />
       </fieldset>
 
       <fieldset className={`${panelClass} space-y-4`}>
@@ -237,7 +273,7 @@ export function AlertForm({ catalogue, channels, rule, submitLabel, pending, err
             Webhook
           </label>
         </div>
-        <FieldError id="alert-channel-error" message={api.fields.channel} />
+        <FieldError id="alert-channel-error" message={err("channel")} />
         {form.channel === "email" ? (
           <Field
             id="alert-recipients"

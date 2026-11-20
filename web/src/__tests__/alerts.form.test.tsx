@@ -166,6 +166,10 @@ describe("alerts.form (new)", () => {
     await user.click(screen.getByRole("button", { name: "Create rule" }));
     expect((await screen.findByText(NAME_TAKEN)).id).toBe("alert-name-error");
     expect(screen.getByLabelText("Name").getAttribute("aria-invalid")).toBe("true");
+    // Changing the name answers the error: it goes, before any new request.
+    await user.type(screen.getByLabelText("Name"), " 2");
+    expect(screen.queryByText(NAME_TAKEN)).toBeNull();
+    expect(screen.getByLabelText("Name").getAttribute("aria-invalid")).toBeNull();
 
     code = "credentials_unavailable";
     await user.click(screen.getByRole("radio", { name: "Webhook" }));
@@ -190,6 +194,33 @@ describe("alerts.form (new)", () => {
     expect((await screen.findByText("1: not an address")).id).toBe("alert-recipients-error");
     expect(screen.getByText("check_ids: unknown check: nope").id).toBe("alert-condition-error");
     expect(screen.getByText("Could not save the rule: colour: unknown field")).toBeTruthy();
+    // Every control of the condition names its error; the recipients keep theirs until changed.
+    const check = screen.getByRole("checkbox", { name: "completeness" });
+    expect(check.getAttribute("aria-invalid")).toBe("true");
+    expect(check.getAttribute("aria-describedby")).toBe("alert-condition-error");
+    expect(screen.getByLabelText("Minimum severity").getAttribute("aria-describedby")).toBe("alert-condition-error");
+    expect(screen.getByLabelText("Asset path prefix (optional)").getAttribute("aria-describedby")).toBe(
+      "alert-condition-error alert-prefix-hint",
+    );
+    await user.click(check);
+    expect(screen.queryByText("check_ids: unknown check: nope")).toBeNull();
+    expect(check.getAttribute("aria-invalid")).toBeNull();
+    expect(screen.getByText("1: not an address")).toBeTruthy();
+  });
+
+  it("clears a field's own error when the field changes, and keeps the others", async () => {
+    stubFetch(alertsBackend().route, ADMIN);
+    const user = userEvent.setup();
+    renderApp("/alerts/new");
+    await screen.findByLabelText("Name");
+    await retype(user, "Throttle (minutes)", "2000");
+    await user.click(screen.getByRole("button", { name: "Create rule" }));
+    expect(await screen.findByText("A name has 1 to 120 characters.")).toBeTruthy();
+    await user.type(screen.getByLabelText("Name"), "N");
+    expect(screen.queryByText("A name has 1 to 120 characters.")).toBeNull();
+    expect(screen.getByLabelText("Name").getAttribute("aria-invalid")).toBeNull();
+    expect(screen.getByText("The throttle is a whole number of minutes from 0 to 1440.")).toBeTruthy();
+    expect(screen.getByText("Enter 1 to 10 addresses.")).toBeTruthy();
   });
 
   it("keeps viewers and editors out", async () => {
