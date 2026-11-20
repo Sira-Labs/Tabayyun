@@ -47,6 +47,9 @@ EXPECTED_TABLES = {
     "series_baselines",
     # Spec 029.
     "finding_filters",
+    # Spec 031.
+    "alert_rules",
+    "alert_notifications",
 }
 HYPERTABLES = {"findings", "metrics", "scores"}
 
@@ -535,6 +538,35 @@ def test_0016_replaces_the_reaper_and_downgrades(db_url, fresh_schema):
         with engine.connect() as conn:
             assert "pg_notify('tabayyun_events'" in conn.execute(source).scalar_one()
             check_grants(conn)
+    finally:
+        engine.dispose()
+        fresh_schema("auto")
+
+
+def test_0017_adds_the_alert_tables_and_downgrades(db_url, fresh_schema):
+    """0017 brings `alert_rules` and `alert_notifications`, each with the tenant policy; its
+    downgrade removes both."""
+    fresh_schema("auto")
+    engine = create_engine(db_url)
+    tables = {"alert_rules", "alert_notifications"}
+    policies = text(
+        "SELECT tablename FROM pg_policies WHERE policyname = 'tenant' AND tablename LIKE 'alert\\_%'"
+    )
+
+    def present() -> set[str]:
+        return set(inspect(engine).get_table_names()) & tables
+
+    try:
+        with engine.connect() as conn:
+            assert set(conn.execute(policies).scalars()) == tables
+        indexes = {i["name"] for i in inspect(engine).get_indexes("alert_notifications")}
+        assert "ix_alert_notifications_rule_id_created_at" in indexes
+        migrate.downgrade(db_url, "0016")
+        assert _current_revision(db_url) == "0016" and present() == set()
+        migrate.upgrade(db_url, "head", timescale="auto")
+        assert present() == tables
+        with engine.connect() as conn:
+            assert set(conn.execute(policies).scalars()) == tables
     finally:
         engine.dispose()
         fresh_schema("auto")
