@@ -155,13 +155,14 @@ async def gather(
     once or the throttle after the one before. Returns the notification when it is new."""
     # One evaluation at a time per rule, so two runs do not both start a notification.
     await session.execute(select(AlertRule.id).where(AlertRule.id == rule.id).with_for_update())
-    # The lock above lets at most one notification of a rule wait, so it is looked up by its
-    # status: no ordering by a time an evaluation that waited for the lock could have reversed.
+    # The waiting notification is looked up by its status, not by a time an evaluation that
+    # waited for the lock could have reversed. Two can wait when one that was being sent came
+    # back for a retry after the next was started: matches join the one that goes last.
     own = (AlertNotification.rule_id == rule.id, AlertNotification.kind == "alert")
     waiting = await session.scalar(
         select(AlertNotification)
         .where(*own, AlertNotification.status == "pending")
-        .order_by(AlertNotification.due_at, AlertNotification.id)
+        .order_by(AlertNotification.due_at.desc(), AlertNotification.id)
         .limit(1)
         .with_for_update()
     )
@@ -171,7 +172,9 @@ async def gather(
         return None
     # The throttle counts from the last one that told something: from when it was sent, which
     # can be later than when it was due, or from its due time while it is on its way. A
-    # notification that failed or was skipped told nobody and holds nothing back.
+    # notification that failed or was skipped told nobody and holds nothing back. This is the
+    # plan; the delivery checks the throttle again when it takes the notification, because the
+    # one before can be sent later than was known here.
     told = func.greatest(
         AlertNotification.due_at, func.coalesce(AlertNotification.sent_at, AlertNotification.due_at)
     )

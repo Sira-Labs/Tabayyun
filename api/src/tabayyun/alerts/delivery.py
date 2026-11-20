@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 import structlog
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tabayyun import __version__, mail
@@ -94,6 +94,44 @@ def _items_kind(items: list[dict[str, Any]]) -> str | None:
     return "score" if "metric" in items[0] else "finding"
 
 
+async def _held_back_until(
+    session: AsyncSession, rule: AlertRule, notification: AlertNotification, now: datetime
+) -> datetime | None:
+    """When the throttle lets the notification go, if that is later than `now`.
+
+    The evaluation plans a notification from what it knew: the one before may have been sent
+    later than it was due, or may still be on its way (being sent, or waiting for a retry).
+    The rule's notifications go one after the other, each at least the throttle after the
+    send before it.
+    """
+    throttle = timedelta(minutes=rule.throttle_minutes)
+    if notification.kind != "alert" or not throttle:
+        return None
+    others = (
+        AlertNotification.rule_id == rule.id,
+        AlertNotification.kind == "alert",
+        AlertNotification.id != notification.id,
+    )
+    on_its_way = await session.scalar(
+        select(func.count())
+        .select_from(AlertNotification)
+        .where(
+            *others,
+            AlertNotification.status.in_(("pending", "sending")),
+            AlertNotification.due_at < notification.due_at,
+        )
+    )
+    if on_its_way:
+        # Its send time is not known yet: look again a throttle from now.
+        return now + throttle
+    last_sent = await session.scalar(
+        select(func.max(AlertNotification.sent_at)).where(*others, AlertNotification.status == "sent")
+    )
+    if last_sent is not None and now < last_sent + throttle:
+        return last_sent + throttle
+    return None
+
+
 async def _claim(
     session: AsyncSession, notification_id: uuid.UUID, deps: Deps, now: datetime
 ) -> tuple[int, _Claimed | _Outcome] | None:
@@ -101,6 +139,17 @@ async def _claim(
     do (gone, done, not due, or another worker has it). Otherwise the claim's number (the
     notification's count of attempts, which every claim raises) with what to send, or with
     the outcome when it cannot be sent."""
+    # The rule's row first, then the notification: the order the evaluation locks them in.
+    # The rule is the lock it gathers under, so taking a notification and starting the next
+    # one do not cross.
+    rule = await session.scalar(
+        select(AlertRule)
+        .join(AlertNotification, AlertNotification.rule_id == AlertRule.id)
+        .where(AlertNotification.id == notification_id)
+        .with_for_update(of=AlertRule)
+    )
+    if rule is None:
+        return None
     notification = await session.scalar(
         select(AlertNotification).where(AlertNotification.id == notification_id).with_for_update()
     )
@@ -113,9 +162,14 @@ async def _claim(
     )
     if notification.status != "pending" and not stuck:
         return None
-    rule = await session.get(AlertRule, notification.rule_id)
     workspace = await session.get(Workspace, notification.workspace_id)
-    if rule is None or workspace is None:
+    if workspace is None:
+        return None
+    later = await _held_back_until(session, rule, notification, now)
+    if later is not None:
+        notification.status, notification.due_at = "pending", later
+        await evaluate.defer_job(session, notification.id, notification.org_id, later)
+        log.info("alert.delivery_postponed", notification_id=str(notification.id), due_at=later.isoformat())
         return None
     notification.status, notification.claimed_at = "sending", now
     notification.attempts += 1

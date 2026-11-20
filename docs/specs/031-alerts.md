@@ -148,7 +148,11 @@ A score match is `{"series_id", "series_name", "asset_path", "metric", "score", 
    due time while it is being sent. A notification that failed or was skipped told nobody
    and holds nothing back. So the first match is told at once, and later ones together, at
    least the throttle after the send before. `items` keeps the first 50 matches; `n_matches`
-   counts all.
+   counts all. That time is the evaluation's plan. The delivery checks it again when it
+   takes the notification: while an earlier one of the rule is still on its way (being sent,
+   or waiting for a retry) or was sent less than the throttle ago, the notification is moved
+   to the later time and its job queued anew. Two can wait at once after such a retry; new
+   matches join the later one.
 3. **Delivery.** The worker's `deliver_alert` job (mail queue) sends a notification when it
    is due: it claims it (`sending`), sends outside any transaction, and records `sent` or the
    error. Three attempts with a growing pause; after the last the notification is `failed`.
@@ -216,6 +220,8 @@ A score match is `{"series_id", "series_name", "asset_path", "metric", "score", 
   `kind_change_skips_what_waits`, `unexpected_send_error_is_recorded`,
   `stuck_notifications_are_requeued`, `late_worker_does_not_overwrite_a_later_claim`,
   `kind_change_during_a_send_skips_the_retry`,
+  `throttle_is_kept_when_the_one_before_is_sent_late`,
+  `retry_of_the_one_before_holds_the_next_back`,
   `email_not_configured_is_skipped`, `routes_validation_roles_and_url_visibility`,
   `test_notification_and_audit`, `rotation_reseals_rule_secrets`,
   `evaluation_error_does_not_fail_the_run`.
@@ -268,6 +274,9 @@ A score match is `{"series_id", "series_name", "asset_path", "metric", "score", 
     cannot turn `sent` into `pending`.
   - A claim whose items are of another kind than the rule now has is `skipped`: a change of
     kind during a send or between retries is caught where the message would be built.
+  - The throttle is checked a second time at delivery, under the rule's lock: the
+    evaluation cannot know when a notification that is being sent, or waits for a retry,
+    will really go.
   - The form drops a field's error when the field changes, and every control of a finding
     condition names the condition's error.
 

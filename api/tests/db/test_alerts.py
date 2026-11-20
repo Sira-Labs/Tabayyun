@@ -939,3 +939,105 @@ async def test_kind_change_during_a_send_skips_the_retry(admin_env, smtp):  # no
         row = world.notifications(rule["id"])[0]
         assert (row[1], row[5]) == ("skipped", rules.KIND_CHANGED)
     assert smtp.messages == []
+
+
+async def test_throttle_is_kept_when_the_one_before_is_sent_late(admin_env, smtp):  # noqa: F811
+    """A match while the notification before is being sent, late: the next one is planned
+    from its due time, and the delivery moves it to a throttle after the real send."""
+    async with admin_env.client() as c:
+        world = World(admin_env, c)
+        series = await world.series("feeder")
+        rule = await world.rule(**EMAIL_RULE, throttle_minutes=60)
+
+        async def match(minute: int):
+            run = world.run()
+            world.finding(run, series)
+            return await world.evaluate(run, T0 + timedelta(minutes=minute))
+
+        [first] = await match(0)
+        sent_late = T0 + timedelta(minutes=55)
+        admin_env.sql(
+            "UPDATE alert_notifications SET status = 'sending', claimed_at = :t, attempts = 1 WHERE id = :i",
+            t=sent_late,
+            i=first.id,
+        )
+        [second] = await match(56)
+        assert second.due_at == T0 + timedelta(minutes=60)
+        admin_env.sql(
+            "UPDATE alert_notifications SET status = 'sent', sent_at = :t WHERE id = :i",
+            t=sent_late,
+            i=first.id,
+        )
+        admin_env.sql("DELETE FROM procrastinate_jobs")
+        at_plan, at_last = T0 + timedelta(minutes=60), sent_late + timedelta(minutes=60)
+        assert (
+            await delivery.deliver(world.factory, second.id, deps(smtp), final_attempt=False, now=at_plan)
+            is None
+        )
+        row = world.notifications(rule["id"])[1]
+        assert (row[1], row[3], row[4]) == ("pending", at_last, 0) and smtp.messages == []
+        assert [j[0] for j in admin_env.sql("SELECT scheduled_at FROM procrastinate_jobs")] == [at_last]
+        assert (
+            await delivery.deliver(world.factory, second.id, deps(smtp), final_attempt=False, now=at_last)
+            == "sent"
+        )
+        assert len(smtp.messages) == 1
+
+
+async def test_retry_of_the_one_before_holds_the_next_back(admin_env, smtp):  # noqa: F811
+    """A notification comes back for a retry after the next one was started: two wait. New
+    matches join the later one, and it goes a throttle after the first was really sent."""
+    async with admin_env.client() as c:
+        world = World(admin_env, c)
+        series = await world.series("feeder")
+        rule = await world.rule(**EMAIL_RULE, throttle_minutes=60)
+
+        async def match(minute: int):
+            run = world.run()
+            world.finding(run, series)
+            return await world.evaluate(run, T0 + timedelta(minutes=minute))
+
+        def minutes(n: int) -> datetime:
+            return T0 + timedelta(minutes=n)
+
+        [first] = await match(0)
+        smtp.refuse.add("ops@example.org")
+        admin_env.sql(
+            "UPDATE alert_notifications SET status = 'sending', claimed_at = :t, attempts = 1 WHERE id = :i",
+            t=T0,
+            i=first.id,
+        )
+        [second] = await match(1)  # started while the first is being sent
+        admin_env.sql(
+            "UPDATE alert_notifications SET status = 'pending' WHERE id = :i", i=first.id
+        )  # its retry
+        assert await match(2) == []  # joins the later one
+        rows = world.notifications(rule["id"])
+        assert [(r[1], r[2]) for r in rows] == [("pending", 1), ("pending", 2)]
+
+        # The second is due while the first still waits for its retry: it is held back.
+        assert (
+            await delivery.deliver(world.factory, second.id, deps(smtp), final_attempt=False, now=minutes(60))
+            is None
+        )
+        assert world.notifications(rule["id"])[1][3] == minutes(120)
+        smtp.refuse.clear()
+        assert (
+            await delivery.deliver(world.factory, first.id, deps(smtp), final_attempt=False, now=minutes(90))
+            == "sent"
+        )
+        # At its new time the first was sent 30 minutes ago: held back to a throttle after that.
+        assert (
+            await delivery.deliver(
+                world.factory, second.id, deps(smtp), final_attempt=False, now=minutes(120)
+            )
+            is None
+        )
+        assert world.notifications(rule["id"])[1][3] == minutes(150)
+        assert (
+            await delivery.deliver(
+                world.factory, second.id, deps(smtp), final_attempt=False, now=minutes(150)
+            )
+            == "sent"
+        )
+        assert ["1 new finding" in m["Subject"] for m in smtp.messages] == [True, False]
