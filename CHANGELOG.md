@@ -72,7 +72,8 @@ All notable changes to this project are documented here. The format follows
     enable, delete and test them, and everyone with access sees a rule's notifications.
   - `/api/alerts` (list, create, read, change, delete, `/channels`, `POST …/test`,
     `GET …/notifications`). Changes are written to the audit log without the secret or the
-    full URL. Migration 0017 adds `alert_rules` and `alert_notifications`.
+    full URL. Migration 0017 adds `alert_rules`, `alert_notifications`,
+    `runs.alerts_evaluated_at` and the function that requeues unfinished notifications.
 
 ### Changed
 - `PATCH /api/findings/{id}` refuses fields it does not know (it ignored them before).

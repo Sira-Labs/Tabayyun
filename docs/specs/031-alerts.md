@@ -35,7 +35,7 @@ of the same and I get one more email an hour later that names them together, not
 | Column | Type | Meaning |
 |---|---|---|
 | `id` | uuid | primary key |
-| `name` | text | 1 to 120 characters, unique in the workspace |
+| `name` | text | 1 to 120 characters on one line, unique in the workspace |
 | `enabled` | boolean | a disabled rule is not evaluated |
 | `kind` | text | `finding` or `score` |
 | `condition` | jsonb | see below |
@@ -139,23 +139,31 @@ A score match is `{"series_id", "series_name", "asset_path", "metric", "score", 
 
 1. **Evaluation.** After a run succeeded and its results are committed, the enabled rules of
    its workspace are evaluated on what that run stored, in a transaction of their own. An
-   error there is logged and never fails the run.
+   error there is logged and never fails the run. The evaluation marks the run
+   (`runs.alerts_evaluated_at`) in the same transaction, so a run is evaluated once, however
+   often its job is delivered.
 2. **Throttle.** A rule that matches while it has a notification waiting adds its matches to
    that one. Otherwise it gets a new notification, due at once, or `throttle_minutes` after
-   the one before when that is later. So the first match is told at once, and later ones
-   together, at least the throttle apart. `items` keeps the first 50 matches; `n_matches`
+   the last one that told something when that is later: after the time it was sent, or its
+   due time while it is being sent. A notification that failed or was skipped told nobody
+   and holds nothing back. So the first match is told at once, and later ones together, at
+   least the throttle after the send before. `items` keeps the first 50 matches; `n_matches`
    counts all.
 3. **Delivery.** The worker's `deliver_alert` job (mail queue) sends a notification when it
    is due: it claims it (`sending`), sends outside any transaction, and records `sent` or the
    error. Three attempts with a growing pause; after the last the notification is `failed`.
-   A notification left `sending` for ten minutes by a worker that died is taken again.
+   An error the send does not expect is recorded as `failed` too. A notification left
+   `sending` for ten minutes (the worker died, or lost the database before recording) is put
+   back to `pending` and queued again by the periodic `requeue_stuck_alerts` task (every
+   five minutes, through `tabayyun_requeue_stuck_alerts`, which crosses orgs); its own count
+   of attempts ends the retries.
 4. **Not configured.** An email notification without SMTP settings is `skipped` with the
    reason. A webhook whose secret cannot be opened (no master key, or another key) is
    `failed` with the reason and is not sent unsigned.
 5. **Webhook safety.** The URL is resolved under the connectors' address policy (spec 021):
    loopback, link-local and other refused addresses are not contacted, private ranges only
    when allowed, the connection is pinned to the checked address, and redirects are not
-   followed. A 2xx answer within 10 seconds is success; the answer's body is not kept.
+   followed. A 2xx answer within 10 seconds is success; the answer's body is not read.
 6. **Test.** A test notification carries one made-up match, is due at once and does not
    count for the throttle.
 7. **Audit.** Creating, changing, deleting and testing a rule are written to the audit log
@@ -164,7 +172,9 @@ A score match is `{"series_id", "series_name", "asset_path", "metric", "score", 
 8. **Key rotation.** `python -m tabayyun.secrets rotate` re-encrypts the rules' secrets
    together with the connectors' credentials.
 9. **Inline jobs** (development, tests): the API process delivers what is due at once after
-   the run; a throttled notification waits for a worker.
+   the run; a throttled notification gets its job and waits for a worker.
+10. **Changing a rule's kind** skips what waits for it (`skipped`, with the reason): those
+    matches were found by the other kind and cannot be told as this one.
 
 ## Acceptance criteria
 
@@ -202,7 +212,9 @@ A score match is `{"series_id", "series_name", "asset_path", "metric", "score", 
   `throttle_gathers_matches`, `webhook_delivery_headers_and_signature`,
   `webhook_refused_address_redirect_and_missing_key`,
   `retries_then_failed_and_stuck_sending_is_retaken`,
-  `deferred_delivery_is_queued_for_its_due_time`,
+  `deferred_delivery_is_queued_for_its_due_time`, `inline_mode_queues_what_is_due_later`,
+  `kind_change_skips_what_waits`, `unexpected_send_error_is_recorded`,
+  `stuck_notifications_are_requeued`,
   `email_not_configured_is_skipped`, `routes_validation_roles_and_url_visibility`,
   `test_notification_and_audit`, `rotation_reseals_rule_secrets`,
   `evaluation_error_does_not_fail_the_run`.
@@ -220,9 +232,9 @@ A score match is `{"series_id", "series_name", "asset_path", "metric", "score", 
   two loses that run's notifications.
 - The throttle is kept in the notifications themselves: a rule has at most one `pending`
   notification, later matches join it (up to 50 items; the count stays exact), and a new one
-  is due the throttle after the due time of the one before. No counter and no periodic task.
+  is due the throttle after the one before was sent. No counter of its own.
 - The delivery job is queued in the evaluation's transaction with `scheduled_at` = the due
-  time, and carries the org id, so the worker needs no function that reads across orgs.
+  time, and carries the org id, so delivery itself reads nothing across orgs.
   With inline jobs, notifications due now are delivered in the request's background task and
   later ones wait for a worker.
 - A notification is claimed (`sending`) before the send and recorded after it; one left
@@ -235,6 +247,23 @@ A score match is `{"series_id", "series_name", "asset_path", "metric", "score", 
 - "Send test" neither waits for the throttle nor counts for it.
 - The database tests write runs, findings and scores as the owner, so each test decides what
   a run stored; one test goes end to end through an upload.
+
+- From the review:
+  - The run's evaluation is claimed with one `UPDATE … WHERE alerts_evaluated_at IS NULL`:
+    a snapshot of the run's status before execution did not prove which call ran it.
+  - The waiting notification is found by its status, not by the newest `created_at`: an
+    evaluation that waited for the rule's lock could store an older time than one sent
+    meanwhile.
+  - The throttle counts from the send, not from the due time: a notification sent late
+    would otherwise be followed too soon.
+  - A notification left `sending` had no job that would take it again; the periodic task
+    gives it one. `_claim` keeps its ten-minute rule for a job that arrives on its own.
+  - The webhook's answer is streamed and closed after the status: a receiver that never
+    ends its body cannot hold a worker.
+  - Rule names are one line (they become the email subject), and a URL the parser refuses
+    is a field error, not a 500.
+  - The form drops a field's error when the field changes, and every control of a finding
+    condition names the condition's error.
 
 ## Out of scope
 

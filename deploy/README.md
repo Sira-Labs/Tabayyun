@@ -143,7 +143,8 @@ buffers or blocks the stream costs only the live updates: the pages load as befo
 ## Alerts
 
 Alert rules (spec 031) are evaluated after every run and delivered by the worker (queue
-`mail`, served by the bundled worker without further settings). Email needs
+`mail`, served by the bundled worker without further settings). A notification a worker
+left unfinished is queued again within fifteen minutes by a periodic task. Email needs
 `TABAYYUN_SMTP_HOST` and `TABAYYUN_SMTP_FROM`, the same account that sends invitations;
 without it email notifications are recorded as `skipped`. A webhook's signing secret is stored
 sealed with `TABAYYUN_MASTER_KEY`; without the key webhooks work unsigned and a secret cannot

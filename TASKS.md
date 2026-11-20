@@ -585,8 +585,11 @@ starts; the plan is the backlog until then.
       - Rules are evaluated after the run committed, in their own transaction: alerting can
         never fail a run.
       - The throttle lives in the notifications: at most one waiting notification per rule,
-        which later matches join; the delivery job is queued for its due time, so there is no
-        periodic task and no read across orgs.
+        which later matches join; the delivery job is queued for its due time. It counts from
+        the send before, not from its due time.
+      - A run is evaluated once (`runs.alerts_evaluated_at`, claimed by the evaluation). A
+        notification left `sending` is requeued by a periodic task through a function that
+        crosses orgs, like the reaper.
       - Only new findings (`first_run_id` = the run) and scores that cross the threshold
         tell; a first score below the threshold counts as a crossing.
       - Webhooks go through the connectors' address policy, follow no redirects and are signed
