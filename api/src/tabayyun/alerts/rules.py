@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +24,7 @@ MAX_NAME = 120
 MAX_RECIPIENTS = 10
 MAX_EMAIL = 254
 MAX_URL = 2000
-KIND_CHANGED = "the rule's kind changed before this was sent"
+KIND_FIXED = "cannot be changed; create a new rule for the other kind"
 MAX_ASSET_PREFIX = 200
 MAX_THROTTLE_MINUTES = 1440
 DEFAULT_THROTTLE_MINUTES = 60
@@ -335,12 +335,9 @@ async def change_rule(
     if secret is not UNSET and secret is not None:
         secret = validate_secret(secret, data.channel)
     if data.kind != rule.kind:
-        # What waits was matched by the other kind and cannot be told as this one.
-        await session.execute(
-            update(AlertNotification)
-            .where(AlertNotification.rule_id == rule.id, AlertNotification.status == "pending")
-            .values(status="skipped", error=KIND_CHANGED)
-        )
+        # A rule's notifications hold matches of its kind, some waiting or on their way; a
+        # rule that watches something else is another rule.
+        raise RuleError([{"field": "kind", "message": KIND_FIXED}])
     apply(rule, data)
     if secret is not UNSET:
         seal_secret(rule, keyring, secret)

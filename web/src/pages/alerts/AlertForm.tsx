@@ -121,6 +121,8 @@ export function AlertForm({ catalogue, channels, rule, submitLabel, pending, err
   const signing = channels.webhook.signing;
   const removing = form.removeSecret && Boolean(rule?.has_secret);
   const nLocal = Object.keys(local).length;
+  // The API refuses to change a stored rule's kind.
+  const kindFixed = rule !== undefined;
   // A finding condition has one error for all its controls: each names it.
   const conditionError = form.kind === "finding" ? err("condition") : undefined;
   const inCondition = conditionError ? { "aria-invalid": true, "aria-describedby": "alert-condition-error" } : {};
@@ -147,14 +149,33 @@ export function AlertForm({ catalogue, channels, rule, submitLabel, pending, err
         <legend className="px-1 font-semibold">What it watches</legend>
         <div role="radiogroup" aria-label="Kind" className="flex flex-wrap gap-4 text-sm">
           <label className="flex items-center gap-2">
-            <input type="radio" name="alert-kind" checked={form.kind === "finding"} onChange={() => set("kind", "finding")} />
+            <input
+              type="radio"
+              name="alert-kind"
+              checked={form.kind === "finding"}
+              disabled={kindFixed}
+              aria-describedby={kindFixed ? "alert-kind-fixed" : undefined}
+              onChange={() => set("kind", "finding")}
+            />
             New findings
           </label>
           <label className="flex items-center gap-2">
-            <input type="radio" name="alert-kind" checked={form.kind === "score"} onChange={() => set("kind", "score")} />
+            <input
+              type="radio"
+              name="alert-kind"
+              checked={form.kind === "score"}
+              disabled={kindFixed}
+              aria-describedby={kindFixed ? "alert-kind-fixed" : undefined}
+              onChange={() => set("kind", "score")}
+            />
             A score that falls below a threshold
           </label>
         </div>
+        {kindFixed && (
+          <p id="alert-kind-fixed" className={`text-xs ${mutedClass}`}>
+            A rule keeps what it watches: its waiting notifications hold matches of this kind. Create a new rule for the other.
+          </p>
+        )}
         {form.kind === "finding" ? (
           <>
             <div className="grid gap-3 sm:grid-cols-2">

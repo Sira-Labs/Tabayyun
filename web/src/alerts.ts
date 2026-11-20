@@ -219,10 +219,8 @@ export function alertPatch(rule: AlertRule, form: AlertFormModel): AlertRuleBody
   const patch: AlertRuleBody = {};
   if (next.name !== rule.name) patch.name = next.name;
   if (next.enabled !== rule.enabled) patch.enabled = next.enabled;
-  if (next.kind !== rule.kind) patch.kind = next.kind;
-  if (next.kind !== rule.kind || conditionKey(next.condition as AlertCondition) !== conditionKey(rule.condition)) {
-    patch.condition = next.condition;
-  }
+  // The kind of a stored rule does not change (the API refuses it), so it is never sent.
+  if (conditionKey(next.condition as AlertCondition) !== conditionKey(rule.condition)) patch.condition = next.condition;
   if (next.channel !== rule.channel) patch.channel = next.channel;
   if (JSON.stringify(next.recipients) !== JSON.stringify(rule.recipients)) patch.recipients = next.recipients;
   if ((next.url ?? null) !== (rule.url ?? null)) patch.url = next.url;

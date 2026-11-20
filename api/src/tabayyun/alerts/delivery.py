@@ -5,7 +5,6 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import httpx
 import structlog
@@ -87,13 +86,6 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _items_kind(items: list[dict[str, Any]]) -> str | None:
-    """The rule kind that matched these items: a score's crossing names its metric."""
-    if not items:
-        return None
-    return "score" if "metric" in items[0] else "finding"
-
-
 async def _held_back_until(
     session: AsyncSession, rule: AlertRule, notification: AlertNotification, now: datetime
 ) -> datetime | None:
@@ -173,10 +165,6 @@ async def _claim(
         return None
     notification.status, notification.claimed_at = "sending", now
     notification.attempts += 1
-    if _items_kind(notification.items) not in (None, rule.kind):
-        # The rule's kind changed while this one was being sent or waited for a retry: its
-        # matches are of the other kind and are never told as this one.
-        return notification.attempts, _Outcome("skipped", rules.KIND_CHANGED)
     try:
         secret = rules.open_secret(rule, deps.keyring) if rule.channel == "webhook" else None
     except (CredentialsUnavailableError, CredentialsError) as exc:

@@ -295,20 +295,21 @@ describe("alerts.form (edit)", () => {
     expect(runs.map((sent) => sent[0]?.body)).toEqual([{ name: "Score drop 2" }, { secret: "a-new-secret" }, { secret: null }]);
   });
 
-  it("changes a rule from email to webhook and from findings to score", async () => {
+  it("changes a rule from email to webhook, and keeps what it watches", async () => {
     const { route, sent } = alertsBackend();
     stubFetch(route, ADMIN);
     const user = userEvent.setup();
     renderApp(`/alerts/${RULE_ID}/edit`);
-    await user.click(await screen.findByRole("radio", { name: "A score that falls below a threshold" }));
+    const score = (await screen.findByRole("radio", { name: "A score that falls below a threshold" })) as HTMLInputElement;
+    expect(score.disabled).toBe(true);
+    expect((screen.getByRole("radio", { name: "New findings" }) as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByText(/A rule keeps what it watches/).id).toBe("alert-kind-fixed");
     await user.click(screen.getByRole("radio", { name: "Webhook" }));
     expect(screen.queryByRole("checkbox", { name: "Remove secret" })).toBeNull();
     await user.type(screen.getByLabelText("Webhook URL"), "https://hooks.example.com/x");
     await user.click(screen.getByRole("button", { name: "Save rule" }));
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({
-      kind: "score",
-      condition: { metric: "overall", below: 70 },
       channel: "webhook",
       recipients: [],
       url: "https://hooks.example.com/x",

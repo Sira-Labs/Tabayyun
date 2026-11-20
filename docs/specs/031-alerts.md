@@ -177,8 +177,9 @@ A score match is `{"series_id", "series_name", "asset_path", "metric", "score", 
    together with the connectors' credentials.
 9. **Inline jobs** (development, tests): the API process delivers what is due at once after
    the run; a throttled notification gets its job and waits for a worker.
-10. **Changing a rule's kind** skips what waits for it (`skipped`, with the reason): those
-    matches were found by the other kind and cannot be told as this one.
+10. **A rule's kind does not change.** A `PATCH` that names another kind is refused (422 at
+    `kind`): the rule's notifications hold matches of its kind, some waiting or being sent.
+    The form shows the kind of a stored rule and does not offer the other.
 
 ## Acceptance criteria
 
@@ -217,9 +218,8 @@ A score match is `{"series_id", "series_name", "asset_path", "metric", "score", 
   `webhook_refused_address_redirect_and_missing_key`,
   `retries_then_failed_and_stuck_sending_is_retaken`,
   `deferred_delivery_is_queued_for_its_due_time`, `inline_mode_queues_what_is_due_later`,
-  `kind_change_skips_what_waits`, `unexpected_send_error_is_recorded`,
+  `a_rules_kind_cannot_change`, `unexpected_send_error_is_recorded`,
   `stuck_notifications_are_requeued`, `late_worker_does_not_overwrite_a_later_claim`,
-  `kind_change_during_a_send_skips_the_retry`,
   `throttle_is_kept_when_the_one_before_is_sent_late`,
   `retry_of_the_one_before_holds_the_next_back`,
   `email_not_configured_is_skipped`, `routes_validation_roles_and_url_visibility`,
@@ -272,8 +272,9 @@ A score match is `{"series_id", "series_name", "asset_path", "metric", "score", 
   - An outcome is written only by the claim that is still the notification's own (its
     count of attempts): a worker that comes back after the notification was taken again
     cannot turn `sent` into `pending`.
-  - A claim whose items are of another kind than the rule now has is `skipped`: a change of
-    kind during a send or between retries is caught where the message would be built.
+  - A rule's kind is fixed after creation. Skipping what waits, and checking the items'
+    kind at delivery, each left an interleaving with a running evaluation or send; a rule
+    that watches something else is a new rule, and none of them exists.
   - The throttle is checked a second time at delivery, under the rule's lock: the
     evaluation cannot know when a notification that is being sent, or waits for a retry,
     will really go.

@@ -792,29 +792,6 @@ async def test_inline_mode_queues_what_is_due_later(admin_env):
     ]
 
 
-async def test_kind_change_skips_what_waits(admin_env, smtp):  # noqa: F811
-    """A waiting notification holds matches of the rule's old kind: changing the kind skips
-    it instead of telling findings as scores."""
-    async with admin_env.client() as c:
-        world = World(admin_env, c)
-        series = await world.series("feeder")
-        rule = await world.rule(**EMAIL_RULE)
-        run = world.run()
-        world.finding(run, series)
-        [started] = await world.evaluate(run, T0)
-        changed = await c.patch(
-            f"/api/alerts/{rule['id']}",
-            json={"kind": "score", "condition": {"metric": "overall", "below": 70}},
-        )
-        assert changed.status_code == 200, changed.text
-        row = world.notifications(rule["id"])[0]
-        assert (row[1], row[5]) == ("skipped", rules.KIND_CHANGED)
-        assert (
-            await delivery.deliver(world.factory, started.id, deps(smtp), final_attempt=True, now=T0) is None
-        )
-    assert smtp.messages == []
-
-
 async def test_unexpected_send_error_is_recorded(admin_env, smtp, monkeypatch):  # noqa: F811
     """An error the send does not expect ends the notification `failed` with the reason; it
     is not left `sending`."""
@@ -910,35 +887,6 @@ async def test_late_worker_does_not_overwrite_a_later_claim(admin_env, smtp, mon
         row = world.notifications(rule["id"])[0]
         assert (row[1], row[4], row[5]) == ("sent", 2, None)
         assert len(smtp.messages) == 1
-
-
-async def test_kind_change_during_a_send_skips_the_retry(admin_env, smtp):  # noqa: F811
-    """The kind changes while a notification is being sent: the change cannot skip it, so
-    the retry does, instead of telling findings as scores."""
-    async with admin_env.client() as c:
-        world = World(admin_env, c)
-        series = await world.series("feeder")
-        rule = await world.rule(**EMAIL_RULE)
-        run = world.run()
-        world.finding(run, series)
-        [started] = await world.evaluate(run, T0)
-        smtp.refuse.add("ops@example.org")
-        with pytest.raises(delivery.DeliveryError):
-            await delivery.deliver(world.factory, started.id, deps(smtp), final_attempt=False, now=T0)
-        # As if the change had come while it was `sending`: it is `pending` again and kept.
-        admin_env.sql(
-            "UPDATE alert_rules SET kind = 'score', condition = CAST(:c AS jsonb) WHERE id = :i",
-            c=json.dumps({"metric": "overall", "below": 70}),
-            i=rule["id"],
-        )
-        smtp.refuse.clear()
-        assert (
-            await delivery.deliver(world.factory, started.id, deps(smtp), final_attempt=False, now=T0)
-            == "skipped"
-        )
-        row = world.notifications(rule["id"])[0]
-        assert (row[1], row[5]) == ("skipped", rules.KIND_CHANGED)
-    assert smtp.messages == []
 
 
 async def test_throttle_is_kept_when_the_one_before_is_sent_late(admin_env, smtp):  # noqa: F811
@@ -1041,3 +989,30 @@ async def test_retry_of_the_one_before_holds_the_next_back(admin_env, smtp):  # 
             == "sent"
         )
         assert ["1 new finding" in m["Subject"] for m in smtp.messages] == [True, False]
+
+
+async def test_a_rules_kind_cannot_change(admin_env):
+    """What a rule watches is fixed: its notifications hold matches of that kind. The change
+    is refused at `kind` and nothing of the rule or its waiting notification changes."""
+    async with admin_env.client() as c:
+        world = World(admin_env, c)
+        series = await world.series("feeder")
+        rule = await world.rule(**EMAIL_RULE)
+        run = world.run()
+        world.finding(run, series)
+        await world.evaluate(run, T0)
+        refused = await c.patch(
+            f"/api/alerts/{rule['id']}",
+            json={"kind": "score", "condition": {"metric": "overall", "below": 70}, "name": "Other"},
+        )
+        assert refused.status_code == 422
+        assert refused.json()["detail"] == [{"field": "kind", "message": rules.KIND_FIXED}]
+        same = await c.patch(f"/api/alerts/{rule['id']}", json={"kind": "finding", "throttle_minutes": 5})
+        assert same.status_code == 200
+        stored = (await c.get(f"/api/alerts/{rule['id']}")).json()
+        assert (stored["kind"], stored["name"], stored["throttle_minutes"]) == (
+            "finding",
+            EMAIL_RULE["name"],
+            5,
+        )
+        assert world.notifications(rule["id"])[0][1] == "pending"
