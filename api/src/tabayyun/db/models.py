@@ -390,6 +390,74 @@ class CheckSuite(TenantMixin, Base):
     )
 
 
+ALERT_KINDS = ("finding", "score")
+ALERT_CHANNELS = ("email", "webhook")
+NOTIFICATION_KINDS = ("alert", "test")
+NOTIFICATION_STATUSES = ("pending", "sending", "sent", "failed", "skipped")
+
+
+class AlertRule(TenantMixin, Base):
+    """A condition over a run's findings or scores and where to tell about it (spec 031)."""
+
+    __tablename__ = "alert_rules"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name"),
+        CheckConstraint(_in("kind", ALERT_KINDS), name="kind"),
+        CheckConstraint(_in("channel", ALERT_CHANNELS), name="channel"),
+        CheckConstraint("throttle_minutes BETWEEN 0 AND 1440", name="throttle_minutes"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    condition: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    # Email: the addresses; webhook: empty.
+    recipients: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default="[]")
+    url: Mapped[str | None] = mapped_column(Text)
+    # The webhook's signing secret: AES-GCM ciphertext bound to the rule (`tabayyun.secrets`).
+    secret_key_id: Mapped[str | None] = mapped_column(Text)
+    secret_nonce: Mapped[bytes | None] = mapped_column(LargeBinary)
+    secret_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary)
+    throttle_minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="60")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AlertNotification(TenantMixin, Base):
+    """One message of a rule, gathered from the matches of one or more runs (spec 031)."""
+
+    __tablename__ = "alert_notifications"
+    __table_args__ = (
+        CheckConstraint(_in("kind", NOTIFICATION_KINDS), name="kind"),
+        CheckConstraint(_in("status", NOTIFICATION_STATUSES), name="status"),
+        # A rule's history, newest first, and its newest notification for the throttle.
+        Index("ix_alert_notifications_rule_id_created_at", "rule_id", text("created_at DESC")),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    rule_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("alert_rules.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="alert")
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    n_matches: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # The first matches as they are told; `n_matches` counts all.
+    items: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, server_default="[]")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    error: Mapped[str | None] = mapped_column(Text)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created_at()
+
+
 class DatasetSeries(OrgMixin, Base):
     __tablename__ = "dataset_series"
 
@@ -474,6 +542,8 @@ class Run(TenantMixin, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     stats: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
     error: Mapped[str | None] = mapped_column(Text)
+    # Set by the one evaluation of the alert rules on this run (spec 031).
+    alerts_evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created_at()
 
 

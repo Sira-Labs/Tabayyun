@@ -109,6 +109,19 @@ async def _seed_org(app: Any, prefix: str) -> dict[str, str]:
             "/api/finding-filters", json={"name": f"{prefix}-filter", "query": "status=open"}
         )
         assert saved.status_code == 201, saved.text
+        # Spec 031: an alert rule and one notification of it (a test, skipped without SMTP).
+        alert = await c.post(
+            "/api/alerts",
+            json={
+                "name": f"{prefix}-alert",
+                "kind": "finding",
+                "condition": {"min_severity": "low"},
+                "channel": "email",
+                "recipients": ["ops@example.test"],
+            },
+        )
+        assert alert.status_code == 201, alert.text
+        assert (await c.post(f"/api/alerts/{alert.json()['id']}/test")).status_code == 202
     return {
         "source": source.json()["id"],
         "run": run["id"],
@@ -118,6 +131,7 @@ async def _seed_org(app: Any, prefix: str) -> dict[str, str]:
         "dataset": dataset.json()["id"],
         "suite": suite.json()["id"],
         "filter": saved.json()["id"],
+        "alert": alert.json()["id"],
     }
 
 
@@ -458,6 +472,12 @@ ROUTES = [
     # Spec 028: baselines of a series.
     ("GET", "/api/series/{series_id}/baselines", "series", None),
     ("POST", "/api/series/{series_id}/baselines", "series", None),
+    # Spec 031: alert rules.
+    ("GET", "/api/alerts/{rule_id}", "alert", None),
+    ("PATCH", "/api/alerts/{rule_id}", "alert", {"enabled": False}),
+    ("DELETE", "/api/alerts/{rule_id}", "alert", None),
+    ("POST", "/api/alerts/{rule_id}/test", "alert", None),
+    ("GET", "/api/alerts/{rule_id}/notifications", "alert", None),
 ]
 READ_BACK = {
     "run": "/api/runs/{}",
@@ -467,6 +487,7 @@ READ_BACK = {
     "dataset": "/api/datasets/{}",
     "source": "/api/sources/{}",
     "suite": "/api/suites/{}",
+    "alert": "/api/alerts/{}",
 }
 # Scoped to the signed-in user, not to a tenant: `test_auth_flow.py` checks that another user's
 # session gives 404 (spec 013).
@@ -508,6 +529,7 @@ LISTS = [
     "/api/series-groups",
     "/api/datasets",
     "/api/suites",
+    "/api/alerts",
 ]
 
 
@@ -590,7 +612,10 @@ async def test_other_org_gets_404_for_every_admin_route(seed, app_for, method, t
             open_a = "SELECT revoked_at IS NULL FROM invitations WHERE id = :i"
             assert conn.execute(text(open_a), {"i": INVITATION_A}).scalar() is True
             # Only the seeded events: the refused request wrote none in org B.
-            seeded = "('org.renamed', 'source.created', 'suite.created', 'series.baseline_refresh_requested')"
+            seeded = (
+                "('org.renamed', 'source.created', 'suite.created', 'series.baseline_refresh_requested', "
+                "'alert_rule.created', 'alert_rule.tested')"
+            )
             assert (
                 conn.execute(
                     text(f"SELECT count(*) FROM audit_events WHERE org_id = :o AND action NOT IN {seeded}"),  # noqa: S608

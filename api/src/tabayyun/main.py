@@ -30,6 +30,7 @@ from tabayyun.limits import RateLimitedError
 from tabayyun.limits import response_for as rate_limited_response
 from tabayyun.routers import (
     admin,
+    alerts,
     auth,
     checks,
     compare,
@@ -113,7 +114,19 @@ def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = No
     # Everything else needs a principal (spec 013), also routers that do not authorize() a
     # workspace, such as the stateless check run. FastAPI resolves it once per request.
     signed_in = [Depends(get_principal)]
-    for router in (checks, runs, findings, series, sources, groups, datasets, workspaces, compare, suites):
+    for router in (
+        checks,
+        runs,
+        findings,
+        series,
+        sources,
+        groups,
+        datasets,
+        workspaces,
+        compare,
+        suites,
+        alerts,
+    ):
         app.include_router(router.router, dependencies=signed_in)
     app.include_router(findings.filters_router, dependencies=signed_in)
     app.include_router(events.router, dependencies=signed_in)

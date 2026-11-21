@@ -581,6 +581,26 @@ starts; the plan is the backlog until then.
         upload, with one list request and no reload. Not exercised here: the stream through
         staging's proxy before the merge, and a worker in another process than the api (the
         tests publish and listen on separate connections).
+- [x] **031 Alerts** — `docs/specs/031-alerts.md` (S10-5, 20 Nov). Every criterion is met.
+      - Rules are evaluated after the run committed, in their own transaction: alerting can
+        never fail a run.
+      - The throttle lives in the notifications: at most one waiting notification per rule,
+        which later matches join; the delivery job is queued for its due time. It counts from
+        the send before, not from its due time.
+      - A run is evaluated once (`runs.alerts_evaluated_at`, claimed by the evaluation). A
+        notification left `sending` is requeued by a periodic task through a function that
+        crosses orgs, like the reaper.
+      - Only new findings (`first_run_id` = the run) and scores that cross the threshold
+        tell; a first score below the threshold counts as a crossing.
+      - Webhooks go through the connectors' address policy, follow no redirects and are signed
+        with a secret sealed by the master key; a rule whose secret cannot be opened fails
+        instead of sending unsigned.
+      - Changing rules needs workspace admin; other roles see the host of a webhook only.
+      - Not exercised here: delivery by a worker in its own process, and a real SMTP server
+        or webhook receiver (tests use an in-process SMTP server and a mock transport).
+      - Noticed, not changed: importing `tabayyun.services.execution` before `tabayyun.jobs`
+        fails on an import cycle (jobs → tasks → runtime → dataset_runs); `alerts.evaluate`
+        imports the task name inside the function for that reason.
 - [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
       `tabayyun-api` and `tabayyun-worker` on staging; then a `synthetic` source with
       `poll_interval_s` gives staging a live, polling source for demos.

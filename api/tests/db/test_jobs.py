@@ -16,10 +16,12 @@ from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID, Run, Upload
 from tabayyun.jobs import app as jobs_app
 from tabayyun.jobs import libpq_conninfo, make_app, tasks, worker_application_name
 from tabayyun.jobs.names import (
+    DELIVER_ALERT_TASK,
     PROFILE_SERIES_TASK,
     REAP_STALE_RUNS_TASK,
     REFRESH_BASELINES_TASK,
     REOPEN_EXPIRED_MUTES_TASK,
+    REQUEUE_STUCK_ALERTS_TASK,
     RUN_CHECKS_TASK,
     RUN_DUE_SUITES_TASK,
 )
@@ -87,6 +89,8 @@ def test_tasks_registered_on_the_app():
     assert jobs_app.tasks[PROFILE_SERIES_TASK].queue == "maintenance"
     assert REOPEN_EXPIRED_MUTES_TASK in jobs_app.tasks  # the end of mutes (spec 029)
     assert jobs_app.tasks[RUN_CHECKS_TASK].queue == "runs"
+    assert jobs_app.tasks[DELIVER_ALERT_TASK].queue == "mail"  # alert delivery (spec 031)
+    assert jobs_app.tasks[REQUEUE_STUCK_ALERTS_TASK].queue == "maintenance"
 
 
 def test_libpq_conninfo_strips_the_sqlalchemy_driver():

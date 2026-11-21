@@ -140,6 +140,19 @@ process in the database's connection budget. The bundled Caddy passes the stream
 behind nginx the response's `X-Accel-Buffering: no` turns buffering off for it. A proxy that
 buffers or blocks the stream costs only the live updates: the pages load as before.
 
+## Alerts
+
+Alert rules (spec 031) are evaluated after every run and delivered by the worker (queue
+`mail`, served by the bundled worker without further settings). A notification a worker
+left unfinished is queued again within fifteen minutes by a periodic task. Email needs
+`TABAYYUN_SMTP_HOST` and `TABAYYUN_SMTP_FROM`, the same account that sends invitations;
+without it email notifications are recorded as `skipped`. A webhook's signing secret is stored
+sealed with `TABAYYUN_MASTER_KEY`; without the key webhooks work unsigned and a secret cannot
+be saved. Webhooks leave from the worker and obey the connectors' address policy: private and
+loopback addresses are refused unless that policy allows them, and redirects are not followed.
+Links in notifications start with `TABAYYUN_PUBLIC_URL`. `python -m tabayyun.secrets rotate` (key
+rotation) re-encrypts the rules' secrets together with the sources' credentials.
+
 ## Schema migrations
 
 The api image runs `python -m tabayyun.db.migrate upgrade head` (the packaged Alembic

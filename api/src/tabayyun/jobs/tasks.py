@@ -9,11 +9,13 @@ import uuid
 import structlog
 from procrastinate import JobContext, RetryStrategy
 
+from tabayyun.alerts import delivery as alert_delivery
 from tabayyun.db import for_org
 from tabayyun.db.models import DEFAULT_ORG_ID
 from tabayyun.jobs import app, runtime
 from tabayyun.jobs.names import (
     CHECK_SOURCE_TASK,
+    DELIVER_ALERT_TASK,
     FETCH_QUEUE,
     FETCH_WINDOW_TASK,
     INGEST_SOURCE_TASK,
@@ -26,6 +28,7 @@ from tabayyun.jobs.names import (
     REAP_STALE_RUNS_TASK,
     REFRESH_BASELINES_TASK,
     REOPEN_EXPIRED_MUTES_TASK,
+    REQUEUE_STUCK_ALERTS_TASK,
     RUN_CHECKS_TASK,
     RUN_DUE_SUITES_TASK,
     RUNS_QUEUE,
@@ -49,7 +52,10 @@ async def run_checks_job(run_id: str, org_id: str | None = None) -> None:
     """
     org = DEFAULT_ORG_ID if org_id is None else uuid.UUID(org_id)
     factory = for_org(runtime.session_factory(), org)
-    await execution.execute(factory, uuid.UUID(run_id), runtime.run_cache(), runtime.run_fetch())
+    # Alerts on what the run stored are evaluated here and delivered by `deliver_alert`.
+    await execution.execute(
+        factory, uuid.UUID(run_id), runtime.run_cache(), runtime.run_fetch(), alert_delivery.Dispatch()
+    )
 
 
 @app.periodic(cron="*/10 * * * *")
@@ -201,3 +207,33 @@ async def prune_source_fetches(timestamp: int) -> None:
     pruned = await fetches.prune(runtime.session_factory())
     if pruned:
         log.info("fetches.pruned", count=pruned, tick=timestamp)
+
+
+@app.task(
+    queue=MAIL_QUEUE,
+    name=DELIVER_ALERT_TASK,
+    pass_context=True,
+    retry=RetryStrategy(
+        max_attempts=alert_delivery.ATTEMPTS,
+        exponential_wait=30,
+        retry_exceptions=[alert_delivery.DeliveryError],
+    ),
+)
+async def deliver_alert(context: JobContext, notification_id: str, org_id: str) -> None:
+    """Send one alert notification when it is due (spec 031); three attempts with a growing
+    pause, and the last failure stays on the notification."""
+    await alert_delivery.deliver(
+        for_org(runtime.session_factory(), uuid.UUID(org_id)),
+        uuid.UUID(notification_id),
+        runtime.alert_deps(),
+        final_attempt=context.job.attempts + 1 >= alert_delivery.ATTEMPTS,
+    )
+
+
+@app.periodic(cron="*/5 * * * *")
+@app.task(queue=MAINTENANCE_QUEUE, name=REQUEUE_STUCK_ALERTS_TASK, retry=False)
+async def requeue_stuck_alerts(timestamp: int) -> None:
+    """Every five minutes: notifications a lost worker left `sending` are queued again (spec 031)."""
+    requeued = await alert_delivery.requeue_stuck(runtime.session_factory())
+    if requeued:
+        log.warning("alerts.requeued", count=requeued, tick=timestamp)

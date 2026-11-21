@@ -47,6 +47,9 @@ EXPECTED_TABLES = {
     "series_baselines",
     # Spec 029.
     "finding_filters",
+    # Spec 031.
+    "alert_rules",
+    "alert_notifications",
 }
 HYPERTABLES = {"findings", "metrics", "scores"}
 
@@ -535,6 +538,48 @@ def test_0016_replaces_the_reaper_and_downgrades(db_url, fresh_schema):
         with engine.connect() as conn:
             assert "pg_notify('tabayyun_events'" in conn.execute(source).scalar_one()
             check_grants(conn)
+    finally:
+        engine.dispose()
+        fresh_schema("auto")
+
+
+def test_0017_adds_the_alert_tables_and_downgrades(db_url, fresh_schema):
+    """0017 brings `alert_rules` and `alert_notifications`, each with the tenant policy, the
+    runs' evaluation mark and the function that requeues stuck notifications, which only the
+    app role may call; its downgrade removes all of them."""
+    fresh_schema("auto")
+    engine = create_engine(db_url)
+    tables = {"alert_rules", "alert_notifications"}
+    policies = text(
+        "SELECT tablename FROM pg_policies WHERE policyname = 'tenant' AND tablename LIKE 'alert\\_%'"
+    )
+
+    function = text("SELECT count(*) FROM pg_proc WHERE proname = 'tabayyun_requeue_stuck_alerts'")
+    signature = "tabayyun_requeue_stuck_alerts(timestamptz)"
+    may_call = text("SELECT has_function_privilege(:role, :f, 'EXECUTE')")
+
+    def present() -> set[str]:
+        return set(inspect(engine).get_table_names()) & tables
+
+    def run_columns() -> set[str]:
+        return {c["name"] for c in inspect(engine).get_columns("runs")} & {"alerts_evaluated_at"}
+
+    try:
+        with engine.connect() as conn:
+            assert set(conn.execute(policies).scalars()) == tables
+        indexes = {i["name"] for i in inspect(engine).get_indexes("alert_notifications")}
+        assert "ix_alert_notifications_rule_id_created_at" in indexes
+        migrate.downgrade(db_url, "0016")
+        assert _current_revision(db_url) == "0016" and present() == set() and run_columns() == set()
+        with engine.connect() as conn:
+            assert conn.execute(function).scalar_one() == 0
+        migrate.upgrade(db_url, "head", timescale="auto")
+        assert present() == tables and run_columns() == {"alerts_evaluated_at"}
+        with engine.connect() as conn:
+            assert conn.execute(may_call, {"role": "tabayyun_app", "f": signature}).scalar_one() is True
+            assert conn.execute(may_call, {"role": "public", "f": signature}).scalar_one() is False
+        with engine.connect() as conn:
+            assert set(conn.execute(policies).scalars()) == tables
     finally:
         engine.dispose()
         fresh_schema("auto")

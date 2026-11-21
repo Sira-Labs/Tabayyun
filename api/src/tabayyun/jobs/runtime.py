@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from tabayyun.alerts import delivery as alert_delivery
 from tabayyun.connectors import NetPolicy
 from tabayyun.db import make_engine, make_session_factory
 from tabayyun.secrets import Keyring
@@ -56,6 +57,14 @@ def fetch_deps() -> FetchDeps:
 def run_fetch() -> RunFetch:
     """How dataset runs in this worker fill their gaps from connectors (spec 021)."""
     return RunFetch(deps=fetch_deps(), budget_s=float(get_settings().run_fetch_budget_s))
+
+
+def alert_deps() -> alert_delivery.Deps:
+    """What delivering alerts needs in the worker (spec 031)."""
+    settings = get_settings()
+    return alert_delivery.Deps.from_settings(
+        settings, net=NetPolicy.from_settings(settings), keyring=Keyring.from_settings(settings)
+    )
 
 
 async def dispose() -> None:

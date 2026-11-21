@@ -17,10 +17,11 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tabayyun import core
+from tabayyun.alerts import delivery as alert_delivery
 from tabayyun.authz import ReadScope, Scope, WriteScope, get_session
 from tabayyun.db import for_org
 from tabayyun.db.models import Run
-from tabayyun.services import dataset_runs, fetches
+from tabayyun.services import dataset_runs, execution, fetches
 from tabayyun.services import runs as runs_service
 from tabayyun.services import series as series_service
 from tabayyun.services.datasets import DatasetError
@@ -105,6 +106,15 @@ async def _create_dataset_run(
     return await dispatch_dataset_run(request, background, session, scope, run)
 
 
+def inline_alerts(request: Request) -> alert_delivery.Dispatch:
+    """How a run executed in this process gets its alerts delivered (spec 031): at once, with
+    the process's own mail settings, address policy and keyring."""
+    state = request.app.state
+    return alert_delivery.Dispatch(
+        inline=alert_delivery.Deps.from_settings(state.settings, net=state.net_policy, keyring=state.keyring)
+    )
+
+
 async def dispatch_dataset_run(
     request: Request, background: BackgroundTasks, session: AsyncSession, scope: Scope, run: Run
 ) -> RunCreated:
@@ -114,7 +124,7 @@ async def dispatch_dataset_run(
         await session.commit()
         state = request.app.state
         background.add_task(
-            dataset_runs.execute_dataset_run,
+            execution.execute,
             for_org(state.session_factory, scope.org_id),
             run.id,
             state.run_cache,
@@ -122,6 +132,7 @@ async def dispatch_dataset_run(
                 deps=fetches.FetchDeps(cache=state.run_cache, net=state.net_policy, keyring=state.keyring),
                 budget_s=float(state.settings.run_fetch_budget_s),
             ),
+            inline_alerts(request),
         )
     else:
         await runs_service.enqueue_run(session, run.id, scope.org_id)
@@ -204,10 +215,12 @@ async def create_run(
         # inline worker sees the run. The dependency's exit then finds nothing left to commit.
         await session.commit()
         background.add_task(
-            runs_service.execute_run,
+            execution.execute,
             for_org(request.app.state.session_factory, scope.org_id),
             run.id,
             request.app.state.run_cache,
+            None,
+            inline_alerts(request),
         )
     else:
         await runs_service.enqueue_run(session, run.id, scope.org_id)
