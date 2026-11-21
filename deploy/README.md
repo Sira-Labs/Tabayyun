@@ -165,6 +165,9 @@ controls whether findings, metrics and scores become hypertables: `on` requires 
 extension, `off` never uses it (Apache-2-only mode, ADR-0003). Take a `pg_dump` before
 upgrading a production database.
 
+Migration 0018 fills `score_days` from `scores` in one statement inside the migration's
+transaction; on an installation with millions of scores the api's start takes that long once.
+
 ## Database logins and row-level security
 
 Every tenant table has a row-level security policy keyed by the org of the transaction

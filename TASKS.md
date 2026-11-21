@@ -601,6 +601,22 @@ starts; the plan is the backlog until then.
       - Noticed, not changed: importing `tabayyun.services.execution` before `tabayyun.jobs`
         fails on an import cycle (jobs → tasks → runtime → dataset_runs); `alerts.evaluate`
         imports the task name inside the function for that reason.
+- [x] **032 Overview** — `docs/specs/032-overview.md` (S10-6, 21 Nov). Every criterion is met.
+      - The overview reads `score_days` (the last score per series and UTC day, written in
+        the run's transaction and backfilled by migration 0018), never `scores`: a row per
+        run would not answer within a second for 10 000 series.
+      - Each series' newest day is one primary-key probe per series (a lateral join); sorting
+        the whole window took 0.7 s of the second, the probe 0.13 s. Measured locally with
+        10 000 series, 300 000 score days and 50 000 findings: about 0.5 s for the request.
+      - The worst series are ranked by their lowest value among overall and the dimensions,
+        and that metric is named: the display half of "Scores that barely move". The scoring
+        method itself (severity weight, a penalty per episode) stays open there.
+      - A day's trend point is the mean over the series scored that day, with their number:
+        suites run at different times, so a day can hold a part of the workspace.
+      - Unresolved means open and acknowledged, as on the series pages; muted findings are
+        not counted.
+      - Not exercised here: the page against staging's data, and the backfill on a large
+        `scores` table (one `INSERT … SELECT DISTINCT ON`).
 - [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
       `tabayyun-api` and `tabayyun-worker` on staging; then a `synthetic` source with
       `poll_interval_s` gives staging a live, polling source for demos.

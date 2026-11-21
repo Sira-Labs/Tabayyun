@@ -74,6 +74,15 @@ All notable changes to this project are documented here. The format follows
     `GET …/notifications`). Changes are written to the audit log without the secret or the
     full URL. Migration 0017 adds `alert_rules`, `alert_notifications`,
     `runs.alerts_evaluated_at` and the function that requeues unfinished notifications.
+- Overview (spec 032):
+  - `/` is the overview of the workspace (it led to the runs before): a tile per quality
+    dimension with its mean, its lowest value and a sparkline of the last 7, 30 or 90 days,
+    the worst 5 % of the series ranked by their lowest dimension, the new findings per day
+    by severity with the unresolved counts, and every source with its health. Filters for
+    window, source and asset path prefix live in the URL; the page reloads on live events.
+  - `GET /api/overview?days=&asset=&source=` answers in under a second for 10 000 series.
+  - Migration 0018 adds `score_days` (the last score of each series per UTC day, filled from
+    the existing scores; runs keep it up to date) and an index on `findings`.
 
 ### Changed
 - `PATCH /api/findings/{id}` refuses fields it does not know (it ignored them before).
