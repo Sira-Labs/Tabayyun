@@ -119,7 +119,9 @@ async def test_run_writes_its_score_day(admin_env):
         assert kept[2] is not None and kept[2] < 100 and kept[6] == DEFAULT_WORKSPACE_ID
 
         app = admin_env.apps[-1]
-        earlier, next_day = newest[3] - timedelta(minutes=5), newest[3] + timedelta(days=1)
+        # Older, but on the same UTC day whatever the time of this test: the day's first moment.
+        earlier = newest[3].astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        next_day = newest[3] + timedelta(days=1)
         async with org_session(app) as session, session.begin():
             for at, overall in ((earlier, 1.0), (next_day, 2.0)):
                 await overview.record_score_day(
@@ -180,6 +182,15 @@ async def test_overview_tiles_and_trend(admin_env):
             {"day": TODAY.isoformat(), "mean": 90.0, "n": 1},
         ]
         assert tile(body, "validity")["trend"] == [{"day": TODAY.isoformat(), "mean": 100.0, "n": 1}]
+
+        # A day after the window's end (a clock ahead, a run finishing past midnight while the
+        # request is answered) belongs to neither the tiles nor the trend.
+        world.score(a, -1, 5.0, completeness=5.0)
+        world.finding(a, -1, "critical")
+        ahead = await world.get()
+        assert tile(ahead, "overall") == overall and tile(ahead, "completeness") == completeness
+        assert ahead["findings"]["days"][-1]["day"] == TODAY.isoformat()
+        assert sum(d["critical"] for d in ahead["findings"]["days"]) == 0
 
         week = await world.get(days=7)
         assert week["window"]["days"] == 7 and week["series"]["scored"] == 2

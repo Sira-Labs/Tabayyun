@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { scoreTone } from "../../components/Badges";
 import { formatLocalTime, formatNumber } from "../../format";
-import { metricLabel, scoreText, seriesFindingsSearch, shownWords, type Overview } from "../../overview";
+import { metricLabel, scoreText, shownWords, type Overview } from "../../overview";
 import { mutedClass } from "../suites/parts";
 
 const cell = "px-3 py-2 align-top";
@@ -57,18 +57,7 @@ export function WorstSeries({ worst }: { worst: Overview["worst"] }) {
                     <Score value={item.overall} />
                   </td>
                   <td className={`${cell} text-right tabular-nums`}>
-                    {item.open_findings > 0 ? (
-                      <Link
-                        to="/findings"
-                        search={seriesFindingsSearch(item.series_id)}
-                        aria-label={`${formatNumber(item.open_findings)} unresolved findings of ${item.name}`}
-                        className="font-medium text-sky-800 underline underline-offset-2 dark:text-sky-300"
-                      >
-                        {formatNumber(item.open_findings)}
-                      </Link>
-                    ) : (
-                      <span className={mutedClass}>0</span>
-                    )}
+                    {item.open_findings > 0 ? formatNumber(item.open_findings) : <span className={mutedClass}>0</span>}
                   </td>
                 </tr>
               ))}

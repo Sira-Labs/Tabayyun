@@ -151,8 +151,10 @@ def _narrowed(filters: Filters) -> bool:
     return bool(filters.asset) or filters.source is not None
 
 
-async def _latest(session: AsyncSession, scope: Scope, filters: Filters, start: date) -> list[Latest]:
-    """Each series' newest day in the window.
+async def _latest(
+    session: AsyncSession, scope: Scope, filters: Filters, start: date, end: date
+) -> list[Latest]:
+    """Each series' newest day in the window, both ends included.
 
     One probe of the primary key per series (a lateral join), not a sort of every day of
     the window: with 10 000 series and 30 days that is 10 000 index lookups instead of
@@ -161,7 +163,11 @@ async def _latest(session: AsyncSession, scope: Scope, filters: Filters, start: 
     columns = [getattr(ScoreDay, m) for m in METRICS]
     newest = (
         select(*columns, ScoreDay.computed_at)
-        .where(ScoreDay.series_id == Series.id, ScoreDay.layer == LAYER, ScoreDay.day >= start)
+        .where(
+            ScoreDay.series_id == Series.id,
+            ScoreDay.layer == LAYER,
+            ScoreDay.day.between(start, end),
+        )
         .order_by(ScoreDay.day.desc())
         .limit(1)
         .lateral("newest")
@@ -174,13 +180,17 @@ async def _latest(session: AsyncSession, scope: Scope, filters: Filters, start: 
 
 
 async def _trend(
-    session: AsyncSession, scope: Scope, filters: Filters, start: date
+    session: AsyncSession, scope: Scope, filters: Filters, start: date, end: date
 ) -> dict[str, list[dict[str, Any]]]:
     """Per metric, each day's mean over the series scored that day and how many they were."""
     columns = [getattr(ScoreDay, m) for m in METRICS]
     stmt = (
         select(ScoreDay.day, *(func.avg(c) for c in columns), *(func.count(c) for c in columns))
-        .where(ScoreDay.workspace_id == scope.workspace_id, ScoreDay.layer == LAYER, ScoreDay.day >= start)
+        .where(
+            ScoreDay.workspace_id == scope.workspace_id,
+            ScoreDay.layer == LAYER,
+            ScoreDay.day.between(start, end),
+        )
         .group_by(ScoreDay.day)
         .order_by(ScoreDay.day)
     )
@@ -255,7 +265,9 @@ async def _findings(
     first = datetime(start.year, start.month, start.day, tzinfo=UTC)
     per_day = of_workspace(
         select(day, Finding.severity, func.count())
-        .where(Finding.created_at >= first)
+        .where(
+            Finding.created_at >= first, Finding.created_at < first + timedelta(days=(end - start).days + 1)
+        )
         .group_by(day, Finding.severity)
     )
     counts = [(d, severity, int(n)) for d, severity, n in await session.execute(per_day)]
@@ -292,7 +304,7 @@ async def _sources(session: AsyncSession, scope: Scope) -> list[dict[str, Any]]:
 async def overview(session: AsyncSession, scope: Scope, filters: Filters, *, today: date) -> dict[str, Any]:
     """The overview of the workspace for the window that ends `today`."""
     start, end = window_of(filters.days, today)
-    latest = await _latest(session, scope, filters, start)
+    latest = await _latest(session, scope, filters, start, end)
     n_worst, worst = rank_worst(latest)
     total = await session.scalar(
         select(func.count()).select_from(Series).where(*_series_filter(scope, filters))
@@ -300,7 +312,7 @@ async def overview(session: AsyncSession, scope: Scope, filters: Filters, *, tod
     return {
         "window": {"days": filters.days, "start": start.isoformat(), "end": end.isoformat()},
         "series": {"total": int(total or 0), "scored": len(latest)},
-        "tiles": summarise_tiles(latest, await _trend(session, scope, filters, start)),
+        "tiles": summarise_tiles(latest, await _trend(session, scope, filters, start, end)),
         "worst": {"share": WORST_SHARE, "n": n_worst, "items": await _worst_items(session, worst)},
         "findings": await _findings(session, scope, filters, start, end),
         "sources": await _sources(session, scope),

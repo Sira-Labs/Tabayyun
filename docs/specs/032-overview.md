@@ -100,15 +100,19 @@ fills the table from `scores`. `findings` gets the index `(workspace_id, created
 - Eight score tiles: metric, mean with one decimal coloured as the existing score tiles,
   the lowest value, the number of series, and a sparkline of `trend` with a text
   alternative ("from 97.1 to 96.4 over 30 days").
-- "Worst series": a table of `items` (name linking to the series, asset, the lowest metric
-  and its value, overall, unresolved findings linking to the inbox filtered to that series)
-  and a line "50 of 498 shown" when there are more.
+- "Worst series": a table of `items` (name linking to the series, whose page lists its
+  findings; asset, the lowest metric and its value, overall, the number of unresolved
+  findings) and a line "50 of 498 shown" when there are more.
 - "New findings per day": a stacked bar per day by severity with a table alternative, and
   the unresolved counts by severity, each linking to the inbox with that filter.
 - "Sources": one chip per source with name, health and series count, linking to the source;
   disabled sources are marked.
 - The page reloads on the live events of runs and findings (spec 030).
-- Empty workspace: a line that says nothing was scored yet, with a link to "New run".
+- A workspace without any series: a line that says nothing was scored yet, with a link to
+  "New run". Series that were last scored before the window leave the page as it is, with
+  empty tiles and the findings and sources shown.
+- While a changed filter loads, the numbers of the filter before stay on screen, dimmed and
+  marked "Updating for the changed filter…".
 
 ## Behaviour
 
@@ -169,8 +173,9 @@ fills the table from `scores`. `findings` gets the index `(workspace_id, created
   take 0.13 s. The whole request measured about 0.5 s locally at that size.
 - Unresolved means open and acknowledged, as on the series pages and as the inbox shows by
   default, so the page's links into the inbox carry no status filter.
-- The inbox has no filter by series id; the worst list links to the inbox grouped by series
-  with that series' group open.
+- The inbox has no filter by series id, and its groups are capped at the 500 largest, so a
+  link into it could miss a series; the worst list links the name to the series page and
+  shows the count as a number.
 - `sources[].last_fetch` is passed on as the sources API stores it (an object), not
   flattened to a time.
 - An invalid `days` or `source` in the page's URL is ignored by the page (it asks for 30
@@ -178,6 +183,11 @@ fills the table from `scores`. `findings` gets the index `(workspace_id, created
 - Seen in Chromium against a local api with the example data, light and dark and at phone
   width: tiles with sparklines, the worst series, the stacked bars and the source chip; the
   filters wrote themselves into the URL.
+
+- From the review:
+  - The window has an upper bound too: a score or finding dated after today (a clock ahead,
+    a run that finishes past midnight) is in neither the tiles, the trend nor the bars.
+  - Sparkline points lie at their dates, so a gap without scores takes its width.
 
 ## Out of scope
 

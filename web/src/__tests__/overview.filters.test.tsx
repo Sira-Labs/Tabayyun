@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { validateOverviewSearch } from "../overview";
 import { renderApp } from "./helpers";
-import { PI_ID, overviewBackend } from "./overviewFake";
+import { PI_ID, overview, overviewBackend } from "./overviewFake";
 
 type App = ReturnType<typeof renderApp>;
 const searchOf = (app: App) => app.router.state.location.search as Record<string, unknown>;
@@ -75,6 +75,22 @@ describe("overview.filters", () => {
 
     // Filters replace the history entry rather than adding one.
     expect(app.router.history.length).toBe(length);
+  });
+
+  it("marks the numbers of the filter before as updating until the new ones arrive", async () => {
+    let release: (body: unknown) => void = () => {};
+    const late = new Promise<unknown>((resolve) => (release = resolve));
+    const backend = overviewBackend((query) => (query.get("days") === "7" ? late : overview()));
+    renderApp("/");
+    await screen.findByRole("region", { name: "Scores" });
+    expect(screen.queryByRole("status")).toBeNull();
+    await userEvent.setup().selectOptions(screen.getByRole("combobox", { name: "Window" }), "7");
+    expect((await screen.findByRole("status")).textContent).toBe("Updating for the changed filter…");
+    expect(screen.getByRole("region", { name: "Scores" }).closest("[aria-busy]")?.getAttribute("aria-busy")).toBe("true");
+    release(overview());
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+    expect(screen.getByRole("region", { name: "Scores" }).closest("[aria-busy]")?.getAttribute("aria-busy")).toBe("false");
+    expect(last(backend.asked)).toEqual({ days: "7" });
   });
 
   it("applies the asset prefix when the field is left, and clears it when emptied", async () => {

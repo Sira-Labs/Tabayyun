@@ -162,7 +162,8 @@ export function lastFetchAt(source: Pick<OverviewSource, "last_fetch">): string 
  * The means span the box's height (a flat trend lies in the middle); one point becomes a flat
  * line over the whole width. */
 export function sparklinePoints(trend: readonly TrendPoint[], width: number, height: number, pad = 2): string {
-  const means = trend.map((p) => p.mean).filter((m) => Number.isFinite(m));
+  const points = trend.filter((p) => Number.isFinite(p.mean));
+  const means = points.map((p) => p.mean);
   if (means.length === 0) return "";
   const lo = Math.min(...means);
   const hi = Math.max(...means);
@@ -172,8 +173,12 @@ export function sparklinePoints(trend: readonly TrendPoint[], width: number, hei
     const y0 = round(y(means[0] as number));
     return `0,${y0} ${width},${y0}`;
   }
-  const step = width / (means.length - 1);
-  return means.map((m, i) => `${round(i * step)},${round(y(m))}`).join(" ");
+  // By date, not by position: a gap of four weeks between two points takes four weeks' width.
+  const at = points.map((p) => Date.parse(`${p.day}T00:00:00Z`));
+  const first = at[0] as number;
+  const span = (at.at(-1) as number) - first;
+  const x = (i: number) => (span > 0 ? (((at[i] as number) - first) / span) * width : (i / (means.length - 1)) * width);
+  return means.map((m, i) => `${round(x(i))},${round(y(m))}`).join(" ");
 }
 
 /** One segment of a stacked bar, from the baseline up: least severe at the bottom. */
@@ -196,13 +201,8 @@ export function barSegments(day: SeverityCounts, max: number, height: number): B
 
 // ---- links into the inbox ----
 
-/** The inbox search of a series' unresolved findings: grouped by series with its group open.
- * The inbox shows open and acknowledged findings by default, which is what the API counts. */
-export function seriesFindingsSearch(seriesId: string) {
-  return { group: "series" as const, open: seriesId };
-}
-
-/** The inbox search of the unresolved findings of one severity. */
+/** The inbox search of the unresolved findings of one severity. The inbox shows open and
+ * acknowledged findings by default, which is what the API counts. */
 export function severityFindingsSearch(severity: Severity) {
   return { severity };
 }

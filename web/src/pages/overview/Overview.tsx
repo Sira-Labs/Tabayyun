@@ -24,7 +24,9 @@ function NothingScored() {
 
 /** The overview's parts once the data is there. */
 function OverviewBody({ data, filtered }: { data: OverviewData; filtered: boolean }) {
-  if (data.series.scored === 0 && !filtered) {
+  // Onboarding only for a workspace without any series: one whose series were last scored
+  // before the window still has findings and sources to show.
+  if (data.series.total === 0 && !filtered) {
     return (
       <>
         <NothingScored />
@@ -68,7 +70,18 @@ export function Overview() {
       <OverviewFilters search={search} onChange={change} />
       {overview.isPending && <p>Loading the overview…</p>}
       <ErrorLine error={overview.error} prefix="Could not load the overview" />
-      {overview.data && <OverviewBody data={overview.data} filtered={filtered} />}
+      {/* While a changed filter loads, the numbers on screen are those of the filter before:
+          they are marked as such and dimmed until the new ones arrive. */}
+      {overview.isPlaceholderData && (
+        <p role="status" className={`text-sm ${mutedClass}`}>
+          Updating for the changed filter…
+        </p>
+      )}
+      {overview.data && (
+        <div aria-busy={overview.isPlaceholderData} className={`space-y-6 ${overview.isPlaceholderData ? "opacity-50" : ""}`}>
+          <OverviewBody data={overview.data} filtered={filtered} />
+        </div>
+      )}
     </section>
   );
 }

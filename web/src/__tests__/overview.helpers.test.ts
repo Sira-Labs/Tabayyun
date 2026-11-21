@@ -9,7 +9,6 @@ import {
   overviewKeys,
   overviewUrl,
   scoreText,
-  seriesFindingsSearch,
   severityFindingsSearch,
   shownWords,
   sparklinePoints,
@@ -53,10 +52,18 @@ describe("overview helpers", () => {
   });
 
   it("scales the sparkline to the box, highest mean at the top", () => {
-    expect(sparklinePoints(trend, 100, 20, 2)).toBe("0,11 50,2 100,18");
+    // The middle point is 13 of 29 days in, not halfway.
+    expect(sparklinePoints(trend, 100, 20, 2)).toBe("0,11 44.83,2 100,18");
     expect(sparklinePoints(trend.slice(0, 1), 100, 20)).toBe("0,10 100,10");
     expect(sparklinePoints([{ day: "d1", mean: 90, n: 1 }, { day: "d2", mean: 90, n: 1 }], 100, 20)).toBe("0,10 100,10");
     expect(sparklinePoints([], 100, 20)).toBe("");
+    // Points lie at their dates: after four weeks without scores the last two days sit at the right edge.
+    const gap = [
+      { day: "2026-11-01", mean: 90, n: 1 },
+      { day: "2026-11-29", mean: 80, n: 1 },
+      { day: "2026-11-30", mean: 80, n: 1 },
+    ];
+    expect(sparklinePoints(gap, 290, 20, 0)).toBe("0,0 280,20 290,20");
   });
 
   it("stacks a day's bar from low at the bottom to critical at the top", () => {
@@ -85,9 +92,6 @@ describe("overview helpers", () => {
   });
 
   it("links into the inbox with searches the inbox keeps as they are", () => {
-    const series = seriesFindingsSearch("s1");
-    expect(validateInboxSearch(series)).toEqual(series);
-    expect(series).toEqual({ group: "series", open: "s1" });
     const severity = severityFindingsSearch("high");
     expect(validateInboxSearch(severity)).toEqual({ severity: "high" });
   });

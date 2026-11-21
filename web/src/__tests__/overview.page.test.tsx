@@ -55,10 +55,8 @@ describe("overview.page", () => {
     expect(cells(rows[1] as HTMLElement)).toEqual(["Feeder 5 flow", "—", "Timeliness", "55.5", "90.0", "0"]);
     const name = within(rows[0] as HTMLElement).getByRole("link", { name: "Feeder 4 pressure" });
     expect(name.getAttribute("href")).toBe(`/series/${SERIES_A}`);
-    const findings = within(rows[0] as HTMLElement).getByRole("link", { name: "12 unresolved findings of Feeder 4 pressure" });
-    expect(pathOf(findings.getAttribute("href"))).toBe("/findings");
-    expect(params(findings.getAttribute("href"))).toEqual({ group: "series", open: SERIES_A });
-    // No findings, no link.
+    // The count is a number; the series' own page lists its findings.
+    expect(within(rows[0] as HTMLElement).queryAllByRole("link").map((l) => l.getAttribute("href"))).toEqual([`/series/${SERIES_A}`]);
     expect(within(rows[1] as HTMLElement).queryAllByRole("link").map((a) => a.getAttribute("href"))).toEqual([`/series/${SERIES_B}`]);
     expect(screen.getByText("2 of 498 shown")).toBeTruthy();
   });
@@ -134,6 +132,20 @@ describe("overview.page", () => {
     expect(within(main).getByRole("link", { name: "New run" }).getAttribute("href")).toBe("/runs/new");
     expect(screen.queryByRole("region", { name: "Scores" })).toBeNull();
     expect(screen.getByText("No sources yet.")).toBeTruthy();
+  });
+
+  it("keeps findings and sources when the series were last scored before the window", async () => {
+    overviewBackend(() => ({
+      ...emptyOverview(),
+      series: { total: 3, scored: 0 },
+      findings: { ...emptyOverview().findings, open: { critical: 0, high: 4, medium: 0, low: 0 } },
+    }));
+    renderApp("/");
+    const scores = await screen.findByRole("region", { name: "Scores" });
+    expect(within(scores).getAllByRole("img", { name: "no scores in the last 30 days" })).toHaveLength(8);
+    expect(screen.getByText(/0 of 3 series scored/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: /4/ }).getAttribute("href")).toContain("severity=high");
+    expect(screen.queryByText(/Nothing was scored/)).toBeNull();
   });
 
   it("shows the parts with zeros when a filter matches nothing", async () => {
