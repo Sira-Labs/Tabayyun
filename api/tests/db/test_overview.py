@@ -102,16 +102,21 @@ async def test_run_writes_its_score_day(admin_env):
             run = (await c.get(f"/api/runs/{r.json()['id']}")).json()
             assert run["status"] == "succeeded"
         sid = run["series"][0]["id"]
-        rows = admin_env.sql(
-            "SELECT day, overall, completeness, plausibility, n_findings, computed_at, workspace_id "
-            "FROM score_days WHERE series_id = :s",
-            s=sid,
-        )
         newest = admin_env.sql(
             "SELECT overall, dimensions, n_findings, computed_at FROM scores WHERE series_id = :s "
             "ORDER BY computed_at DESC LIMIT 1",
             s=sid,
         )[0]
+        # The day of the newer run only: should midnight UTC pass between the two runs, the
+        # first one's row is on the day before and not part of what is checked here.
+        today = newest[3].astimezone(UTC).date()
+        rows = admin_env.sql(
+            "SELECT day, overall, completeness, plausibility, n_findings, computed_at, workspace_id "
+            "FROM score_days WHERE series_id = :s AND day = :d",
+            s=sid,
+            d=today,
+        )
+        assert admin_env.scalar("SELECT count(*) FROM scores WHERE series_id = :s", s=sid) == 2
         assert len(rows) == 1
         kept = rows[0]
         assert (kept[0], kept[1], kept[4], kept[5]) == (newest[3].date(), newest[0], newest[2], newest[3])
@@ -134,8 +139,10 @@ async def test_run_writes_its_score_day(admin_env):
                     computed_at=at,
                 )
         after = admin_env.sql(
-            "SELECT day, overall, validity, completeness FROM score_days WHERE series_id = :s ORDER BY day",
+            "SELECT day, overall, validity, completeness FROM score_days "
+            "WHERE series_id = :s AND day >= :d ORDER BY day",
             s=sid,
+            d=today,
         )
         assert [tuple(r) for r in after] == [
             (newest[3].date(), newest[0], kept_validity(admin_env, sid, newest[3]), kept[2]),
