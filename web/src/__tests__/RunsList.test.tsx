@@ -9,14 +9,14 @@ function run(n: number) {
 }
 
 describe("RunsList", () => {
-  it("redirects / to /runs and appends the next page on load more", async () => {
+  it("lists the runs and appends the next page on load more", async () => {
     stubFetch((url) => {
       if (url === "/api/runs?limit=25") return { items: [run(1), run(2)], next_cursor: "c1" };
       if (url === "/api/runs?cursor=c1&limit=25") return { items: [run(3)], next_cursor: null };
       throw new Error(`unexpected ${url}`);
     });
     const user = userEvent.setup();
-    const { router } = renderApp("/");
+    const { router } = renderApp("/runs");
 
     const table = await screen.findByRole("table");
     expect(router.state.location.pathname).toBe("/runs");

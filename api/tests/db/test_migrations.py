@@ -50,6 +50,8 @@ EXPECTED_TABLES = {
     # Spec 031.
     "alert_rules",
     "alert_notifications",
+    # Spec 032.
+    "score_days",
 }
 HYPERTABLES = {"findings", "metrics", "scores"}
 
@@ -580,6 +582,65 @@ def test_0017_adds_the_alert_tables_and_downgrades(db_url, fresh_schema):
             assert conn.execute(may_call, {"role": "public", "f": signature}).scalar_one() is False
         with engine.connect() as conn:
             assert set(conn.execute(policies).scalars()) == tables
+    finally:
+        engine.dispose()
+        fresh_schema("auto")
+
+
+def test_0018_adds_score_days_filled_from_scores_and_downgrades(db_url, fresh_schema):
+    """0018 brings `score_days` with the tenant policy, filled with the newest score of each
+    series and day, and the findings index; its downgrade removes both and keeps the scores."""
+    fresh_schema("auto")
+    engine = create_engine(db_url)
+    migrate.downgrade(db_url, "0017")
+    seed = """
+        INSERT INTO sources (id, org_id, workspace_id, type, name)
+        SELECT '00000000-0000-0000-0000-00000000e001', o.id, w.id, 'upload', 'u' FROM orgs o
+          JOIN workspaces w ON w.org_id = o.id LIMIT 1;
+        INSERT INTO series (id, org_id, workspace_id, source_id, external_id, name)
+        SELECT '00000000-0000-0000-0000-00000000e002', org_id, workspace_id, id, 'x', 'x' FROM sources
+         WHERE id = '00000000-0000-0000-0000-00000000e001';
+        INSERT INTO runs (id, org_id, workspace_id, trigger, status)
+        SELECT '00000000-0000-0000-0000-00000000e003', org_id, workspace_id, 'upload', 'succeeded' FROM series
+         WHERE id = '00000000-0000-0000-0000-00000000e002';
+        INSERT INTO scores (org_id, series_id, run_id, layer, method_version, overall, dimensions,
+                            n_findings, computed_at)
+        SELECT org_id, id, '00000000-0000-0000-0000-00000000e003', 'raw', 'v1', v.overall,
+               CAST(v.dimensions AS jsonb), v.n, CAST(v.at AS timestamptz)
+          FROM series,
+               (VALUES (80.0, '{"completeness": 70.5}', 2, '2026-11-01T08:00:00+00:00'),
+                       (60.0, '{"completeness": 50.0, "validity": 90}', 5, '2026-11-01T23:30:00+00:00'),
+                       (95.0, '{}', 0, '2026-11-02T00:30:00+00:00')) AS v(overall, dimensions, n, at)
+         WHERE id = '00000000-0000-0000-0000-00000000e002';
+    """
+    days = text(
+        "SELECT day::text, overall, completeness, validity, n_findings, workspace_id IS NOT NULL "
+        "FROM score_days ORDER BY day"
+    )
+    try:
+        assert "score_days" not in inspect(engine).get_table_names()
+        with engine.begin() as conn:
+            conn.execute(text(seed))
+        migrate.upgrade(db_url, "head", timescale="auto")
+        with engine.connect() as conn:
+            assert [tuple(r) for r in conn.execute(days)] == [
+                ("2026-11-01", 60.0, 50.0, 90.0, 5, True),
+                ("2026-11-02", 95.0, None, None, 0, True),
+            ]
+            policies = text("SELECT policyname FROM pg_policies WHERE tablename = 'score_days'")
+            assert conn.execute(policies).scalars().all() == ["tenant"]
+        indexes = {i["name"] for i in inspect(engine).get_indexes("findings")}
+        assert "ix_findings_workspace_id_created_at" in indexes
+        assert "ix_score_days_workspace_id_layer_day" in {
+            i["name"] for i in inspect(engine).get_indexes("score_days")
+        }
+        migrate.downgrade(db_url, "0017")
+        assert _current_revision(db_url) == "0017" and "score_days" not in inspect(engine).get_table_names()
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT count(*) FROM scores")).scalar_one() == 3
+        migrate.upgrade(db_url, "head", timescale="auto")
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT count(*) FROM score_days")).scalar_one() == 2
     finally:
         engine.dispose()
         fresh_schema("auto")

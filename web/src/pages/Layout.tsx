@@ -65,10 +65,13 @@ export function Layout() {
       </a>
       <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <Link to="/runs">
+          <Link to="/">
             <Brand />
           </Link>
           <nav aria-label="Main" className="flex flex-wrap items-center gap-1">
+            <Link to="/" activeOptions={{ exact: true, includeSearch: false }} className={navClass} activeProps={{ className: navActive }}>
+              Overview
+            </Link>
             <Link to="/runs" activeOptions={{ exact: true }} className={navClass} activeProps={{ className: navActive }}>
               Runs
             </Link>

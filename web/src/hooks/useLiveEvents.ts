@@ -4,9 +4,9 @@ import { useQueryClient, type Query, type QueryClient } from "@tanstack/react-qu
 import { useEffect } from "react";
 
 /** First key segments of the queries a finished run can change. */
-const RUN_QUERIES = ["runs", "run", "series", "scores", "suites"] as const;
+const RUN_QUERIES = ["runs", "run", "series", "scores", "suites", "overview"] as const;
 /** First key segments of the queries new findings can change. */
-const FINDING_QUERIES = ["findings", "series"] as const;
+const FINDING_QUERIES = ["findings", "series", "overview"] as const;
 const ALL_QUERIES = [...new Set<string>([...RUN_QUERIES, ...FINDING_QUERIES])];
 
 /** Timing of the stream's client; an object, so tests can shorten it.

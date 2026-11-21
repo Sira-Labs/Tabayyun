@@ -1,7 +1,8 @@
-import { Outlet, createRootRoute, createRoute, createRouter, lazyRouteComponent, redirect, type RouterHistory } from "@tanstack/react-router";
+import { Outlet, createRootRoute, createRoute, createRouter, lazyRouteComponent, type RouterHistory } from "@tanstack/react-router";
 import { setUnauthorizedHandler } from "./api";
 import { validateCompareSearch } from "./compare/url";
 import { validateInboxSearch } from "./findingsInbox";
+import { validateOverviewSearch } from "./overview";
 import { Account } from "./pages/Account";
 import { ADMIN_TABS, Admin, type AdminTab } from "./pages/admin/Admin";
 import { Layout } from "./pages/Layout";
@@ -26,12 +27,12 @@ const rootRoute = createRootRoute({ component: Outlet, notFoundComponent: NotFou
 // Everything but /login lives under the signed-in layout, which checks the session.
 const appRoute = createRoute({ getParentRoute: () => rootRoute, id: "_app", component: Layout });
 
+// The overview (spec 032) loads on its first visit, like the alerts pages.
 const indexRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/",
-  beforeLoad: () => {
-    throw redirect({ to: "/runs" });
-  },
+  validateSearch: validateOverviewSearch,
+  component: lazyRouteComponent(() => import("./pages/overview/Overview"), "Overview"),
 });
 const runsRoute = createRoute({ getParentRoute: () => appRoute, path: "/runs", component: RunsList });
 const newRunRoute = createRoute({ getParentRoute: () => appRoute, path: "/runs/new", component: RunForm });

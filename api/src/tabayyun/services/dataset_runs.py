@@ -45,6 +45,7 @@ from tabayyun.services import datasets as datasets_service
 from tabayyun.services import fetches
 from tabayyun.services import findings as findings_service
 from tabayyun.services import groups as groups_service
+from tabayyun.services import overview as overview_service
 from tabayyun.services import runs as runs_service
 from tabayyun.services import series as series_service
 from tabayyun.services.cache import CacheError, RunCache
@@ -442,6 +443,16 @@ async def _persist(
                     n_findings=rep.score.n_findings,
                     computed_at=finished_at,
                 )
+            )
+            # The overview reads the day's score from `score_days`, never from `scores` (spec 032).
+            await overview_service.record_score_day(
+                session,
+                plan.scope,
+                series_id=m.id,
+                overall=rep.score.overall,
+                dimensions=rep.score.dimensions,
+                n_findings=rep.score.n_findings,
+                computed_at=finished_at,
             )
             outcome = await findings_service.persist_report(
                 session, plan.scope, run_id=run_id, series_id=m.id, report=rep, now=finished_at

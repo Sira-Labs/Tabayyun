@@ -16,13 +16,14 @@ Conventions:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Double,
     ForeignKey,
@@ -577,6 +578,8 @@ class Finding(TenantMixin, Base):
             "status",
             text("window_start DESC"),
         ),
+        # New findings per day on the overview (spec 032).
+        Index("ix_findings_workspace_id_created_at", "workspace_id", "created_at"),
         Index(
             "ix_findings_series_id_check_id_window_start", "series_id", "check_id", text("window_start DESC")
         ),
@@ -655,6 +658,45 @@ class Score(OrgMixin, Base):
     method_version: Mapped[str] = mapped_column(Text, nullable=False)
     overall: Mapped[float] = mapped_column(Double, nullable=False)
     dimensions: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    n_findings: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+# The dimensions a score can hold, in the order the overview shows them (spec 032).
+SCORE_DIMENSIONS = (
+    "completeness",
+    "timeliness",
+    "validity",
+    "accuracy",
+    "consistency",
+    "plausibility",
+    "integrity",
+)
+
+
+class ScoreDay(TenantMixin, Base):
+    """The last score of a series on one UTC day (spec 032): what the overview reads, so it
+    never scans `scores`, which holds a row per run."""
+
+    __tablename__ = "score_days"
+    __table_args__ = (
+        PrimaryKeyConstraint("series_id", "layer", "day"),
+        Index("ix_score_days_workspace_id_layer_day", "workspace_id", "layer", "day"),
+    )
+
+    series_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("series.id", ondelete="CASCADE"), nullable=False
+    )
+    layer: Mapped[str] = mapped_column(Text, nullable=False, server_default="raw")
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    overall: Mapped[float] = mapped_column(Double, nullable=False)
+    completeness: Mapped[float | None] = mapped_column(Double)
+    timeliness: Mapped[float | None] = mapped_column(Double)
+    validity: Mapped[float | None] = mapped_column(Double)
+    accuracy: Mapped[float | None] = mapped_column(Double)
+    consistency: Mapped[float | None] = mapped_column(Double)
+    plausibility: Mapped[float | None] = mapped_column(Double)
+    integrity: Mapped[float | None] = mapped_column(Double)
     n_findings: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
