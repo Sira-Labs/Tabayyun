@@ -39,6 +39,7 @@ from tabayyun.routers import (
     findings,
     groups,
     invitations,
+    overview,
     runs,
     series,
     sources,
@@ -126,6 +127,7 @@ def create_app(settings: Settings | None = None, *, oidc: OidcClient | None = No
         compare,
         suites,
         alerts,
+        overview,
     ):
         app.include_router(router.router, dependencies=signed_in)
     app.include_router(findings.filters_router, dependencies=signed_in)

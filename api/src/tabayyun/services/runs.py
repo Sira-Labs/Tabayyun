@@ -31,6 +31,7 @@ from tabayyun.db.models import Run, Score, Upload
 from tabayyun.jobs.names import RUN_CHECKS_TASK, RUNS_QUEUE
 from tabayyun.services import coverage as coverage_service
 from tabayyun.services import findings as findings_service
+from tabayyun.services import overview as overview_service
 from tabayyun.services import series as series_service
 from tabayyun.services.cache import CacheError, RunCache
 from tabayyun.services.pagination import decode_keyset, encode_keyset
@@ -378,6 +379,16 @@ async def execute_run(
                     n_findings=report.score.n_findings,
                     computed_at=finished_at,
                 )
+            )
+            # The overview reads the day's score from `score_days`, never from `scores` (spec 032).
+            await overview_service.record_score_day(
+                session,
+                scope,
+                series_id=series.id,
+                overall=report.score.overall,
+                dimensions=report.score.dimensions,
+                n_findings=report.score.n_findings,
+                computed_at=finished_at,
             )
             outcome = await findings_service.persist_report(
                 session, scope, run_id=run_id, series_id=series.id, report=report, now=finished_at
