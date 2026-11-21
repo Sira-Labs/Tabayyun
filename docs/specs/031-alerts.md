@@ -167,7 +167,8 @@ A score match is `{"series_id", "series_name", "asset_path", "metric", "score", 
 5. **Webhook safety.** The URL is resolved under the connectors' address policy (spec 021):
    loopback, link-local and other refused addresses are not contacted, private ranges only
    when allowed, the connection is pinned to the checked address, and redirects are not
-   followed. A 2xx answer within 10 seconds is success; the answer's body is not read.
+   followed. A 2xx answer within 10 seconds is success; the answer's body is not read. The
+   whole call has 30 seconds, after which it counts as a failure that is tried again.
 6. **Test.** A test notification carries one made-up match, is due at once and does not
    count for the throttle.
 7. **Audit.** Creating, changing, deleting and testing a rule are written to the audit log
@@ -222,6 +223,8 @@ A score match is `{"series_id", "series_name", "asset_path", "metric", "score", 
   `stuck_notifications_are_requeued`, `late_worker_does_not_overwrite_a_later_claim`,
   `throttle_is_kept_when_the_one_before_is_sent_late`,
   `retry_of_the_one_before_holds_the_next_back`,
+  `inline_delivery_records_when_it_was_sent`, `a_send_in_flight_holds_an_earlier_one_back`,
+  `webhook_has_an_overall_deadline`,
   `email_not_configured_is_skipped`, `routes_validation_roles_and_url_visibility`,
   `test_notification_and_audit`, `rotation_reseals_rule_secrets`,
   `evaluation_error_does_not_fail_the_run`.

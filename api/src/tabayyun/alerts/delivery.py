@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -9,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import structlog
-from sqlalchemy import func, select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tabayyun import __version__, mail
@@ -25,6 +26,10 @@ log = structlog.get_logger()
 
 ATTEMPTS = 3
 WEBHOOK_TIMEOUT_S = 10.0
+# The whole call, from resolving the name to the status line. The timeout above bounds each
+# step of it, not their sum; this stays well below `STUCK_AFTER`, so a send that is still
+# running is never taken for one a lost worker left behind.
+WEBHOOK_DEADLINE_S = 30.0
 # A notification left `sending` this long belongs to a worker that died: it is taken again.
 STUCK_AFTER = timedelta(minutes=10)
 MAX_ERROR = 300
@@ -105,13 +110,17 @@ async def _held_back_until(
         AlertNotification.kind == "alert",
         AlertNotification.id != notification.id,
     )
+    # Another one that is being sent right now, whatever its due time, or one that waits and
+    # is due before this one (a retry of an earlier send).
     on_its_way = await session.scalar(
         select(func.count())
         .select_from(AlertNotification)
         .where(
             *others,
-            AlertNotification.status.in_(("pending", "sending")),
-            AlertNotification.due_at < notification.due_at,
+            or_(
+                AlertNotification.status == "sending",
+                and_(AlertNotification.status == "pending", AlertNotification.due_at < notification.due_at),
+            ),
         )
     )
     if on_its_way:
@@ -206,20 +215,23 @@ async def _send_webhook(claimed: _Claimed, deps: Deps) -> _Outcome:
     headers = messages.webhook_headers(claimed.content, body, secret=claimed.secret, version=__version__)
     url = claimed.url or ""
     try:
-        # Pinned to the checked address, without redirects (spec 021).
-        client = await deps.net.http_client(url)
+        async with asyncio.timeout(WEBHOOK_DEADLINE_S):
+            # Pinned to the checked address, without redirects (spec 021).
+            client = await deps.net.http_client(url)
+            # Only the status is read: the body is never loaded, so a receiver cannot hold
+            # the delivery or fill the memory by sending one without end.
+            async with (
+                client,
+                client.stream(
+                    "POST", url, content=body, headers=headers, timeout=WEBHOOK_TIMEOUT_S
+                ) as response,
+            ):
+                status_code = response.status_code
     except TargetRefusedError as exc:
         return _Outcome("failed", str(exc)[:MAX_ERROR])
-    try:
-        # Only the status is read: the body is never loaded, so a receiver cannot hold the
-        # delivery or fill the memory by sending one without end.
-        async with (
-            client,
-            client.stream("POST", url, content=body, headers=headers, timeout=WEBHOOK_TIMEOUT_S) as response,
-        ):
-            status_code = response.status_code
-    except TargetRefusedError as exc:
-        return _Outcome("failed", str(exc)[:MAX_ERROR])
+    except TimeoutError:
+        # Leaving the blocks above closed the client and its connection.
+        return _Outcome("failed", f"no answer within {WEBHOOK_DEADLINE_S:g} s", retry=True)
     except httpx.HTTPError as exc:
         return _Outcome("failed", f"{type(exc).__name__}: {exc}"[:MAX_ERROR], retry=True)
     if 200 <= status_code < 300:

@@ -95,17 +95,19 @@ const FIELD_OF: Record<keyof AlertFormModel, AlertField> = {
 export function AlertForm({ catalogue, channels, rule, submitLabel, pending, error, onSubmit }: Props) {
   const [form, setForm] = useState<AlertFormModel>(() => formOf(rule));
   const [local, setLocal] = useState<Partial<Record<AlertField, string>>>({});
-  // The API's errors of fields changed since the last submit: the error object stays until
-  // the next request, the message at a corrected field must not.
-  const [dismissed, setDismissed] = useState<ReadonlySet<AlertField>>(new Set());
+  // The fields changed since `error` arrived: that error object stays until the next request,
+  // the message at a corrected field must not. The set belongs to one error: an answer that
+  // comes later shows all its errors, also at fields edited while the request was on its way.
+  const [dismissed, setDismissed] = useState<{ of: unknown; fields: ReadonlySet<AlertField> }>({ of: null, fields: new Set() });
   const api = alertErrors(error);
-  const err = (field: AlertField) => local[field] ?? (dismissed.has(field) ? undefined : api.fields[field]);
+  const isDismissed = (field: AlertField) => dismissed.of === error && dismissed.fields.has(field);
+  const err = (field: AlertField) => local[field] ?? (isDismissed(field) ? undefined : api.fields[field]);
   const set = <K extends keyof AlertFormModel>(key: K, value: AlertFormModel[K]) => {
     const field = FIELD_OF[key];
     setForm((f) => ({ ...f, [key]: value }));
     // The score's own check is on the threshold: choosing another score does not answer it.
     if (key !== "metric") setLocal((l) => Object.fromEntries(Object.entries(l).filter(([k]) => k !== field)));
-    setDismissed((d) => (d.has(field) ? d : new Set(d).add(field)));
+    setDismissed((d) => ({ of: error, fields: new Set(d.of === error ? d.fields : []).add(field) }));
   };
   const toggle = <T extends string>(list: T[], item: T, on: boolean): T[] => (on ? [...list, item] : list.filter((x) => x !== item));
 
@@ -113,7 +115,6 @@ export function AlertForm({ catalogue, channels, rule, submitLabel, pending, err
     e.preventDefault();
     const found = validateForm(form);
     setLocal(found);
-    setDismissed(new Set());
     if (Object.keys(found).length > 0) return;
     onSubmit(form);
   };

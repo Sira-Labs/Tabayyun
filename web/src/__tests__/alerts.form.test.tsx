@@ -208,6 +208,23 @@ describe("alerts.form (new)", () => {
     expect(screen.getByText("1: not an address")).toBeTruthy();
   });
 
+  it("shows the errors of an answer at fields edited while it was on its way", async () => {
+    let release: (answer: Response) => void = () => {};
+    const late = new Promise<Response>((resolve) => (release = resolve));
+    stubFetch(alertsBackend({ answer: () => late }).route, ADMIN);
+    const user = userEvent.setup();
+    renderApp("/alerts/new");
+    await user.type(await screen.findByLabelText("Name"), "Taken");
+    await user.type(screen.getByLabelText("Recipients"), "ops@example.org");
+    await user.click(screen.getByRole("button", { name: /rule/ }));
+    // Edited before the answer is there: the answer's error at this field must still show.
+    await user.type(screen.getByLabelText("Name"), "!");
+    release(json({ detail: "name_taken" }, 409));
+    expect((await screen.findByText(NAME_TAKEN)).id).toBe("alert-name-error");
+    await user.type(screen.getByLabelText("Name"), "?");
+    expect(screen.queryByText(NAME_TAKEN)).toBeNull();
+  });
+
   it("clears a field's own error when the field changes, and keeps the others", async () => {
     stubFetch(alertsBackend().route, ADMIN);
     const user = userEvent.setup();

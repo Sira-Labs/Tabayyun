@@ -1040,3 +1040,59 @@ async def test_inline_delivery_records_when_it_was_sent(admin_env, smtp, monkeyp
             == done
         )
     assert len(smtp.messages) == 1
+
+
+async def test_a_send_in_flight_holds_an_earlier_one_back(admin_env, smtp):  # noqa: F811
+    """Whatever its due time, a notification that is being sent right now holds the rule's
+    others back: its send time is what the throttle will count from."""
+    async with admin_env.client() as c:
+        world = World(admin_env, c)
+        series = await world.series("feeder")
+        rule = await world.rule(**EMAIL_RULE, throttle_minutes=60)
+        run = world.run()
+        world.finding(run, series)
+        [waiting] = await world.evaluate(run, T0)
+        # Another one of the rule, due later, is being sent at this moment.
+        admin_env.sql(
+            "INSERT INTO alert_notifications (id, org_id, workspace_id, rule_id, kind, status, due_at, "
+            "n_matches, items, attempts, claimed_at, created_at) "
+            "VALUES (gen_random_uuid(), :o, :w, :r, 'alert', 'sending', :due, 1, '[]'::jsonb, 1, :now, :now)",
+            o=DEFAULT_ORG_ID,
+            w=DEFAULT_WORKSPACE_ID,
+            r=rule["id"],
+            due=T0 + timedelta(minutes=5),
+            now=T0 + timedelta(minutes=6),
+        )
+        at = T0 + timedelta(minutes=6)
+        assert (
+            await delivery.deliver(world.factory, waiting.id, deps(smtp), final_attempt=False, now=at) is None
+        )
+        held = admin_env.sql("SELECT status, due_at FROM alert_notifications WHERE id = :i", i=waiting.id)[0]
+        assert tuple(held) == ("pending", at + timedelta(minutes=60))
+    assert smtp.messages == []
+
+
+async def test_webhook_has_an_overall_deadline(admin_env, monkeypatch):
+    """A receiver that keeps the call open is given up on after the deadline, long before the
+    notification would count as left behind; the send is tried again."""
+    import asyncio
+
+    async def stalls(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(5)
+        return httpx.Response(204)
+
+    monkeypatch.setattr(delivery, "WEBHOOK_DEADLINE_S", 0.05)
+    assert timedelta(seconds=30) < delivery.STUCK_AFTER
+    async with admin_env.client() as c:
+        world = World(admin_env, c)
+        series = await world.series("feeder")
+        rule = await world.rule(**HOOK_RULE)
+        run = world.run()
+        world.finding(run, series)
+        [started] = await world.evaluate(run, T0)
+        with pytest.raises(delivery.DeliveryError, match="no answer within 0.05 s"):
+            await delivery.deliver(
+                world.factory, started.id, deps(net=hook_net(stalls)), final_attempt=False, now=T0
+            )
+        row = world.notifications(rule["id"])[0]
+        assert (row[1], row[4], row[5]) == ("pending", 1, "no answer within 0.05 s")
