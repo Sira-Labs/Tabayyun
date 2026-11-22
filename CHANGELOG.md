@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-22
+
+Sprint 10: suites, triage, alerts, overview. Quality is monitored continuously instead of
+run by hand. The patch releases v0.3.1 to v0.3.8 carried these changes to staging as they
+merged.
+
 ### Added
 - Check suites (spec 027):
   - A suite names a dataset, a cron schedule (UTC, at most every five minutes) and the checks
@@ -83,6 +89,17 @@ All notable changes to this project are documented here. The format follows
   - `GET /api/overview?days=&asset=&source=` answers in under a second for 10 000 series.
   - Migration 0018 adds `score_days` (the last score of each series per UTC day, filled from
     the existing scores; runs keep it up to date) and an index on `findings`.
+- Compare view scatter (spec 033):
+  - "Scatter" on `/compare` plots one of the compared series against another: one point per
+    bin of the grid the cross-series checks use, coloured by its time, for the chart's
+    window. Points inside finding windows are ringed and the selected finding's are drawn
+    stronger, so a correlation break shows as a part of the cloud that leaves the rest. The
+    pair lives in the URL (`xy=`), and the points are also listed as a table.
+  - `GET /api/compare/scatter?x=&y=&from=&to=&grid=&max_points=` returns the points, the
+    number of bins and the Pearson correlation over all of them. Above `max_points` (default
+    2000) the server returns a selection that keeps the cloud's density over time and the
+    points that leave it.
+  - The core gained `scatter` (Python: `tabayyun_core.scatter`).
 
 ### Changed
 - `PATCH /api/findings/{id}` refuses fields it does not know (it ignored them before).
@@ -297,6 +314,7 @@ Sprint 8: sign-in, tenants and the first security baseline pass.
 - A dataset window lying wholly outside 1677–2262, fixed or resolved at a run's `now`, is a
   422 instead of a run that fails in the worker.
 
-[Unreleased]: https://github.com/Sira-Labs/Tabayyun/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Sira-Labs/Tabayyun/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Sira-Labs/Tabayyun/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Sira-Labs/Tabayyun/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Sira-Labs/Tabayyun/releases/tag/v0.2.0
