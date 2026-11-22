@@ -25,6 +25,7 @@ __all__ = [
     "residual",
     "run_checks",
     "run_checks_multi",
+    "scatter",
     "synth",
     "validate_configs",
     "__version__",
@@ -281,3 +282,46 @@ class Cache:
     def read(self, layer: str, source_id: str, series_ids: list[str], start_ns: int, end_ns: int) -> dict[str, Any]:
         """Series over ``[start_ns, end_ns)`` as pyarrow RecordBatches keyed by id, in request order."""
         return dict(self._native.read(layer, source_id, list(series_ids), start_ns, end_ns))
+
+
+def scatter(
+    tables: dict[str, Any],
+    metas: dict[str, dict[str, Any]],
+    x: str,
+    y: str,
+    from_ns: int,
+    to_ns: int,
+    *,
+    grid: str | None = None,
+    max_points: int = 2000,
+    ts_col: str = "ts",
+    value_col: str = "value",
+    quality_col: str | None = "quality",
+) -> dict[str, Any]:
+    """Series ``y`` against series ``x`` over ``[from_ns, to_ns)`` (spec 033).
+
+    Both are aligned on the grid the checks use; every grid bin in which both have a value is
+    one point. ``grid`` is ``auto`` (the coarser expected interval of the two, the default) or
+    a duration such as ``15m``.
+
+    Returns ``grid_ns``, ``n_bins`` (the number of such bins), ``r`` (the Pearson correlation
+    over all of them, or None), at most ``max_points`` points in time order as ``ts``, ``x``
+    and ``y``, and ``missing`` (series without a usable, finite sample in the window; then
+    there are no points). Above the cap the points are a selection that keeps the cloud's
+    density over time and the points that leave it.
+    """
+    return dict(
+        _native.scatter(
+            tables,
+            json.dumps(metas),
+            x,
+            y,
+            from_ns,
+            to_ns,
+            grid,
+            max_points,
+            ts_col,
+            value_col,
+            quality_col,
+        )
+    )

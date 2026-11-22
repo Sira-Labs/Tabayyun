@@ -92,6 +92,34 @@ def test_compare_series_stats_do_not_depend_on_the_width():
         tc.compare_series(table, end, 0, 50)
 
 
+def test_scatter_points_and_cap():
+    n = 3000
+    x = [float(i % 50) for i in range(n)]
+    y = [2 * v + (300.0 if 1500 <= i < 1503 else 0.0) for i, v in enumerate(x)]
+    tables = {"a": _series(x), "b": _series(y)}
+    end = n * 60 * 10**9
+    full = tc.scatter(tables, {}, "a", "b", 0, end, max_points=5000)
+    assert set(full) == {"grid_ns", "n_bins", "r", "ts", "x", "y", "missing"}
+    assert full["grid_ns"] == 60 * 10**9 and full["n_bins"] == n and full["missing"] == []
+    assert full["x"] == x and full["y"] == y and full["ts"][1] == 60 * 10**9
+    capped = tc.scatter(tables, {}, "a", "b", 0, end, max_points=200)
+    assert capped["n_bins"] == n and 100 < len(capped["ts"]) <= 200
+    assert capped["r"] == full["r"] and 0.5 < capped["r"] < 1.0
+    # The three bins off the line are shorter than a chunk and still leave a point.
+    assert sum(1 for a, b in zip(capped["x"], capped["y"]) if b - 2 * a > 200) == 1
+    coarse = tc.scatter(tables, {}, "b", "a", 0, end, grid="1h")
+    assert coarse["grid_ns"] == 3600 * 10**9 and coarse["n_bins"] == n // 60
+    tables["b"] = _series(y, quality=["bad"] * n)
+    missing = tc.scatter(tables, {}, "a", "b", 0, end)
+    assert missing["missing"] == ["b"] and missing["ts"] == [] and missing["r"] is None
+    with pytest.raises(ValueError, match="grid: cannot parse duration"):
+        tc.scatter(tables, {}, "a", "b", 0, end, grid="soon")
+    with pytest.raises(ValueError, match="no table for series x"):
+        tc.scatter(tables, {}, "a", "x", 0, end)
+    with pytest.raises(ValueError, match="max_points"):
+        tc.scatter(tables, {}, "a", "b", 0, end, max_points=0)
+
+
 def test_residual_of_a_balance_and_a_pair():
     n = 600
     tables = {
