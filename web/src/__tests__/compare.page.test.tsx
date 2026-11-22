@@ -5,7 +5,7 @@ import type { CompareChartResponse, ResidualResponse, SeriesGroup } from "../com
 import { PALETTE } from "../compare/palette";
 import type { Finding } from "../types";
 import { json, renderApp, stubFetch } from "./helpers";
-import { FINDING_ID, GROUP_ID, H, IDS, T0, compareSeries, finding } from "./compareFake";
+import { FINDING_ID, GROUP_ID, H, IDS, T0, compareSeries, finding, scatterAnswer } from "./compareFake";
 
 type Opts = {
   height: number;
@@ -92,10 +92,11 @@ type Backend = {
   group?: SeriesGroup;
   residual?: unknown;
   finding?: Finding;
+  scatter?: (q: URLSearchParams) => unknown;
 };
 
-function backend({ chart, findings = () => [], group = GROUP, residual = RESIDUAL, finding: one }: Backend = {}) {
-  const asked = { charts: [] as URLSearchParams[], findings: [] as URLSearchParams[], residuals: [] as URLSearchParams[] };
+function backend({ chart, findings = () => [], group = GROUP, residual = RESIDUAL, finding: one, scatter }: Backend = {}) {
+  const asked = { charts: [] as URLSearchParams[], findings: [] as URLSearchParams[], residuals: [] as URLSearchParams[], scatters: [] as URLSearchParams[] };
   stubFetch((url) => {
     const [path = "", query = ""] = url.split("?");
     const q = new URLSearchParams(query);
@@ -103,6 +104,11 @@ function backend({ chart, findings = () => [], group = GROUP, residual = RESIDUA
       asked.charts.push(q);
       if (chart) return chart(q);
       return q.get("from") ? chartOf(q.getAll("series"), Number(q.get("from")), Number(q.get("to"))) : chartOf(q.getAll("series"));
+    }
+    if (path === "/api/compare/scatter") {
+      asked.scatters.push(q);
+      // Nine hourly bins from the window's start.
+      return scatter ? scatter(q) : scatterAnswer(IDS.indexOf(q.get("x")!), IDS.indexOf(q.get("y")!), Number(q.get("from")), Number(q.get("to")), 9);
     }
     if (path === "/api/findings") {
       asked.findings.push(q);
@@ -340,5 +346,149 @@ describe("Compare", () => {
     await user.click(screen.getByRole("button", { name: "Compare" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/compare"));
     expect(router.state.location.search).toEqual({ series: `${IDS[0]},${IDS[2]}` });
+  });
+
+  it("scatter: opens with the selected finding's pair, rings the points in finding windows and follows the selects, Swap and a zoom", async () => {
+    // F2 and F1 stopped moving together from hour 30 to 36; F2 has a later finding of its own.
+    const f = finding({ series_id: IDS[1]!, check_id: "tby.correlation_break", evidence: { partner: IDS[0] }, summary: "F2 and F1 stopped moving together" });
+    const own = finding({ id: "a0000000-0000-4000-8000-000000000001", series_id: IDS[1]!, check_id: "tby.spikes", evidence: {}, summary: "1 spike", window: { start: T0 + 36.5 * H, end: T0 + 37 * H } });
+    const asked = backend({ finding: f, findings: (id) => (id === IDS[1] ? [f, own] : []) });
+    const user = userEvent.setup();
+    const three = IDS.slice(0, 3).join(",");
+    const { router } = renderApp(`/compare?series=${three}&finding=${FINDING_ID}`);
+    await chartShown();
+    expect(asked.scatters).toHaveLength(0);
+    const toggle = screen.getByRole("button", { name: "Scatter" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    await user.click(toggle);
+    await waitFor(() => expect(router.state.location.search).toEqual({ series: three, finding: FINDING_ID, xy: `${IDS[1]},${IDS[0]}` }));
+    expect(screen.getByRole("button", { name: "Scatter" }).getAttribute("aria-pressed")).toBe("true");
+
+    const plot = await screen.findByTestId("compare-scatter");
+    // The chart's window, centred on the finding.
+    expect(asked.scatters[0]!.toString()).toBe(`x=${IDS[1]}&y=${IDS[0]}&from=${T0 + 28.5 * H}&to=${T0 + 37.5 * H}&max_points=2000`);
+    const circles = (selector = "") => screen.getByTestId("compare-scatter").querySelectorAll(`circle[data-finding]${selector}`);
+    expect(circles()).toHaveLength(9);
+    // Bins 29.5 to 35.5 overlap the selected finding, the last bin F2's own; the first is clear.
+    await waitFor(() => expect(circles('[data-finding="true"]')).toHaveLength(8));
+    expect(circles('[data-selected="true"]')).toHaveLength(7);
+    expect(circles('[data-finding="false"][data-selected="false"]')).toHaveLength(1);
+    // The selected finding's points are drawn last and larger; the rest keep the small dot.
+    expect([...circles()].slice(-7).every((c) => c.getAttribute("data-selected") === "true" && c.getAttribute("r") === "4")).toBe(true);
+    expect(circles('[data-finding="true"]')[0]!.getAttribute("stroke")).toBe("#0f172a");
+    expect(circles('[data-finding="false"]')[0]!.getAttribute("stroke")).toBe("none");
+    // Colour runs with time: the first and the last point differ.
+    expect(circles('[data-finding="false"]')[0]!.getAttribute("fill")).not.toBe(circles('[data-selected="false"][data-finding="true"]')[0]!.getAttribute("fill"));
+    expect(circles()[0]!.querySelector("title")!.textContent).toMatch(/^2026-01-02 07:30:00 UTC\+03:00 · F2: 10 MW · F1: 20 MW$/);
+    expect(plot.getAttribute("aria-label")).toMatch(/^Scatter of F1 against F2, 2026-01-02 07:30:00 UTC\+03:00 to 2026-01-02 16:30:00 UTC\+03:00: 9 points coloured by time, 8 inside finding windows\.$/);
+    expect(screen.getByText("9 bins on a 1 h grid · r = 1.00 · 8 inside finding windows")).toBeTruthy();
+    const legend = screen.getByRole("list", { name: "Legend" });
+    expect(legend.textContent).toMatch(/Colour by time: 2026-01-02 07:30:00 UTC\+03:00.*2026-01-02 16:30:00 UTC\+03:00.*inside a finding window.*selected finding/);
+    expect(screen.getByRole("heading", { level: 2, name: "Scatter: F1 against F2" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Swap" }));
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ xy: `${IDS[0]},${IDS[1]}` }));
+    await waitFor(() => expect(asked.scatters.at(-1)!.get("x")).toBe(IDS[0]));
+    expect(asked.scatters.at(-1)!.get("y")).toBe(IDS[1]);
+
+    // Another series on an axis; the series the other axis has swaps the two.
+    await user.selectOptions(screen.getByRole("combobox", { name: "Y axis" }), IDS[2]!);
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ xy: `${IDS[0]},${IDS[2]}` }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "X axis" }), IDS[2]!);
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ xy: `${IDS[2]},${IDS[0]}` }));
+    await waitFor(() => expect(asked.scatters.at(-1)!.get("x")).toBe(IDS[2]));
+    await waitFor(() => expect((screen.getByRole("combobox", { name: "X axis" }) as HTMLSelectElement).value).toBe(IDS[2]));
+
+    // A zoom of the chart redraws the scatter for the new window and keeps the pair.
+    live()[0]!.opts.hooks.setSelect[0]!({ select: { left: 30, width: 4 }, posToVal: (px: number) => T0 / 1e9 + px * 3600, setSelect: vi.fn() });
+    await waitFor(() => expect(asked.scatters.at(-1)!.get("from")).toBe(String(T0 + 30 * H)));
+    expect(asked.scatters.at(-1)!.get("to")).toBe(String(T0 + 34 * H));
+    expect(router.state.location.search).toMatchObject({ from: String(T0 + 30 * H), xy: `${IDS[2]},${IDS[0]}`, finding: FINDING_ID });
+
+    await user.click(screen.getByRole("button", { name: "Hide scatter" }));
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty("xy"));
+    await waitFor(() => expect(screen.queryByTestId("compare-scatter")).toBeNull());
+    expect(screen.getByRole("button", { name: "Scatter" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("scatter: without a finding's pair it takes the first two series, and lists its points as a table", async () => {
+    const f = finding({ series_id: IDS[0]!, check_id: "tby.spikes", evidence: {}, summary: "2 spikes", window: { start: T0 + 2 * H, end: T0 + 4 * H } });
+    // F2 against F1 has all nine bins; swapped, the answer starts five hours later.
+    const answer = (q: URLSearchParams) => {
+      const [from, to] = [Number(q.get("from")), Number(q.get("to"))];
+      return q.get("x") === IDS[0] ? scatterAnswer(0, 1, from, to, 9) : scatterAnswer(1, 0, from, to, 3, { ts: [5, 6, 7].map((k) => String(from + k * H)) });
+    };
+    backend({ findings: (id) => (id === IDS[0] ? [f] : []), scatter: answer });
+    const user = userEvent.setup();
+    const { router } = renderApp(`/compare?series=${two}`);
+    await chartShown();
+    await user.click(screen.getByRole("button", { name: "Scatter" }));
+    await waitFor(() => expect(router.state.location.search).toEqual({ series: two, xy: two }));
+    await screen.findByTestId("compare-scatter");
+    await screen.findByText("9 bins on a 1 h grid · r = 1.00 · 2 inside finding windows");
+    expect(screen.getByTestId("compare-scatter").querySelectorAll('circle[data-selected="true"]')).toHaveLength(0);
+
+    const open = screen.getByRole("button", { name: "View the scatter as a table" });
+    expect(open.getAttribute("aria-expanded")).toBe("false");
+    await user.click(open);
+    const table = screen.getByRole("table", { name: /^Points of the scatter/ });
+    expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Time", "F1 (MW)", "F2 (MW)", "In a finding"]);
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(9);
+    expect(rows.map((r) => r.lastElementChild!.textContent)).toEqual(["—", "—", "yes", "yes", "—", "—", "—", "—", "—"]);
+    expect(rows[2]!.textContent).toBe("2026-01-01 05:00:00 UTC+03:001224yes");
+    // One row is in the tab order; the arrow keys move on, and the row's point is marked and read out.
+    expect(rows.map((r) => r.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1, -1, -1]);
+    rows[0]!.focus();
+    await user.keyboard("{ArrowDown}{ArrowDown}");
+    await waitFor(() => expect(document.activeElement).toBe(rows[2]));
+    expect(screen.getByTestId("scatter-readout").textContent).toBe("2026-01-01 05:00:00 UTC+03:00 · F1: 12 MW · F2: 24 MW");
+    expect(screen.getByTestId("scatter-focus")).toBeTruthy();
+    expect(rows[2]!.tabIndex).toBe(0);
+
+    // An answer without the marked bin ends the mark, and it stays ended when a later answer
+    // has that bin again.
+    await user.click(screen.getByRole("button", { name: "Swap" }));
+    await screen.findByText("3 bins on a 1 h grid · r = 1.00 · none inside finding windows");
+    await waitFor(() => expect(screen.queryByTestId("scatter-focus")).toBeNull());
+    expect(screen.getByTestId("scatter-readout").textContent).toBe("");
+    await user.click(screen.getByRole("button", { name: "Swap" }));
+    await screen.findByText("9 bins on a 1 h grid · r = 1.00 · 2 inside finding windows");
+    expect(screen.queryByTestId("scatter-focus")).toBeNull();
+    expect(screen.getByTestId("scatter-readout").textContent).toBe("");
+  });
+
+  it("scatter: says which series is missing, when there are too few points, and why a request failed", async () => {
+    const xy = `&xy=${IDS[1]},${IDS[0]}`;
+    const empty = { ts: [], xs: [], ys: [], n_bins: 0, r: null };
+    backend({ scatter: () => scatterAnswer(1, 0, T0, END, 0, { ...empty, missing: [IDS[0]!] }) });
+    const one = renderApp(`/compare?series=${two}${xy}`);
+    expect(await screen.findByText("F1 has no usable samples in this window.")).toBeTruthy();
+    expect(screen.queryByTestId("compare-scatter")).toBeNull();
+    one.unmount();
+
+    backend({ scatter: () => scatterAnswer(1, 0, T0, END, 0, { ...empty, window: null, missing: [IDS[1]!, IDS[0]!] }) });
+    const both = renderApp(`/compare?series=${two}${xy}`);
+    expect(await screen.findByText("F2 and F1 have no usable samples in this window.")).toBeTruthy();
+    both.unmount();
+
+    backend({ scatter: () => scatterAnswer(1, 0, T0, END, 1) });
+    const few = renderApp(`/compare?series=${two}${xy}`);
+    expect(await screen.findByText("Not enough bins with a value of both series to draw a scatter.")).toBeTruthy();
+    expect(screen.queryByTestId("compare-scatter")).toBeNull();
+    few.unmount();
+
+    backend({ scatter: () => json({ detail: "window_too_large" }, 422) });
+    const refused = renderApp(`/compare?series=${two}${xy}`);
+    await waitFor(() => expect(screen.getAllByRole("alert").some((a) => /^Could not load the scatter: .*window_too_large/.test(a.textContent ?? ""))).toBe(true));
+    expect(screen.queryByText("Loading the scatter…")).toBeNull();
+    refused.unmount();
+
+    // A pair that is not among the series is dropped: no panel, no request.
+    const asked = backend();
+    renderApp(`/compare?series=${two}&xy=${IDS[0]},${IDS[2]}`);
+    await chartShown();
+    expect(screen.queryByRole("heading", { name: /^Scatter/ })).toBeNull();
+    expect(asked.scatters).toHaveLength(0);
   });
 });

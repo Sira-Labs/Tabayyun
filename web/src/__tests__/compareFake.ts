@@ -1,5 +1,5 @@
-// Fixtures of the compare view tests (spec 018).
-import type { CompareSeries } from "../compare/api";
+// Fixtures of the compare view tests (specs 018 and 033).
+import type { CompareSeries, ScatterResponse } from "../compare/api";
 import type { Finding } from "../types";
 
 export const H = 3600e9;
@@ -43,6 +43,24 @@ export function finding(overrides: Partial<Finding> = {}): Finding {
     occurrences: 1,
     created_at: "",
     updated_at: "",
+    ...overrides,
+  };
+}
+
+/** A scatter answer of F(x+1) against F(y+1): `n` hourly bins from `from`, y twice x. */
+export function scatterAnswer(x: number, y: number, from: number, to: number, n: number, overrides: Partial<ScatterResponse> = {}): ScatterResponse {
+  const at = Array.from({ length: n }, (_, k) => k);
+  return {
+    window: { from: String(from), to: String(to) },
+    grid_ns: String(H),
+    x: { id: IDS[x]!, name: `F${x + 1}`, unit: "MW" },
+    y: { id: IDS[y]!, name: `F${y + 1}`, unit: "MW" },
+    n_bins: n,
+    r: n >= 3 ? 1 : null,
+    ts: at.map((k) => String(from + k * H)),
+    xs: at.map((k) => 10 + k),
+    ys: at.map((k) => 20 + 2 * k),
+    missing: [],
     ...overrides,
   };
 }

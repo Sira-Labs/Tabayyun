@@ -48,7 +48,7 @@ fn invalid(message: &str) -> Error {
 }
 
 /// The samples of a sorted frame inside `[from, to)` as a frame of their own.
-fn windowed(frame: &SeriesFrame, from: i64, to: i64) -> Result<SeriesFrame> {
+pub(crate) fn windowed(frame: &SeriesFrame, from: i64, to: i64) -> Result<SeriesFrame> {
     let lo = frame.ts.partition_point(|&t| t < from);
     let hi = frame.ts.partition_point(|&t| t < to).max(lo);
     SeriesFrame::new(

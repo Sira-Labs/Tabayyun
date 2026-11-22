@@ -39,6 +39,27 @@ export type ResidualResponse = {
   missing: string[];
 };
 
+export type ScatterAxis = { id: string; name: string; unit: string | null };
+
+/** `GET /api/compare/scatter` (spec 033): one point per grid bin `[ts, ts + grid_ns)` in which
+ * both series have a value, in time order and capped; `r` is over all `n_bins` bins. Empty
+ * when `missing` names a series. */
+export type ScatterResponse = {
+  window: { from: string; to: string } | null;
+  grid_ns: string;
+  x: ScatterAxis;
+  y: ScatterAxis;
+  n_bins: number;
+  r: number | null;
+  ts: string[];
+  xs: number[];
+  ys: number[];
+  missing: string[];
+};
+
+/** Points asked of the scatter; the server thins a longer window. */
+export const SCATTER_MAX_POINTS = 2000;
+
 export type GroupMember = { series_id: string; external_id: string; role: string };
 
 /** `GET /api/series-groups/{id}` (spec 008). */
@@ -69,10 +90,17 @@ export function compareChartUrl(ids: string[], range: Range | null, widthPx: num
   return `/api/compare/chart?${q.toString()}`;
 }
 
+/** The scatter request: the two series, then the window. */
+export function compareScatterUrl(x: string, y: string, range: Range): string {
+  const q = new URLSearchParams({ x, y, ...searchOfRange(range), max_points: String(SCATTER_MAX_POINTS) });
+  return `/api/compare/scatter?${q.toString()}`;
+}
+
 export const compareApi = {
   chart: (ids: string[], range: Range | null, widthPx: number) => apiGet<CompareChartResponse>(compareChartUrl(ids, range, widthPx)),
   residual: (groupId: string, range: Range, widthPx: number) =>
     apiGet<ResidualResponse>(`/api/series-groups/${encodeURIComponent(groupId)}/residual?${windowParams(range, widthPx).toString()}`),
+  scatter: (x: string, y: string, range: Range) => apiGet<ScatterResponse>(compareScatterUrl(x, y, range)),
   group: (id: string) => apiGet<SeriesGroup>(`/api/series-groups/${encodeURIComponent(id)}`),
   finding: (id: string) => apiGet<Finding>(`/api/findings/${encodeURIComponent(id)}`),
 };

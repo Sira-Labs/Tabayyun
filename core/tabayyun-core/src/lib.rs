@@ -29,6 +29,7 @@ pub mod profile;
 pub mod quality;
 pub mod registry;
 pub mod residual;
+pub mod scatter;
 pub mod score;
 pub mod seasonal;
 pub mod synth;

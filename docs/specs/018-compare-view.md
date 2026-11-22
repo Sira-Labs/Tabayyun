@@ -242,7 +242,7 @@ the checks. `tabayyun_core.compare_series` returns one series' chart points and 
 
 ## Out of scope
 
-- XY scatter of one series against another, coloured by time: story S10-7 (decided 2026-09-24).
+- XY scatter of one series against another, coloured by time: story S10-7, spec 033 (decided 2026-09-24).
 - Compare periods (one series, several windows overlaid): later.
 - A lag / cross-correlation explorer: later.
 - More than 8 series (small multiples): with fleet baselines, S20.

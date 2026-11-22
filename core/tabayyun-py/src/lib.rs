@@ -14,6 +14,7 @@ use tabayyun_core::cache::{catch_panic, Cache, StoreConfig};
 use tabayyun_core::downsample::{gap_breaks, m4, m4_window, quality_runs, window_stats};
 use tabayyun_core::frame::modal_interval;
 use tabayyun_core::residual::{residual as group_residual, residual_chart};
+use tabayyun_core::scatter::scatter as pair_scatter;
 use tabayyun_core::synth::{generate, inject, Rng, SynthSpec};
 use tabayyun_core::time::parse_duration;
 use tabayyun_core::{
@@ -372,12 +373,7 @@ fn residual<'py>(
         frames.push(frame.map_err(err)?);
     }
     let signs: Vec<f64> = members.iter().map(|(_, sign)| *sign).collect();
-    let grid_ns = match grid.filter(|g| *g != "auto") {
-        Some(g) => Some(parse_duration(g).filter(|ns| *ns > 0).ok_or_else(|| {
-            PyValueError::new_err(format!("grid: cannot parse duration `{g}` (use e.g. 90s, 15m, 2h, 1d)"))
-        })?),
-        None => None,
-    };
+    let grid_ns = grid_ns_of(grid)?;
     let (r, chart) = py.detach(move || {
         let frames: Vec<SeriesFrame> =
             frames.into_iter().map(|f| if f.is_sorted() { f } else { f.normalized().0 }).collect();
@@ -404,6 +400,83 @@ fn residual<'py>(
             out.set_item("sum_in", r.sum_in)?;
         }
     }
+    Ok(out)
+}
+
+/// The frame's samples in time order, all of them: samples that share a timestamp stay, in
+/// their order, so a bin's mean does not depend on the order the rows arrived in.
+fn sorted_by_time(frame: SeriesFrame) -> PyResult<SeriesFrame> {
+    if frame.is_sorted() {
+        return Ok(frame);
+    }
+    let mut idx: Vec<usize> = (0..frame.len()).collect();
+    idx.sort_by_key(|&i| frame.ts[i]);
+    SeriesFrame::new(
+        frame.meta.clone(),
+        idx.iter().map(|&i| frame.ts[i]).collect(),
+        idx.iter().map(|&i| frame.values[i]).collect(),
+        idx.iter().map(|&i| frame.quality[i]).collect(),
+    )
+    .map_err(err)
+}
+
+/// `grid` of a call: `None` for `auto` or nothing, else the duration in ns.
+fn grid_ns_of(grid: Option<&str>) -> PyResult<Option<i64>> {
+    match grid.filter(|g| *g != "auto") {
+        Some(g) => Ok(Some(parse_duration(g).filter(|ns| *ns > 0).ok_or_else(|| {
+            PyValueError::new_err(format!("grid: cannot parse duration `{g}` (use e.g. 90s, 15m, 2h, 1d)"))
+        })?)),
+        None => Ok(None),
+    }
+}
+
+/// One series against another over `[from_ns, to_ns)` on the checks' grid (spec 033).
+///
+/// `tables` maps the ids `x` and `y` to their Arrow data and `metas_json` to their metadata.
+/// `grid` is `auto` (the coarser expected interval of the two, the default) or a duration.
+/// Returns a dict with `grid_ns`, `n_bins` (grid bins in which both have a value), `r` (the
+/// Pearson correlation over those bins, or None), at most `max_points` points as `ts`, `x`
+/// and `y`, and `missing` (series without a usable, finite sample in the window).
+#[pyfunction]
+#[pyo3(signature = (tables, metas_json, x, y, from_ns, to_ns, grid=None, max_points=2000, ts_col="ts", value_col="value", quality_col=Some("quality")))]
+#[allow(clippy::too_many_arguments)]
+fn scatter<'py>(
+    py: Python<'py>,
+    tables: &Bound<'_, PyDict>,
+    metas_json: &str,
+    x: &str,
+    y: &str,
+    from_ns: i64,
+    to_ns: i64,
+    grid: Option<&str>,
+    max_points: usize,
+    ts_col: &str,
+    value_col: &str,
+    quality_col: Option<&str>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let mut metas: BTreeMap<String, SeriesMeta> = serde_json::from_str(metas_json).map_err(err)?;
+    let mut frames = Vec::with_capacity(2);
+    for id in [x, y] {
+        let data =
+            tables.get_item(id)?.ok_or_else(|| PyValueError::new_err(format!("no table for series {id}")))?;
+        let meta = metas.remove(id).unwrap_or_else(|| SeriesMeta::new(id.to_string()));
+        let batch = batch_from_py(&data)?;
+        let frame = SeriesFrame::from_record_batch_ext(meta, &batch, ts_col, value_col, quality_col, None);
+        frames.push(frame.map_err(err)?);
+    }
+    let grid_ns = grid_ns_of(grid)?;
+    let s = py.detach(move || {
+        let frames: Vec<SeriesFrame> = frames.into_iter().map(sorted_by_time).collect::<PyResult<_>>()?;
+        pair_scatter(&frames[0], &frames[1], grid_ns, from_ns, to_ns, max_points).map_err(err)
+    })?;
+    let out = PyDict::new(py);
+    out.set_item("grid_ns", s.grid_ns)?;
+    out.set_item("n_bins", s.n_bins)?;
+    out.set_item("r", s.r)?;
+    out.set_item("ts", s.ts)?;
+    out.set_item("x", s.x)?;
+    out.set_item("y", s.y)?;
+    out.set_item("missing", s.missing)?;
     Ok(out)
 }
 
@@ -546,6 +619,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(chart, m)?)?;
     m.add_function(wrap_pyfunction!(compare_series, m)?)?;
     m.add_function(wrap_pyfunction!(residual, m)?)?;
+    m.add_function(wrap_pyfunction!(scatter, m)?)?;
     m.add_function(wrap_pyfunction!(synth, m)?)?;
     m.add_function(wrap_pyfunction!(builtin_checks, m)?)?;
     m.add_function(wrap_pyfunction!(check_catalogue, m)?)?;

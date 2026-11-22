@@ -1,4 +1,4 @@
-"""Compare chart and group residual (spec 018)."""
+"""Compare chart and group residual (spec 018), and the scatter of a pair (spec 033)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import pyarrow as pa
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from admin_support import BOB, MIA, NED, ORG_B
 from tabayyun.db.models import DEFAULT_ORG_ID, Series
 from tabayyun.main import create_app
 from tabayyun.services import coverage
@@ -370,3 +371,136 @@ async def test_chart_of_eight_series_of_a_million_points(app, client):
     log.warning("compare chart of 8 × 1M points: %.0f ms, then %.0f ms", *(t * 1000 for t in timings))
     # Measured locally well under the spec's 1.5 s; CI runners vary, so the bound here is loose.
     assert min(timings) < 15.0
+
+
+def wave(i: int) -> float:
+    """A value that moves through 20 to 40 with a period of about five hours."""
+    return 30.0 + 10.0 * math.sin(i / 50)
+
+
+async def scatter(client, x: str, y: str, **params: str):
+    return await client.get("/api/compare/scatter", params={"x": x, "y": y, **params})
+
+
+async def test_scatter_of_a_pair(client):
+    """One point per grid bin in which both have a value, in time order, with the correlation."""
+    xs = [wave(i) for i in range(N)]
+    ys: list[float | None] = [2 * v + 1 for v in xs]
+    ys[10] = None
+    quality = ["bad" if i == 20 else "good" for i in range(N)]
+    a = await upload(client, "a", csv(xs), unit="bar")
+    b = await upload(client, "b", csv(ys, quality=quality))
+    r = await scatter(client, a, b, **day(), max_points="5000")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["window"] == day() and body["grid_ns"] == str(MIN) and body["missing"] == []
+    assert body["x"] == {"id": a, "name": "a", "unit": "bar"}
+    assert body["y"] == {"id": b, "name": "b", "unit": None}
+    assert body["n_bins"] == N - 2 == len(body["ts"]) == len(body["xs"]) == len(body["ys"])
+    ts = [int(t) for t in body["ts"]]
+    assert ts == sorted(ts) and NS0 + 10 * MIN not in ts and NS0 + 20 * MIN not in ts
+    assert ts[0] == NS0 and (body["xs"][0], body["ys"][0]) == (xs[0], 2 * xs[0] + 1)
+    assert body["r"] == pytest.approx(1.0)
+    # The axes follow the request: swapped, the same bins with x and y exchanged.
+    swapped = (await scatter(client, b, a, **day(), max_points="5000")).json()
+    assert (swapped["x"]["id"], swapped["xs"], swapped["ys"]) == (b, body["ys"], body["xs"])
+
+
+async def test_scatter_default_window_grid_and_cap(client):
+    """Without a window it is the last 7 days of the two series' data; `grid` coarsens the
+    bins, `max_points` caps the points and leaves `n_bins` and `r` as they are."""
+    a = await upload(client, "a", csv([wave(i) for i in range(3 * N)]))
+    b = await upload(client, "b", csv([wave(5 * i) + 3 for i in range(3 * N // 5)], step_min=5))
+    body = (await scatter(client, a, b)).json()
+    assert body["window"]["from"] == str(NS0) and int(body["window"]["to"]) > NS0 + (3 * N - 1) * MIN
+    # The grid is the coarser interval of the two.
+    assert body["grid_ns"] == str(5 * MIN) and body["n_bins"] == 3 * N // 5 == len(body["ts"])
+    hourly = (await scatter(client, a, b, grid="1h")).json()
+    assert hourly["grid_ns"] == str(HOUR) and hourly["n_bins"] == 3 * 24
+    capped = (await scatter(client, a, b, max_points="100")).json()
+    assert 50 < len(capped["ts"]) <= 100 and capped["n_bins"] == body["n_bins"]
+    assert capped["r"] == body["r"] and set(capped["ts"]) <= set(body["ts"])
+
+
+async def test_scatter_missing_series_and_no_data(client):
+    """A series without a usable sample in the window is named; without any data there is no window."""
+    a = await upload(client, "a", csv([1.0, 2.0, 3.0, 4.0]))
+    bad = await upload(client, "bad", csv([1.0, 2.0, 3.0, 4.0], quality=["bad"] * 4))
+    body = (await scatter(client, a, bad)).json()
+    assert body["missing"] == [bad] and body["ts"] == [] and body["n_bins"] == 0 and body["r"] is None
+    later = {"from": str(NS0 + 10 * HOUR), "to": str(NS0 + 11 * HOUR)}
+    body = (await scatter(client, a, bad, **later)).json()
+    assert body["missing"] == [a, bad] and body["window"] == later and body["grid_ns"] == "0"
+    assert (await scatter(client, a, bad, **later, grid="soon")).status_code == 422
+
+
+async def test_scatter_validation(client):
+    """The same series twice, a bad id, grid, window or cap are 422; unknown ids are a 404
+    that names them."""
+    a = await upload(client, "a", csv([1.0, 2.0, 3.0]))
+    b = await upload(client, "b", csv([1.0, 2.0, 3.0]))
+    assert (await scatter(client, a, a)).status_code == 422
+    assert (await scatter(client, a, "not-an-id")).status_code == 422
+    assert (await client.get("/api/compare/scatter", params={"x": a})).status_code == 422
+    r = await scatter(client, a, b, grid="soon")
+    assert r.status_code == 422 and "grid" in r.json()["detail"]
+    assert (await scatter(client, a, b, max_points="99")).status_code == 422
+    assert (await scatter(client, a, b, max_points="5001")).status_code == 422
+    assert (await scatter(client, a, b, **{"from": str(NS0)})).status_code == 422
+    assert (await scatter(client, a, b, **{"from": str(NS0 + HOUR), "to": str(NS0)})).status_code == 422
+    unknown = str(uuid.uuid4())
+    r = await scatter(client, unknown, b)
+    assert r.status_code == 404
+    assert r.json()["detail"] == {"message": "series not found", "unknown": [unknown]}
+    assert (await scatter(client, a, b, grid="auto", max_points="100")).status_code == 200
+
+
+async def test_scatter_refuses_a_window_over_the_row_limit(db_url, fresh_schema, tmp_path):
+    """The row limit counts both series together."""
+    fresh_schema("auto")
+    app = create_app(app_settings(db_url, inline_jobs=True, cache_url=str(tmp_path), chart_max_rows=150))
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"X-Tabayyun-Request": "1"}
+    ) as client:
+        a = await upload(client, "a", csv([1.0] * 100))
+        b = await upload(client, "b", csv([2.0] * 100))
+        r = await scatter(client, a, b)
+        assert (r.status_code, r.json()["detail"]) == (422, "window_too_large")
+        half = {"from": str(NS0), "to": str(NS0 + 50 * MIN)}
+        assert (await scatter(client, a, b, **half)).status_code == 200
+    await app.state.engine.dispose()
+
+
+async def test_scatter_shows_a_correlation_break(client):
+    """While `b` stops following `a`, its points leave the line the others lie on, also when
+    the day is capped to a tenth of its bins."""
+    xs = [wave(i) for i in range(N)]
+    ys = [-2 * v if i in LOW else 2 * v for i, v in enumerate(xs)]
+    a = await upload(client, "a", csv(xs))
+    b = await upload(client, "b", csv(ys))
+    whole = (await scatter(client, a, b, **day(), max_points="5000")).json()
+    capped = (await scatter(client, a, b, **day(), max_points="144")).json()
+    assert whole["n_bins"] == capped["n_bins"] == N and len(capped["ts"]) <= 144
+    assert whole["r"] == capped["r"] and whole["r"] < 0.9
+    for body in (whole, capped):
+        minutes = [(int(t) - NS0) // MIN for t in body["ts"]]
+        off = [abs(y - 2 * x) > 1.0 for x, y in zip(body["xs"], body["ys"], strict=True)]
+        # Off the line exactly inside the break, and the break is there with many points.
+        assert off == [m in LOW for m in minutes]
+        assert sum(off) >= len(off) // 5
+
+
+async def test_scatter_roles_and_other_org(admin_env):
+    """A viewer reads it; without a role in the workspace, or from another org, the request
+    is refused or the series are unknown."""
+    async with admin_env.client() as c:
+        a = await upload(c, "a", csv([1.0, 2.0, 3.0, 4.0]))
+        b = await upload(c, "b", csv([2.0, 4.0, 6.0, 9.0]))
+        assert (await scatter(c, a, b)).json()["n_bins"] == 4
+    async with admin_env.client(MIA) as viewer:
+        assert (await scatter(viewer, a, b)).status_code == 200
+    async with admin_env.client(NED) as nobody:
+        assert (await scatter(nobody, a, b)).status_code == 404
+    async with admin_env.client(BOB, org=ORG_B) as other:
+        r = await scatter(other, a, b)
+        assert r.status_code == 404 and r.json()["detail"]["unknown"] == [a, b]

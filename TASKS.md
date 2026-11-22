@@ -617,6 +617,19 @@ starts; the plan is the backlog until then.
         not counted.
       - Not exercised here: the page against staging's data, and the backfill on a large
         `scores` table (one `INSERT … SELECT DISTINCT ON`).
+- [x] **033 Compare scatter** — `docs/specs/033-compare-scatter.md` (S10-7, 22 Nov; closes
+      sprint 10, released as v0.4.0). Every criterion is met.
+      - The points are the bins of the grid the cross-series checks use (`align`), so a
+        finding's evidence and the picture agree; the Pearson `r` is over all bins.
+      - Above `max_points` the server returns two points per chunk of consecutive bins: the
+        middle one (density over time) and the one farthest from the chunk's centre (what
+        leaves the cloud). A stride would lose an excursion shorter than its step.
+      - Finding windows are marked by the page from the findings it already loads; the API
+        returns no marks.
+      - Time is coloured from blue to orange, not on one hue: a break in the middle of the
+        window did not stand out on a single blue ramp.
+      - Not exercised here: a real `tby.correlation_break` finding opened in the browser,
+        and the scatter on staging's data.
 - [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
       `tabayyun-api` and `tabayyun-worker` on staging; then a `synthetic` source with
       `poll_interval_s` gives staging a live, polling source for demos.
