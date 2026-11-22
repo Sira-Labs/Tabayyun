@@ -237,6 +237,9 @@ export function Scatter({ series, xy, range, findings, selected, theme, onXy }: 
   // A new answer keeps the mark only where it still has that bin; its row is then the same
   // row (rows are keyed by the bin's time), so the keyboard focus stays with it.
   const focus = marked === null ? undefined : points.find((p) => p.ts === marked);
+  // An answer without the marked bin ends the mark: it does not come back with a later
+  // answer that has that bin again.
+  if (marked !== null && data && !focus) setMarked(null);
   const active = focus?.ts ?? null;
 
   const choose = (axis: 0 | 1, id: string) => {

@@ -413,7 +413,12 @@ describe("Compare", () => {
 
   it("scatter: without a finding's pair it takes the first two series, and lists its points as a table", async () => {
     const f = finding({ series_id: IDS[0]!, check_id: "tby.spikes", evidence: {}, summary: "2 spikes", window: { start: T0 + 2 * H, end: T0 + 4 * H } });
-    backend({ findings: (id) => (id === IDS[0] ? [f] : []) });
+    // F2 against F1 has all nine bins; swapped, the answer starts five hours later.
+    const answer = (q: URLSearchParams) => {
+      const [from, to] = [Number(q.get("from")), Number(q.get("to"))];
+      return q.get("x") === IDS[0] ? scatterAnswer(0, 1, from, to, 9) : scatterAnswer(1, 0, from, to, 3, { ts: [5, 6, 7].map((k) => String(from + k * H)) });
+    };
+    backend({ findings: (id) => (id === IDS[0] ? [f] : []), scatter: answer });
     const user = userEvent.setup();
     const { router } = renderApp(`/compare?series=${two}`);
     await chartShown();
@@ -440,6 +445,17 @@ describe("Compare", () => {
     expect(screen.getByTestId("scatter-readout").textContent).toBe("2026-01-01 05:00:00 UTC+03:00 · F1: 12 MW · F2: 24 MW");
     expect(screen.getByTestId("scatter-focus")).toBeTruthy();
     expect(rows[2]!.tabIndex).toBe(0);
+
+    // An answer without the marked bin ends the mark, and it stays ended when a later answer
+    // has that bin again.
+    await user.click(screen.getByRole("button", { name: "Swap" }));
+    await screen.findByText("3 bins on a 1 h grid · r = 1.00 · none inside finding windows");
+    await waitFor(() => expect(screen.queryByTestId("scatter-focus")).toBeNull());
+    expect(screen.getByTestId("scatter-readout").textContent).toBe("");
+    await user.click(screen.getByRole("button", { name: "Swap" }));
+    await screen.findByText("9 bins on a 1 h grid · r = 1.00 · 2 inside finding windows");
+    expect(screen.queryByTestId("scatter-focus")).toBeNull();
+    expect(screen.getByTestId("scatter-readout").textContent).toBe("");
   });
 
   it("scatter: says which series is missing, when there are too few points, and why a request failed", async () => {
