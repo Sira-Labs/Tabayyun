@@ -1,8 +1,9 @@
-"""Several series on one chart, and the residual of a balance or a pair (spec 018).
+"""Several series on one chart, the residual of a balance or a pair (spec 018) and the
+scatter of one series against another (spec 033).
 
-Both read the raw layer of the Parquet cache like the series chart (spec 025) and hand the
+All read the raw layer of the Parquet cache like the series chart (spec 025) and hand the
 rows to the core: `compare_series` for M4 points on the window's bins plus the statistics the
-page normalises with, `residual` for the members aligned on the checks' grid.
+page normalises with, `residual` and `scatter` for the members aligned on the checks' grid.
 """
 
 from __future__ import annotations
@@ -126,6 +127,77 @@ async def series_points(
         values=_nullable(out["values"]),
         n_raw=int(out["n_raw"]),
         stats=finite_stats(out["stats"]),
+    )
+
+
+@dataclass(frozen=True)
+class PairScatter:
+    """Points of one series against another on the checks' grid (spec 033)."""
+
+    grid_ns: int
+    n_bins: int
+    r: float | None
+    ts: list[int]
+    xs: list[float]
+    ys: list[float]
+    missing: list[str]
+
+
+class ScatterError(ValueError):
+    """The core refused the request: `grid` is neither `auto` nor a duration it can read."""
+
+
+async def pair_scatter(
+    x: Series,
+    y: Series,
+    batches: dict[str, pa.RecordBatch],
+    start_ns: int,
+    end_ns: int,
+    *,
+    grid: str = "auto",
+    max_points: int = 2000,
+) -> PairScatter:
+    """`y` against `x` over the window: one point per grid bin in which both have a value.
+
+    `batches` holds the window's rows of the series that have any; one without is reported
+    in `missing`, and there are then no points. Every value is finite: a bin whose mean
+    overflowed counts as a bin without a value.
+
+    Raises:
+        ScatterError: the core refused the request (a `grid` it cannot parse).
+    """
+    ids = [str(x.id), str(y.id)]
+    if not batches:
+        return PairScatter(0, 0, None, [], [], [], ids)
+    template = next(iter(batches.values()))
+    tables = {sid: batches.get(sid, _empty_like(template)) for sid in ids}
+    metas = {
+        str(s.id): {"id": str(s.id), "expected_interval_ns": s.expected_interval_ns}
+        for s in (x, y)
+        if s.expected_interval_ns
+    }
+    try:
+        out = await asyncio.to_thread(
+            tabayyun_core.scatter,
+            tables,
+            metas,
+            ids[0],
+            ids[1],
+            start_ns,
+            end_ns,
+            grid=grid,
+            max_points=max_points,
+        )
+    except ValueError as exc:
+        raise ScatterError(str(exc)) from exc
+    return PairScatter(
+        grid_ns=int(out["grid_ns"]),
+        n_bins=int(out["n_bins"]),
+        r=float(out["r"]) if out["r"] is not None and math.isfinite(out["r"]) else None,
+        ts=[int(t) for t in out["ts"]],
+        xs=[float(v) for v in out["x"]],
+        ys=[float(v) for v in out["y"]],
+        missing=[str(m) for m in out["missing"]],
     )
 
 

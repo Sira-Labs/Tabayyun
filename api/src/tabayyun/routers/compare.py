@@ -1,4 +1,5 @@
-"""Compare endpoint (spec 018): 2 to 8 series on the same chart bins."""
+"""Compare endpoints: 2 to 8 series on the same chart bins (spec 018) and the scatter of one
+series against another (spec 033)."""
 
 from __future__ import annotations
 
@@ -153,4 +154,96 @@ async def get_compare_chart(
             )
             for p in points
         ],
+    )
+
+
+class ScatterAxisOut(BaseModel):
+    """The series on one axis of the scatter."""
+
+    id: str
+    name: str
+    unit: str | None
+
+
+class ScatterOut(BaseModel):
+    """`GET /api/compare/scatter`: one point per grid bin in which both series have a value."""
+
+    window: dict[str, str] | None
+    grid_ns: str
+    x: ScatterAxisOut
+    y: ScatterAxisOut
+    n_bins: int = Field(description="grid bins with a value of both series, before the cap")
+    r: float | None = Field(description="Pearson correlation over all those bins")
+    ts: list[str]
+    xs: list[float]
+    ys: list[float]
+    missing: list[str]
+
+
+def _axis(series: Series) -> ScatterAxisOut:
+    return ScatterAxisOut(id=str(series.id), name=series.name or series.external_id, unit=series.unit)
+
+
+def _pair_or_422(x: str, y: str) -> list[uuid.UUID]:
+    """The two different series ids of a scatter; 422 otherwise."""
+    try:
+        ids = [uuid.UUID(x), uuid.UUID(y)]
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="x, y: not a series id") from exc
+    if ids[0] == ids[1]:
+        raise HTTPException(status_code=422, detail="x and y are the same series")
+    return ids
+
+
+@router.get("/scatter", response_model=ScatterOut)
+async def get_compare_scatter(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    scope: ReadScope,
+    x: str,
+    y: str,
+    from_: Annotated[str | None, Query(alias="from")] = None,
+    to: str | None = None,
+    grid: Annotated[str, Query(max_length=20)] = "auto",
+    max_points: Annotated[int, Query(ge=100, le=5000)] = 2000,
+) -> ScatterOut:
+    """Series `y` against series `x` on the grid the cross-series checks use (default window:
+    the last 7 days of their data), at most `max_points` points in time order.
+
+    422 for the same series twice, a `grid` that is neither `auto` nor a duration, and
+    `window_too_large`; 404 names the ids the workspace does not have.
+    """
+    members, unknown = await compare.series_by_id(session, scope, _pair_or_422(x, y))
+    if unknown:
+        detail = {"message": "series not found", "unknown": [str(i) for i in unknown]}
+        raise HTTPException(status_code=404, detail=detail)
+    found = await compare.extents(session, members)
+    window = window_or_422(from_, to) or compare.default_window(found)
+    batches = {}
+    if window is not None:
+        try:
+            compare.check_size(found, *window, request.app.state.settings.chart_max_rows)
+        except series_chart.WindowTooLargeError as exc:
+            raise HTTPException(status_code=422, detail="window_too_large") from exc
+        cache = request.app.state.run_cache
+        rows = await asyncio.gather(*(read_or_503(cache, s, window) for s in members))
+        batches = {str(s.id): batch for s, batch in zip(members, rows, strict=True) if batch is not None}
+    try:
+        start_ns, end_ns = window or (0, 1)
+        out = await compare.pair_scatter(
+            members[0], members[1], batches, start_ns, end_ns, grid=grid, max_points=max_points
+        )
+    except compare.ScatterError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return ScatterOut(
+        window={"from": str(window[0]), "to": str(window[1])} if window else None,
+        grid_ns=str(out.grid_ns),
+        x=_axis(members[0]),
+        y=_axis(members[1]),
+        n_bins=out.n_bins,
+        r=out.r,
+        ts=[str(t) for t in out.ts],
+        xs=out.xs,
+        ys=out.ys,
+        missing=out.missing,
     )
