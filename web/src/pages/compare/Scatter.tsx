@@ -47,11 +47,11 @@ function pointsOf(data: ScatterResponse, window: Range, findings: Finding[], sel
 
 const pointText = (p: Point, data: ScatterResponse) => `${formatLocalTime(p.ts)} · ${data.x.name}: ${valueOf(p.x, data.x)} · ${data.y.name}: ${valueOf(p.y, data.y)}`;
 
-type PlotProps = { data: ScatterResponse; points: Point[]; window: Range; theme: Theme; active: number | null };
+type PlotProps = { data: ScatterResponse; points: Point[]; window: Range; theme: Theme; focus: Point | undefined };
 
 /** The cloud: x against y, one dot per bin in the colour of its time; dots in finding windows
  * are ringed, the selected finding's are drawn last and stronger. */
-function Plot({ data, points, window, theme, active }: PlotProps) {
+function Plot({ data, points, window, theme, focus }: PlotProps) {
   const dark = theme === "dark";
   const xScale = useMemo(() => scaleOf(points.map((p) => p.x), PLOT_W), [points]);
   const yScale = useMemo(() => scaleOf(points.map((p) => p.y), PLOT_H), [points]);
@@ -63,7 +63,6 @@ function Plot({ data, points, window, theme, active }: PlotProps) {
     `${formatNumber(points.length)} ${points.length === 1 ? "point" : "points"} coloured by time, ${ringed === 0 ? "none" : formatNumber(ringed)} inside finding windows.`;
   // Plain dots first, ringed ones over them, the selected finding's on top.
   const order = [...points].sort((a, b) => Number(a.selected) - Number(b.selected) || Number(a.finding) - Number(b.finding));
-  const focus = active === null ? undefined : points.find((p) => p.i === active);
   const axisText = "fill-slate-600 text-[11px] dark:fill-slate-400";
   const line = "stroke-slate-300 dark:stroke-slate-700";
   return (
@@ -79,7 +78,7 @@ function Plot({ data, points, window, theme, active }: PlotProps) {
       </text>
       {order.map((p) => (
         <circle
-          key={p.i}
+          key={p.ts}
           cx={px(p)}
           cy={py(p)}
           r={p.selected ? SELECTED_R : DOT_R}
@@ -155,7 +154,8 @@ function Key({ window, theme }: { window: Range; theme: Theme }) {
   );
 }
 
-type TableProps = { data: ScatterResponse; points: Point[]; active: number | null; onActive: (i: number) => void };
+/** `active` and `onActive` name a point by the time of its bin, which a new answer keeps. */
+type TableProps = { data: ScatterResponse; points: Point[]; active: number | null; onActive: (ts: number) => void };
 
 /** The points as a table. One row is in the tab order; the arrow keys move through the rows,
  * and the row focused or pointed at is marked in the plot. */
@@ -170,7 +170,7 @@ function PointsTable({ data, points, active, onActive }: TableProps) {
       next.focus();
     }
   };
-  const tabStop = points.some((p) => p.i === active) ? active : (points[0]?.i ?? null);
+  const tabStop = points.some((p) => p.ts === active) ? active : (points[0]?.ts ?? null);
   return (
     <div className="mt-2 max-h-96 overflow-auto rounded border border-slate-200 dark:border-slate-800">
       <table className="w-full text-left text-xs">
@@ -186,10 +186,10 @@ function PointsTable({ data, points, active, onActive }: TableProps) {
         <tbody onKeyDown={onKeyDown}>
           {points.map((p) => (
             <tr
-              key={p.i}
-              tabIndex={p.i === tabStop ? 0 : -1}
-              onFocus={() => onActive(p.i)}
-              onMouseEnter={() => onActive(p.i)}
+              key={p.ts}
+              tabIndex={p.ts === tabStop ? 0 : -1}
+              onFocus={() => onActive(p.ts)}
+              onMouseEnter={() => onActive(p.ts)}
               className="border-t border-slate-200 hover:bg-slate-50 focus:bg-sky-50 dark:border-slate-800 dark:hover:bg-slate-800 dark:focus:bg-sky-950"
             >
               <th scope="row" className="whitespace-nowrap p-2 font-normal">{formatLocalTime(p.ts)}</th>
@@ -226,16 +226,18 @@ export function Scatter({ series, xy, range, findings, selected, theme, onXy }: 
     retry: (count, error) => !(error instanceof ApiError && error.status < 500) && count < 1,
   });
   const [tableOpen, setTableOpen] = useState(false);
-  const [marked, setMarked] = useState<{ data: ScatterResponse; i: number } | null>(null);
+  // The bin pointed at or focused in the table, by its time.
+  const [marked, setMarked] = useState<number | null>(null);
 
   const data = scatter.data;
-  // A marked point belongs to the answer it was marked in.
-  const active = marked && marked.data === data ? marked.i : null;
   const window = useMemo<Range>(() => (data?.window ? { from: Number(data.window.from), to: Number(data.window.to) } : range), [data, range]);
   const points = useMemo(() => (data ? pointsOf(data, window, findings, selected) : []), [data, window, findings, selected]);
   const stale = scatter.isPlaceholderData;
   const nameOf = (id: string) => series.find((s) => s.id === id)?.name ?? id;
-  const focus = active === null ? undefined : points.find((p) => p.i === active);
+  // A new answer keeps the mark only where it still has that bin; its row is then the same
+  // row (rows are keyed by the bin's time), so the keyboard focus stays with it.
+  const focus = marked === null ? undefined : points.find((p) => p.ts === marked);
+  const active = focus?.ts ?? null;
 
   const choose = (axis: 0 | 1, id: string) => {
     const other = xy[1 - axis]!;
@@ -287,7 +289,7 @@ export function Scatter({ series, xy, range, findings, selected, theme, onXy }: 
         <p className="text-sm">Not enough bins with a value of both series to draw a scatter.</p>
       ) : (
         <div className={stale ? "space-y-2 opacity-50" : "space-y-2"}>
-          <Plot data={data} points={points} window={window} theme={theme} active={active} />
+          <Plot data={data} points={points} window={window} theme={theme} focus={focus} />
           <p className={`min-h-5 ${mutedClass}`} data-testid="scatter-readout">
             {focus ? pointText(focus, data) : ""}
           </p>
@@ -296,7 +298,7 @@ export function Scatter({ series, xy, range, findings, selected, theme, onXy }: 
           <button type="button" className={linkButtonClass} aria-expanded={tableOpen} onClick={() => setTableOpen((v) => !v)}>
             View the scatter as a table
           </button>
-          {tableOpen && <PointsTable data={data} points={points} active={active} onActive={(i) => setMarked({ data, i })} />}
+          {tableOpen && <PointsTable data={data} points={points} active={active} onActive={setMarked} />}
         </div>
       )}
     </section>

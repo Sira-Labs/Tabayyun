@@ -120,6 +120,30 @@ def test_scatter_points_and_cap():
         tc.scatter(tables, {}, "a", "b", 0, end, max_points=0)
 
 
+def test_scatter_does_not_depend_on_the_order_of_the_rows():
+    """Two samples of one minute are both in its mean, whatever order the rows arrive in."""
+    minute = 60 * 10**9
+
+    def table(ts, values):
+        return pa.table({"ts": pa.array(ts, pa.timestamp("ns", tz="UTC")), "value": values})
+
+    ts, values = [0, minute, 0, 2 * minute], [0.0, 1.0, 10.0, 2.0]
+    order = sorted(range(4), key=lambda i: ts[i])
+    flat = table([0, minute, 2 * minute], [1.0, 1.0, 1.0])
+    kwargs = {"grid": "1m", "quality_col": None}
+    unsorted = tc.scatter({"a": table(ts, values), "b": flat}, {}, "a", "b", 0, 3 * minute, **kwargs)
+    in_order = tc.scatter(
+        {"a": table([ts[i] for i in order], [values[i] for i in order]), "b": flat},
+        {},
+        "a",
+        "b",
+        0,
+        3 * minute,
+        **kwargs,
+    )
+    assert unsorted == in_order and unsorted["x"] == [5.0, 1.0, 2.0]
+
+
 def test_residual_of_a_balance_and_a_pair():
     n = 600
     tables = {

@@ -57,6 +57,9 @@ async def test_scatter_missing_and_not_finite():
     assert out.missing == [str(y.id)] and out.ts == [] and out.r is None
     none = await compare.pair_scatter(x, y, {}, 0, 1)
     assert none.missing == [str(x.id), str(y.id)] and none.grid_ns == 0
+    # A grid that cannot be read is refused without rows too.
+    with pytest.raises(compare.ScatterError, match="grid"):
+        await compare.pair_scatter(x, y, {}, 0, 1, grid="soon")
     huge = {str(x.id): _batch([1e308, 1e308, 1.0, 2.0, 3.0, 4.0]), str(y.id): _batch([1.0] * 6)}
     out = await compare.pair_scatter(x, y, huge, 0, 6 * MIN, grid="2m")
     assert (out.n_bins, out.ts, out.xs, out.r) == (2, [2 * MIN, 4 * MIN], [1.5, 3.5], None)

@@ -431,6 +431,7 @@ async def test_scatter_missing_series_and_no_data(client):
     later = {"from": str(NS0 + 10 * HOUR), "to": str(NS0 + 11 * HOUR)}
     body = (await scatter(client, a, bad, **later)).json()
     assert body["missing"] == [a, bad] and body["window"] == later and body["grid_ns"] == "0"
+    assert (await scatter(client, a, bad, **later, grid="soon")).status_code == 422
 
 
 async def test_scatter_validation(client):

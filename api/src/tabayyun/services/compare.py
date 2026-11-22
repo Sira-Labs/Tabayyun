@@ -130,6 +130,16 @@ async def series_points(
     )
 
 
+# A window without rows, in the cache's columns.
+_NO_ROWS = pa.record_batch(
+    {
+        "ts": pa.array([], pa.timestamp("ns", tz="UTC")),
+        "value": pa.array([], pa.float64()),
+        "quality": pa.array([], pa.string()),
+    }
+)
+
+
 @dataclass(frozen=True)
 class PairScatter:
     """Points of one series against another on the checks' grid (spec 033)."""
@@ -167,9 +177,8 @@ async def pair_scatter(
         ScatterError: the core refused the request (a `grid` it cannot parse).
     """
     ids = [str(x.id), str(y.id)]
-    if not batches:
-        return PairScatter(0, 0, None, [], [], [], ids)
-    template = next(iter(batches.values()))
+    # Without any rows the core is still asked, so that `grid` is judged the same way.
+    template = next(iter(batches.values()), _NO_ROWS)
     tables = {sid: batches.get(sid, _empty_like(template)) for sid in ids}
     metas = {
         str(s.id): {"id": str(s.id), "expected_interval_ns": s.expected_interval_ns}

@@ -403,6 +403,23 @@ fn residual<'py>(
     Ok(out)
 }
 
+/// The frame's samples in time order, all of them: samples that share a timestamp stay, in
+/// their order, so a bin's mean does not depend on the order the rows arrived in.
+fn sorted_by_time(frame: SeriesFrame) -> PyResult<SeriesFrame> {
+    if frame.is_sorted() {
+        return Ok(frame);
+    }
+    let mut idx: Vec<usize> = (0..frame.len()).collect();
+    idx.sort_by_key(|&i| frame.ts[i]);
+    SeriesFrame::new(
+        frame.meta.clone(),
+        idx.iter().map(|&i| frame.ts[i]).collect(),
+        idx.iter().map(|&i| frame.values[i]).collect(),
+        idx.iter().map(|&i| frame.quality[i]).collect(),
+    )
+    .map_err(err)
+}
+
 /// `grid` of a call: `None` for `auto` or nothing, else the duration in ns.
 fn grid_ns_of(grid: Option<&str>) -> PyResult<Option<i64>> {
     match grid.filter(|g| *g != "auto") {
@@ -449,8 +466,7 @@ fn scatter<'py>(
     }
     let grid_ns = grid_ns_of(grid)?;
     let s = py.detach(move || {
-        let frames: Vec<SeriesFrame> =
-            frames.into_iter().map(|f| if f.is_sorted() { f } else { f.normalized().0 }).collect();
+        let frames: Vec<SeriesFrame> = frames.into_iter().map(sorted_by_time).collect::<PyResult<_>>()?;
         pair_scatter(&frames[0], &frames[1], grid_ns, from_ns, to_ns, max_points).map_err(err)
     })?;
     let out = PyDict::new(py);

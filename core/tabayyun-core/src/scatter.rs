@@ -38,7 +38,10 @@ fn invalid(message: &str) -> Error {
 /// Pearson correlation of two equally long slices, or `None` when it is not defined.
 fn pearson(x: &[f64], y: &[f64]) -> Option<f64> {
     let n = x.len();
-    if n < 3 {
+    // A constant series has no correlation. Asked of the values themselves: the variance of
+    // three times 0.1 is not exactly zero in floating point.
+    let constant = |v: &[f64]| v.iter().all(|a| *a == v[0]);
+    if n < 3 || constant(x) || constant(y) {
         return None;
     }
     let mean = |v: &[f64]| v.iter().sum::<f64>() / n as f64;
@@ -118,7 +121,8 @@ pub fn scatter(
         .filter(|f| !(0..f.len()).any(|i| f.values[i].is_finite() && f.quality[i].is_usable()))
         .map(|f| f.meta.id.clone())
         .collect();
-    let grid = grid_for(&[x, y], grid_ns);
+    // A series may declare an expected interval of 0, which is no grid to divide time by.
+    let grid = grid_for(&[x, y], grid_ns).filter(|g| *g > 0);
     let mut out = Scatter {
         grid_ns: grid.unwrap_or(0),
         n_bins: 0,
@@ -128,7 +132,7 @@ pub fn scatter(
         y: Vec::new(),
         missing,
     };
-    if !out.missing.is_empty() {
+    if !out.missing.is_empty() || grid.is_none() {
         return Ok(out);
     }
     let aligned = align(&frames, grid);
@@ -185,6 +189,9 @@ mod tests {
         assert_eq!((capped.n_bins, capped.ts.len() <= 10), (1000, true));
         assert!((scatter(&a, &down, None, 0, to, 10).unwrap().r.unwrap() + 1.0).abs() < 1e-12);
         assert_eq!(scatter(&a, &flat, None, 0, to, 10).unwrap().r, None);
+        // Constant values whose rounded mean differs from them still have no correlation.
+        let tenth = frame("tenth", &[0.1; 3]);
+        assert_eq!(scatter(&tenth, &tenth, None, 0, 3 * MIN, 10).unwrap().r, None);
         assert_eq!(scatter(&a, &up, None, 0, 2 * MIN, 10).unwrap().r, None);
     }
 
@@ -244,6 +251,19 @@ mod tests {
         let s = scatter(&a, &b, Some(5 * MIN), 2 * MIN, 10 * MIN, 10).unwrap();
         assert_eq!((s.grid_ns, s.ts), (5 * MIN, vec![2 * MIN, 5 * MIN]));
         assert_eq!(s.x, vec![4.0, 8.0]);
+    }
+
+    #[test]
+    fn no_grid_gives_no_points() {
+        // An expected interval of 0 in the metadata is no grid; an explicit one still works.
+        let mut a = frame("a", &[1.0, 2.0, 3.0]);
+        let mut b = frame("b", &[1.0, 2.0, 4.0]);
+        a.meta.expected_interval_ns = Some(0);
+        b.meta.expected_interval_ns = Some(0);
+        let s = scatter(&a, &b, None, 0, 3 * MIN, 10).unwrap();
+        assert_eq!((s.grid_ns, s.n_bins, s.ts.len(), s.missing.len()), (0, 0, 0, 0));
+        let s = scatter(&a, &b, Some(MIN), 0, 3 * MIN, 10).unwrap();
+        assert_eq!((s.grid_ns, s.n_bins), (MIN, 3));
     }
 
     #[test]

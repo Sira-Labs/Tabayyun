@@ -97,6 +97,16 @@ describe("compare scatter", () => {
     }
     expect(ticksOf(0.1, 0.5)).toEqual([0.1, 0.2, 0.3, 0.4, 0.5]);
     expect(ticksOf(1, 1)).toEqual([]);
+
+    // The ends of what a number can hold: no endless search for a step, no place that is not finite.
+    expect(ticksOf(0, Number.MIN_VALUE)).toEqual([]);
+    const tiny = scaleOf([0, Number.MIN_VALUE], 200);
+    expect(Number.isFinite(tiny.at(0))).toBe(true);
+    const huge = scaleOf([-1e308, 1e308], 200);
+    expect([huge.lo, huge.hi].every(Number.isFinite)).toBe(true);
+    expect(huge.at(-1e308)).toBeGreaterThanOrEqual(0);
+    expect(huge.at(1e308)).toBeLessThanOrEqual(200);
+    expect(huge.at(0)).toBeCloseTo(100);
   });
 
   it("summary text: bins, grid, points shown, r and the finding count", () => {

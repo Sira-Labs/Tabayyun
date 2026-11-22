@@ -161,6 +161,19 @@ changed and when, without reading two lines against each other.
 - Seen in Chromium against a local api, light, dark and at phone width, with two uploaded
   series of which one stops following the other for eight hours: the break is a second
   branch beside the line, in the colour of its time; 2 880 bins gave 1 859 points.
+- From the review:
+  - A constant series has no `r`, asked of the values themselves: the variance of three
+    times 0.1 is not exactly zero in floating point.
+  - Series whose metadata declares an expected interval of 0 give no grid: `grid_ns` is 0
+    and there are no points, unless the request names a grid.
+  - The binding sorts rows by time and keeps samples that share a timestamp, so a bin's mean
+    does not depend on the order of the rows (the residual's binding still drops such
+    duplicates when the rows are unsorted; the cache returns them sorted).
+  - `grid` is judged by the core also when neither series has rows, so a bad one is 422
+    with and without data.
+  - The plot's scales stay finite for values at the ends of what a number holds, and the
+    table's rows and the dots are keyed by the bin's time, so a mark or the keyboard focus
+    never moves to another bin when a new answer arrives.
 - Not exercised: a `tby.correlation_break` finding from a real dataset run opened in the
   browser (the tests ring points with a finding fixture), and the scatter on staging's data.
 

@@ -77,6 +77,8 @@ export function ticksOf(lo: number, hi: number): number[] {
   const span = hi - lo;
   if (!(span > 0) || !Number.isFinite(span)) return [];
   let magnitude = 10 ** (Math.floor(Math.log10(span)) - 1);
+  // A span near the smallest number: its tenth is not representable, and a step of 0 never ends.
+  if (!(magnitude > 0)) return [];
   for (;;) {
     for (const m of STEPS) {
       const step = m * magnitude;
@@ -101,10 +103,13 @@ export function scaleOf(values: number[], pixels: number): Scale {
   const finite = values.filter(Number.isFinite);
   const min = finite.length > 0 ? Math.min(...finite) : 0;
   const max = finite.length > 0 ? Math.max(...finite) : 1;
-  const pad = max > min ? (max - min) * PAD : Math.abs(min) * PAD || 1;
-  const lo = min - pad;
-  const hi = max + pad;
-  return { lo, hi, ticks: ticksOf(lo, hi), at: (value) => ((value - lo) / (hi - lo)) * pixels };
+  // Halves throughout: the extent of two finite values can be larger than any number.
+  const half = max / 2 - min / 2;
+  const pad = half > 0 ? half * 2 * PAD : Math.abs(min) * PAD || 1;
+  const lo = Math.max(min - pad, -Number.MAX_VALUE);
+  const hi = Math.min(max + pad, Number.MAX_VALUE);
+  const span = hi / 2 - lo / 2;
+  return { lo, hi, ticks: ticksOf(lo, hi), at: (value) => ((value / 2 - lo / 2) / span) * pixels };
 }
 
 const GRID_UNITS: [number, string][] = [
