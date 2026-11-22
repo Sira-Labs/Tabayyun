@@ -18,10 +18,12 @@ type Props = {
   canGoBack: boolean;
   onLayout: (layout: Layout) => void;
   onNorm: (norm: Norm) => void;
+  scatter: boolean;
+  onScatter: () => void;
 };
 
-/** The window (From, To, Reset, Back) and how the series are laid out and normalised. */
-export function Controls({ range, layout, norm, onRange, onReset, onBack, canGoBack, onLayout, onNorm }: Props) {
+/** The window (From, To, Reset, Back), how the series are laid out and normalised, and the scatter's switch. */
+export function Controls({ range, layout, norm, onRange, onReset, onBack, canGoBack, onLayout, onNorm, scatter, onScatter }: Props) {
   const [fromText, setFromText] = useState(localInput(range.from));
   const [toText, setToText] = useState(localInput(range.to));
   const [error, setError] = useState<string | null>(null);
@@ -92,6 +94,9 @@ export function Controls({ range, layout, norm, onRange, onReset, onBack, canGoB
           ))}
         </select>
       </label>
+      <button type="button" className={`${chip} ${scatter ? "bg-slate-200 dark:bg-slate-700" : ""}`} aria-pressed={scatter} onClick={onScatter}>
+        Scatter
+      </button>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { compareApi, hasResidual, orderByRole, unknownIdsOf, type CompareChartRe
 import { axisLanes } from "../compare/axes";
 import { emphasisOf, suspectOf } from "../compare/findings";
 import { normalise } from "../compare/normalise";
+import { defaultPair } from "../compare/scatter";
 import { buildLanes, isDrawn, residualLane } from "../compare/plot";
 import { binIndex, binWindow, binsOf, readoutAt, stepBin, tableRows } from "../compare/table";
 import { useTheme } from "../compare/theme";
@@ -18,6 +19,7 @@ import { Controls } from "./compare/Controls";
 import { CompareFindings } from "./compare/Findings";
 import { Legend } from "./compare/Legend";
 import { Readout, readoutText } from "./compare/Readout";
+import { Scatter } from "./compare/Scatter";
 import { SeriesPicker } from "./compare/SeriesPicker";
 import { CompareTable } from "./compare/Table";
 import { useRequestWidth } from "./SeriesDetail";
@@ -182,6 +184,8 @@ function CompareView({ state, onApply }: { state: CompareState; onApply: (next: 
     return { norms, emphasis, lanes: extra ? [...lanes, extra] : lanes };
   }, [display, state.norm, state.layout, selected, items, range, theme, residualData]);
   const rows = useMemo(() => (bins ? tableRows(display, bins) : []), [display, bins]);
+  // The scatter marks the selected finding's points even when the window's list does not hold it.
+  const marking = useMemo(() => (selected && !items.includes(selected) ? [...items, selected] : items), [items, selected]);
 
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const toggle = (id: string) =>
@@ -287,6 +291,8 @@ function CompareView({ state, onApply }: { state: CompareState; onApply: (next: 
           canGoBack={backStack.length > 0}
           onLayout={(layout) => onApply({ ...state, layout })}
           onNorm={(norm) => onApply({ ...state, norm })}
+          scatter={!!state.xy}
+          onScatter={() => onApply({ ...state, xy: state.xy ? undefined : defaultPair(selected, display.length > 0 ? display.map((s) => s.id) : state.series) })}
         />
       )}
       {state.norm === "z" && <p className="text-sm text-slate-600 dark:text-slate-400">z-scores use the mean and spread of the visible window, so they change when you zoom.</p>}
@@ -350,6 +356,11 @@ function CompareView({ state, onApply }: { state: CompareState; onApply: (next: 
           <p className="text-sm text-slate-600 dark:text-slate-400">Loading the chart…</p>
         )}
       </div>
+      {state.xy && range && (
+        <div className={panelClass}>
+          <Scatter series={display} xy={state.xy} range={range} findings={marking} selected={selected?.id} theme={theme} onXy={(xy) => onApply({ ...state, xy })} />
+        </div>
+      )}
       {shown && range && (
         <div className={panelClass}>
           <button type="button" className={linkButtonClass} aria-expanded={tableOpen} onClick={() => setTableOpen((v) => !v)}>

@@ -1,4 +1,4 @@
-// URL state of `/compare` (spec 018): the whole view lives in the query string, so a link
+// URL state of `/compare` (specs 018 and 033): the whole view lives in the query string, so a link
 // restores it. Pure functions, shared by the router, the page and the entry-point links.
 import { rangeOfSearch, searchOfRange, type Range } from "../seriesChart";
 
@@ -21,6 +21,7 @@ export type CompareSearch = {
   norm?: Norm;
   group?: string;
   finding?: string;
+  xy?: string;
 };
 
 /** The view the search describes. `series` keeps the URL's order; `range` null is the API's default window. */
@@ -31,6 +32,8 @@ export type CompareState = {
   norm: Norm;
   group?: string;
   finding?: string;
+  /** The scatter's x and y series (spec 033); both are among `series`. */
+  xy?: [string, string];
 };
 
 const NS_RE = /^-?\d{1,19}$/;
@@ -66,6 +69,11 @@ export function validateCompareSearch(search: Record<string, unknown>): CompareS
   if (NORMS.includes(search.norm as Norm) && search.norm !== "raw") out.norm = search.norm as Norm;
   if (typeof search.group === "string" && UUID_RE.test(search.group)) out.group = search.group;
   if (typeof search.finding === "string" && UUID_RE.test(search.finding)) out.finding = search.finding;
+  if (typeof search.xy === "string") {
+    const pair = search.xy.split(",").map((id) => id.trim());
+    const shown = out.series ? out.series.split(",") : [];
+    if (pair.length === 2 && pair[0] !== pair[1] && pair.every((id) => UUID_RE.test(id) && shown.includes(id))) out.xy = pair.join(",");
+  }
   return out;
 }
 
@@ -78,6 +86,7 @@ export function stateOfSearch(search: CompareSearch): CompareState {
     norm: search.norm ?? "raw",
     ...(search.group ? { group: search.group } : {}),
     ...(search.finding ? { finding: search.finding } : {}),
+    ...(search.xy ? { xy: search.xy.split(",") as [string, string] } : {}),
   };
 }
 
@@ -90,13 +99,14 @@ export function searchOfState(state: CompareState): CompareSearch {
     norm: state.norm,
     group: state.group,
     finding: state.finding,
+    xy: state.xy?.join(","),
   });
 }
 
 /** A view as a plain query string (no leading `?`), ids separated by literal commas. */
 export function queryOfState(state: CompareState): string {
   return Object.entries(searchOfState(state))
-    .map(([key, value]) => `${key}=${key === "series" ? value.split(",").map(encodeURIComponent).join(",") : encodeURIComponent(value)}`)
+    .map(([key, value]) => `${key}=${key === "series" || key === "xy" ? value.split(",").map(encodeURIComponent).join(",") : encodeURIComponent(value)}`)
     .join("&");
 }
 
