@@ -81,19 +81,24 @@ changed and when, without reading two lines against each other.
 
 `/compare` gets the URL key `xy=<x id>,<y id>`; both ids must be among `series`.
 
-- The controls get "Scatter": it sets `xy` to the selected finding's pair when the finding
-  names one among the series, otherwise to the first two series. "Hide scatter" removes it.
+- The controls get the switch "Scatter" (a pressed button while it is on): it sets `xy` to
+  the selected finding's pair when the finding names exactly one partner among the series,
+  otherwise to the first two series. "Hide scatter" in the panel, or the switch, removes it.
 - The panel sits under the chart and uses the chart's window, so a zoom there redraws it.
   Two selects choose the x and the y series among the compared ones; "Swap" exchanges them.
 - The plot: x and y axes labelled with name and unit, one dot per point, coloured from the
-  window's start to its end on one ordered ramp with a legend that names both dates. Points
-  whose bin overlaps a window of a finding of either series are ringed; the selected
-  finding's points are drawn last and stronger.
+  window's start (blue) to its end (orange) on one ramp whose lightness changes in one
+  direction, with a legend that names both dates. Points whose bin overlaps the window of a
+  finding about either series (attached to it, or naming it as member or partner) are
+  ringed; the selected finding's points are drawn last and stronger.
 - Under the plot: "672 bins on a 15 min grid, 400 shown · r = 0.93 · 37 inside finding
   windows", and a table alternative (time, x, y, in a finding) of the points shown.
 - States: loading; a missing series ("T-13 has no usable samples in this window"); fewer
   than 2 points; the error of the request.
-- A point's time, x and y show on hover and on keyboard focus of the table row.
+- A point's time, x and y show on hover of its dot. In the table, the row pointed at or
+  focused (one tab stop, the arrow keys move through the rows) is marked in the plot and
+  read out under it.
+- While another window or pair loads, the last cloud stays, dimmed and marked "Updating…".
 
 ## Behaviour
 
@@ -109,17 +114,18 @@ changed and when, without reading two lines against each other.
 
 ## Acceptance criteria
 
-- [ ] The core returns one point per complete grid bin, `r` over all bins, and at most
+- [x] The core returns one point per complete grid bin, `r` over all bins, and at most
       `max_points` points that keep an excursion shorter than a chunk.
-- [ ] `GET /api/compare/scatter` returns the points on the checks' grid for the window, with
+- [x] `GET /api/compare/scatter` returns the points on the checks' grid for the window, with
       the default window, `grid`, the row limit and the 422 and 404 cases above.
-- [ ] `/compare?…&xy=a,b` shows the scatter coloured by time with a legend, rings the points
+- [x] `/compare?…&xy=a,b` shows the scatter coloured by time with a legend, rings the points
       inside finding windows and emphasises the selected finding's.
-- [ ] "Scatter" picks the selected finding's pair; the selects and "Swap" change `xy`; a
+- [x] "Scatter" picks the selected finding's pair; the selects and "Swap" change `xy`; a
       zoom of the chart redraws the scatter for the new window.
-- [ ] A correlation-break finding on synthetic data shows the break's points apart from the
-      cloud: they are the ringed ones and lie off the line of the others.
-- [ ] The table alternative lists the points shown; missing series and too few points have
+- [x] A correlation break on synthetic data shows apart from the cloud: the points of the
+      break lie off the line of the others (API), and the points inside a finding's window
+      are the ringed ones (web).
+- [x] The table alternative lists the points shown; missing series and too few points have
       their own text.
 
 ## Test cases
@@ -138,7 +144,25 @@ changed and when, without reading two lines against each other.
 
 ## Implementation notes
 
-(filled in with the implementation)
+- The cap takes two points per chunk of consecutive bins: the middle one and the one
+  farthest from the chunk's centre. A plain stride would drop an excursion shorter than its
+  step, which is the thing the scatter is opened for; taking only extremes would draw the
+  cloud wider than it is.
+- `r` is computed before the cap, over every bin, so it does not change with `max_points`.
+- A bin whose mean overflowed is not finite and counts as a bin without a value, as in
+  `align`; every value in the answer is finite.
+- The page marks finding windows itself from the findings it already loads. Windows are
+  half-open like the chart's shading: a bin that only touches a window's end is outside.
+- The colour ramp runs from blue to orange (the pair TrendMiner uses for time) instead of
+  one hue: with a single blue ramp the points of a break in the middle of the window did
+  not stand out from the rest. Every step keeps 3:1 against the panel in both themes.
+- The switch in the controls keeps its name "Scatter" and reports its state as pressed; the
+  table's button is "View the scatter as a table", because the chart has "View as table".
+- Seen in Chromium against a local api, light, dark and at phone width, with two uploaded
+  series of which one stops following the other for eight hours: the break is a second
+  branch beside the line, in the colour of its time; 2 880 bins gave 1 859 points.
+- Not exercised: a `tby.correlation_break` finding from a real dataset run opened in the
+  browser (the tests ring points with a finding fixture), and the scatter on staging's data.
 
 ## Out of scope
 
