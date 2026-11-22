@@ -111,6 +111,11 @@ merged.
 - The api image runs on Python 3.15 (was 3.14) and its build stage on Rust 1.100. CI now
   builds the images on pull requests that touch a Dockerfile and starts the api image once.
 
+### Security
+- The core's `url` dependency is 2.5.9 (RUSTSEC-2026-0592, a stack overflow in
+  `Url::origin()` on nested `blob:` URLs); it reaches the build through the object store
+  client.
+
 ## [0.3.0] - 2026-11-15
 
 Sprint 9: connectors and the series screen. The patch releases v0.2.1 to v0.2.10 carried
