@@ -149,6 +149,8 @@ Property (same file, 600 cases each): `raw_never_changes`, `imputers_only_estima
     two ends of the timestamp range cannot push one outside the window.
   - Samples that share a timestamp are matched through an index once there are more than
     16 of them; 40 000 on one timestamp take one pass.
+  - The like-day mean is held between its smallest and largest reference: three thirds of
+    the largest number round past it.
 
 ## Out of scope
 

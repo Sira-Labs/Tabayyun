@@ -384,6 +384,19 @@ fn what_an_imputer_calls_fillable_it_fills() {
         (out.lineage.ts.clone(), out.lineage.after.clone(), out.unrepaired),
         (vec![30 * hour], vec![f64::MAX], 0)
     );
+    // Three references: three thirds of the largest value round past it, the mean does not.
+    for huge in [f64::MAX, -f64::MAX] {
+        let mut ts: Vec<i64> = (0..96).map(|h| h * hour).collect();
+        ts.remove(30);
+        let raw = SeriesFrame::with_default_quality(SeriesMeta::new("s"), ts, vec![huge; 95]).unwrap();
+        let out =
+            repair(&raw, Window::new(0, 96 * hour), &Op::ImputeLikeDay { days: 2, same_weekday: false })
+                .unwrap();
+        assert_eq!(
+            (out.lineage.ts.clone(), out.lineage.after.clone(), out.unrepaired),
+            (vec![30 * hour], vec![huge], 0)
+        );
+    }
 }
 
 #[test]

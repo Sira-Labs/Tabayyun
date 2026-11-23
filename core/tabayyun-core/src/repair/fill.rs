@@ -193,9 +193,13 @@ pub(super) fn like_day(
             .filter_map(|shift| i64::try_from(i128::from(t) + shift).ok())
             .filter_map(|at| known.near(at, grid / 2))
             .collect();
-        // Each share is at most the largest value over the count, so their sum is a number.
+        // Shares are summed so that no partial sum leaves the numbers; only the last step
+        // can round past the largest value (three times a third of it), and a mean lies
+        // between its smallest and largest reference, so it is held there.
         let n = found.len() as f64;
-        (!found.is_empty()).then(|| found.iter().map(|v| v / n).sum::<f64>())
+        let least = found.iter().copied().fold(f64::INFINITY, f64::min);
+        let most = found.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        (!found.is_empty()).then(|| found.iter().map(|v| v / n).sum::<f64>().clamp(least, most))
     };
     // A time can be estimated when a usable sample lies within half an interval of the same
     // time some days away, and that time is a timestamp. From `t` on, the first such time
