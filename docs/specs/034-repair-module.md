@@ -110,7 +110,9 @@ Unit (`core/tabayyun-core/src/repair/tests.rs`): `mask_nulls_the_window_and_noth
 `an_imputer_refuses_to_add_samples_without_end`,
 `a_gap_nothing_can_be_estimated_in_costs_nothing`,
 `timestamps_at_the_ends_of_the_range_stay_inside_the_window`,
-`many_samples_on_one_timestamp_are_matched_in_one_pass`.
+`many_samples_on_one_timestamp_are_matched_in_one_pass`,
+`what_an_imputer_calls_fillable_it_fills`,
+`a_reference_day_beyond_the_last_timestamp_is_none`.
 
 Property (same file, 600 cases each): `raw_never_changes`, `imputers_only_estimate`,
 `like_day_adds_every_timestamp_that_has_a_reference`.
@@ -139,6 +141,10 @@ Property (same file, 600 cases each): `raw_never_changes`, `imputers_only_estima
     another day comes into reach. Two samples years apart cost only what can be filled.
   - A property test compares what `impute.like_day` adds with a plain search for a
     reference over all usable samples, so skipping ahead cannot miss a timestamp.
+  - What an imputer calls fillable it fills: the line between two huge values of opposite
+    sign and the mean of huge references are computed so that they stay numbers, and a
+    reference day that would lie beyond the first or last timestamp is no reference. An
+    imputer therefore never walks a gap without adding to it.
   - The missing timestamps of a gap are computed in 128-bit arithmetic, so samples at the
     two ends of the timestamp range cannot push one outside the window.
   - Samples that share a timestamp are matched through an index once there are more than

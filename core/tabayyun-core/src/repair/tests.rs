@@ -350,6 +350,67 @@ fn timestamps_at_the_ends_of_the_range_stay_inside_the_window() {
 }
 
 #[test]
+fn what_an_imputer_calls_fillable_it_fills() {
+    // Linear between the two largest values of opposite sign: their difference is not a
+    // number, the line between them is.
+    let mut raw = at(&[0, 4], &[-f64::MAX, f64::MAX]);
+    raw.meta.expected_interval_ns = Some(MIN);
+    let out = repair(&raw, w(0, 5), &Op::ImputeLinear { max_gap_ns: None }).unwrap();
+    let expected = [-f64::MAX / 2.0, 0.0, f64::MAX / 2.0];
+    assert_eq!(out.lineage.after.len(), 3);
+    for (got, want) in out.lineage.after.iter().zip(expected) {
+        assert!(got.is_finite() && (got - want).abs() <= f64::MAX * 1e-12, "{got} for {want}");
+    }
+    assert_eq!(out.unrepaired, 0);
+    // The same on a rhythm of one nanosecond over a day stops at the limit, it does not walk
+    // the day without adding anything.
+    let mut day = SeriesFrame::with_default_quality(
+        SeriesMeta::new("s"),
+        vec![0, NS_PER_DAY],
+        vec![-f64::MAX, f64::MAX],
+    )
+    .unwrap();
+    day.meta.expected_interval_ns = Some(1);
+    assert!(repair(&day, Window::new(0, NS_PER_DAY), &Op::ImputeLinear { max_gap_ns: None }).is_err());
+    // Like-day of huge values: the mean of the references is a number too.
+    let hour = NS_PER_HOUR;
+    let mut ts: Vec<i64> = (0..72).map(|h| h * hour).collect();
+    ts.remove(30);
+    let values = vec![f64::MAX; 71];
+    let raw = SeriesFrame::with_default_quality(SeriesMeta::new("s"), ts, values).unwrap();
+    let out =
+        repair(&raw, Window::new(0, 72 * hour), &Op::ImputeLikeDay { days: 1, same_weekday: false }).unwrap();
+    assert_eq!(
+        (out.lineage.ts.clone(), out.lineage.after.clone(), out.unrepaired),
+        (vec![30 * hour], vec![f64::MAX], 0)
+    );
+}
+
+#[test]
+fn a_reference_day_beyond_the_last_timestamp_is_none() {
+    // Samples two days before the end of time and at it, on a rhythm of one nanosecond. In
+    // the last day, the day before has no sample and the day after does not exist: nothing
+    // can be estimated, and that is known without walking the day.
+    let (end, day) = (i64::MAX, NS_PER_DAY);
+    let mut raw =
+        SeriesFrame::with_default_quality(SeriesMeta::new("s"), vec![end - 2 * day, end], vec![1.0, 2.0])
+            .unwrap();
+    raw.meta.expected_interval_ns = Some(1);
+    let window = Window::new(end - day + 1, end);
+    let out = repair(&raw, window, &Op::ImputeLikeDay { days: 1, same_weekday: false }).unwrap();
+    assert_eq!((out.lineage.len(), out.unrepaired), (0, (day - 1) as usize));
+    // The same at the start of time.
+    let start = i64::MIN;
+    let mut raw =
+        SeriesFrame::with_default_quality(SeriesMeta::new("s"), vec![start, start + 2 * day], vec![1.0, 2.0])
+            .unwrap();
+    raw.meta.expected_interval_ns = Some(1);
+    let window = Window::new(start + 1, start + day);
+    let out = repair(&raw, window, &Op::ImputeLikeDay { days: 1, same_weekday: false }).unwrap();
+    assert_eq!((out.lineage.len(), out.unrepaired), (0, (day - 1) as usize));
+}
+
+#[test]
 fn many_samples_on_one_timestamp_are_matched_in_one_pass() {
     // 40 000 samples share a timestamp, with NaN and both zeros among them.
     let n = 40_000;
@@ -387,13 +448,20 @@ fn any_op() -> impl Strategy<Value = Op> {
 /// A sorted frame on a one-minute rhythm with repeated timestamps, gaps, NaN and every quality.
 fn any_frame() -> impl Strategy<Value = SeriesFrame> {
     let step = prop_oneof![4 => Just(1i64), 1 => Just(0i64), 1 => 2..6i64, 1 => Just(24 * 60i64)];
+    // Some samples sit off the rhythm by about half an interval, so a reference a day away
+    // can be just inside, on and just outside the tolerance.
+    let half = MIN / 2;
+    let offset = prop_oneof![
+        12 => Just(0i64),
+        1 => prop_oneof![Just(half - 1), Just(half), Just(half + 1), Just(1 - half), Just(-half), Just(-half - 1)]
+    ];
     let value = prop_oneof![8 => -100.0..100.0f64, 1 => Just(f64::NAN), 1 => Just(0.0)];
     let quality = prop_oneof![6 => Just(G), 1 => Just(Quality::Uncertain), 1 => Just(B), 1 => Just(E)];
-    proptest::collection::vec((step, value, quality), 0..120).prop_map(|samples| {
+    proptest::collection::vec((step, offset, value, quality), 0..120).prop_map(|samples| {
         let mut t = 0i64;
         let (mut ts, mut values, mut qualities) = (Vec::new(), Vec::new(), Vec::new());
-        for (step, value, quality) in samples {
-            t += step * MIN;
+        for (step, offset, value, quality) in samples {
+            t = t.max(t + step * MIN + offset);
             ts.push(t);
             values.push(value);
             qualities.push(quality);

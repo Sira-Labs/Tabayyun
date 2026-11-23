@@ -156,10 +156,14 @@ pub(super) fn linear(
     let estimate = |t: i64| {
         let ((t0, v0), (t1, v1)) = around(t)?;
         let share = (t as i128 - t0 as i128) as f64 / (t1 as i128 - t0 as i128) as f64;
-        Some(v0 + (v1 - v0) * share).filter(|v| v.is_finite())
+        // The difference of two huge values of opposite sign is not a number any more; the
+        // weighted form of the same line always is.
+        let direct = v0 + (v1 - v0) * share;
+        Some(if direct.is_finite() { direct } else { v0 * (1.0 - share) + v1 * share })
     };
     // Between two neighbouring samples the usable samples around are the same everywhere:
-    // either every missing timestamp of the gap can be estimated, or none.
+    // either every missing timestamp of the gap can be estimated, or none. `estimate` gives
+    // a value whenever `around` does, so `hope` promises nothing it cannot keep.
     let hope = |t: i64| around(t).map(|_| t);
     fill(raw, lo, hi, window, interval(raw), estimate, hope)
 }
@@ -180,26 +184,31 @@ pub(super) fn like_day(
     };
     let step = if same_weekday { 7 * NS_PER_DAY } else { NS_PER_DAY };
     let known = Usable::of(raw);
+    let tolerance = i128::from(grid / 2);
+    let range = i128::from(i64::MIN)..=i128::from(i64::MAX);
+    // How far away, in time, the references of a timestamp lie.
+    let shifts = || (1..=days as i128).flat_map(|k| [-k * i128::from(step), k * i128::from(step)]);
     let estimate = |t: i64| {
-        let reference = (1..=days as i64)
-            .flat_map(|k| [t.checked_sub(k * step), t.checked_add(k * step)])
-            .flatten()
-            .filter_map(|at| known.near(at, grid / 2));
-        let (sum, n) = reference.fold((0.0, 0usize), |(s, n), v| (s + v, n + 1));
-        (n > 0).then(|| sum / n as f64).filter(|v| v.is_finite())
+        let found: Vec<f64> = shifts()
+            .filter_map(|shift| i64::try_from(i128::from(t) + shift).ok())
+            .filter_map(|at| known.near(at, grid / 2))
+            .collect();
+        // Each share is at most the largest value over the count, so their sum is a number.
+        let n = found.len() as f64;
+        (!found.is_empty()).then(|| found.iter().map(|v| v / n).sum::<f64>())
     };
     // A time can be estimated when a usable sample lies within half an interval of the same
-    // time some days away. From `t` on, the first such time for one reference day is where
-    // the next usable sample at or after that day's time comes into reach.
-    let tolerance = i128::from(grid / 2);
+    // time some days away, and that time is a timestamp. From `t` on, the first such time
+    // for one reference day is where the next usable sample at or after that day's time
+    // comes into reach. `estimate` gives a value at exactly those times.
     let hope = |t: i64| -> Option<i64> {
         let t = i128::from(t);
-        (1..=days as i128)
-            .flat_map(|k| [-k * i128::from(step), k * i128::from(step)])
+        shifts()
             .filter_map(|shift| {
-                let from = (t + shift - tolerance).clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64;
-                let sample = known.ts.get(known.ts.partition_point(|&u| u < from))?;
-                Some((i128::from(*sample) - shift - tolerance).max(t))
+                let from = i64::try_from((t + shift - tolerance).max(*range.start())).ok()?;
+                let sample = i128::from(*known.ts.get(known.ts.partition_point(|&u| u < from))?);
+                let at = t.max(sample - shift - tolerance).max(range.start() - shift);
+                range.contains(&(at + shift)).then_some(at)
             })
             .min()
             .and_then(|at| i64::try_from(at).ok())
