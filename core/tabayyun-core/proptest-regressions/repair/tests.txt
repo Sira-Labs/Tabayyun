@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc c030ceca859fb129c621122b08f6deccab8101d2dd982a64a14f92fdd599388b # shrinks to raw = SeriesFrame { meta: SeriesMeta { id: "s", name: None, unit: None, kind: Measurement, expected_interval_ns: Some(60000000000), physical_min: None, physical_max: None, resolution: None, non_negative: None }, ts: [60000000000, 86460000000000], values: [0.0, 0.0], quality: [Good, Good], ingest_ts: None }, op = ImputeLinear { max_gap_ns: None }, start = 0, length = 3
