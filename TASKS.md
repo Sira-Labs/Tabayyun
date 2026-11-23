@@ -630,6 +630,17 @@ starts; the plan is the backlog until then.
         window did not stand out on a single blue ramp.
       - Not exercised here: a real `tby.correlation_break` finding opened in the browser,
         and the scatter on staging's data.
+- [x] **034 Repair module** — `docs/specs/034-repair-module.md` (S11-1, 23 Nov). Every
+      criterion is met; nothing calls the module yet.
+      - The lineage is computed in one place as the difference between the raw and the
+        repaired frame, so an operation cannot report something else than it did; `revert`
+        gives the raw samples back, which the property test checks for random frames.
+      - Imputers add missing timestamps only between existing samples and only inside the
+        window, need usable samples to build on, and count what they could not estimate
+        (`unrepaired`) instead of guessing.
+      - `align.resample` rebuilds whole bins only, so no sample moves out of the window; a
+        bin of good samples stays good, as `align` shows it to the checks.
+      - The Python binding is left to S11-2.
 - [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
       `tabayyun-api` and `tabayyun-worker` on staging; then a `synthetic` source with
       `poll_interval_s` gives staging a live, polling source for demos.

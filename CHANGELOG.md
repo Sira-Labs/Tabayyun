@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Repair operations in the core (spec 034): `tabayyun_core::repair` applies `mask`, `clamp`,
+  `dedupe`, `impute.linear`, `impute.like_day`, `align.resample` or `transform.affine` to a
+  window of a series and returns a new frame plus a lineage with one row per sample that
+  was changed, added or removed. The raw frame is only read, and the lineage gives the raw
+  samples back. Nothing uses the module yet; corrections (sprint 11) build on it.
+
 ## [0.4.0] - 2026-11-22
 
 Sprint 10: suites, triage, alerts, overview. Quality is monitored continuously instead of
