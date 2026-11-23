@@ -300,6 +300,66 @@ fn an_imputer_refuses_to_add_samples_without_end() {
     assert!(repair(&raw, all, &Op::ImputeLinear { max_gap_ns: None }).is_err());
 }
 
+#[test]
+fn a_gap_nothing_can_be_estimated_in_costs_nothing() {
+    // Two samples 6 000 001 seconds apart on a one-second rhythm, and a limit of one second:
+    // nothing can be added, so the frame comes back with every missing second counted.
+    let second = 1_000_000_000;
+    let mut raw =
+        SeriesFrame::with_default_quality(SeriesMeta::new("s"), vec![0, 6_000_001 * second], vec![1.0, 2.0])
+            .unwrap();
+    raw.meta.expected_interval_ns = Some(second);
+    let all = Window::new(0, i64::MAX);
+    let out = repair(&raw, all, &Op::ImputeLinear { max_gap_ns: Some(second) }).unwrap();
+    assert_eq!((out.unrepaired, out.lineage.len(), out.frame.len()), (6_000_000, 0, 2));
+    // Like-day reaches one day from each end of a gap of 400 days; the middle is skipped.
+    let minute = MIN;
+    let before: Vec<i64> = (0..2 * 24 * 60).map(|i| i * minute).collect();
+    let after: Vec<i64> = (0..2 * 24 * 60).map(|i| 402 * NS_PER_DAY + i * minute).collect();
+    let ts: Vec<i64> = before.iter().chain(&after).copied().collect();
+    let values = vec![5.0; ts.len()];
+    let raw = SeriesFrame::with_default_quality(SeriesMeta::new("s"), ts, values).unwrap();
+    let out = repair(&raw, all, &Op::ImputeLikeDay { days: 1, same_weekday: false }).unwrap();
+    let missing = (400 * 24 * 60 + 1 - 1) as usize;
+    assert_eq!(out.unrepaired + out.lineage.len(), missing);
+    // One day at each end has the day beside it to take from.
+    assert_eq!(out.lineage.len(), 2 * 24 * 60);
+    assert!(out.lineage.after.iter().all(|v| *v == 5.0));
+}
+
+#[test]
+fn timestamps_at_the_ends_of_the_range_stay_inside_the_window() {
+    // The samples are the whole range of i64 apart; the first missing timestamp inside the
+    // window must not be computed with arithmetic that saturates.
+    let mut raw =
+        SeriesFrame::with_default_quality(SeriesMeta::new("s"), vec![i64::MIN, i64::MAX], vec![0.0, 1.0])
+            .unwrap();
+    raw.meta.expected_interval_ns = Some(4);
+    let out = repair(&raw, Window::new(0, 4), &Op::ImputeLinear { max_gap_ns: None }).unwrap();
+    assert_eq!((out.lineage.ts.clone(), out.lineage.count(Action::Added)), (vec![0], 1));
+    assert!((out.lineage.after[0] - 0.5).abs() < 1e-9);
+    let out = repair(&raw, Window::new(-9, 9), &Op::ImputeLinear { max_gap_ns: None }).unwrap();
+    assert_eq!(out.lineage.ts, vec![-8, -4, 0, 4, 8]);
+}
+
+#[test]
+fn many_samples_on_one_timestamp_are_matched_in_one_pass() {
+    // 40 000 samples share a timestamp, with NaN and both zeros among them.
+    let n = 40_000;
+    let mut values: Vec<f64> = (0..n).map(|i| f64::from(i % 1000)).collect();
+    values[7] = NAN;
+    values[8] = -0.0;
+    let raw = SeriesFrame::with_default_quality(SeriesMeta::new("s"), vec![MIN; n as usize], values).unwrap();
+    let out = repair(&raw, w(0, 5), &Op::Dedupe { keep: Keep::Last }).unwrap();
+    assert_eq!((out.frame.len(), out.lineage.count(Action::Removed)), (1, n as usize - 1));
+    assert_eq!(canonical(&out.lineage.revert(&out.frame).unwrap()), canonical(&raw));
+    // Every sample changes: nothing matches, and the pairs keep the order of the frame.
+    let scaled = repair(&raw, w(0, 5), &Op::TransformAffine { scale: 1.0, offset: 0.5 }).unwrap();
+    assert_eq!(scaled.lineage.count(Action::Changed), n as usize - 1);
+    assert_eq!((scaled.lineage.before[0], scaled.lineage.after[0]), (0.0, 0.5));
+    assert_eq!(canonical(&scaled.lineage.revert(&scaled.frame).unwrap()), canonical(&raw));
+}
+
 fn any_op() -> impl Strategy<Value = Op> {
     prop_oneof![
         Just(Op::Mask),

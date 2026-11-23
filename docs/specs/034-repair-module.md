@@ -67,7 +67,9 @@ Float64` (null for NaN and for an absent sample), `quality_before`, `quality_aft
    interval of the data), a timestamp is missing where two neighbouring samples are more
    than one and a half intervals apart. The imputers add the missing ones inside the window
    on the rhythm of the earlier sample. Nothing is added before the frame's first sample or
-   after its last, and an operation that would add more than 5 000 000 samples is an error.
+   after its last. A stretch of a gap in which nothing can be estimated is counted as
+   unrepaired without being visited; an imputer that would have to estimate more than
+   5 000 000 missing timestamps is an error.
 5. **Imputers do not guess.** `impute.linear` needs a usable sample on both sides (they may
    lie outside the window) and, with `max_gap_ns`, at most that far apart. `impute.like_day`
    needs the sampling interval and takes a reference within half an interval of the same
@@ -105,7 +107,10 @@ Unit (`core/tabayyun-core/src/repair/tests.rs`): `mask_nulls_the_window_and_noth
 `impute_like_day_takes_the_same_time_of_other_days`, `align_resample_rebuilds_whole_bins`,
 `transform_affine_scales_and_shifts`, `lineage_reverts_and_serialises`,
 `operations_read_from_json_and_name_their_method`, `invalid_frames_and_windows_are_errors`,
-`an_imputer_refuses_to_add_samples_without_end`.
+`an_imputer_refuses_to_add_samples_without_end`,
+`a_gap_nothing_can_be_estimated_in_costs_nothing`,
+`timestamps_at_the_ends_of_the_range_stay_inside_the_window`,
+`many_samples_on_one_timestamp_are_matched_in_one_pass`.
 
 Property (same file, 600 cases each): `raw_never_changes`, `imputers_only_estimate`.
 
@@ -125,6 +130,15 @@ Property (same file, 600 cases each): `raw_never_changes`, `imputers_only_estima
 - `transform.affine` refuses a scale of 0, which would erase the values; `mask` does that
   and says so.
 - The Python binding is left to S11-2, which decides what the API hands over.
+- From the review:
+  - The limit of 5 000 000 counts the missing timestamps an imputer visits. `impute.linear`
+    skips a gap whose usable neighbours are missing or too far apart, `impute.like_day` the
+    middle of a gap that no reference day reaches: two samples years apart with a small
+    `max_gap_ns` give the frame back with the count, not an error.
+  - The missing timestamps of a gap are computed in 128-bit arithmetic, so samples at the
+    two ends of the timestamp range cannot push one outside the window.
+  - Samples that share a timestamp are matched through an index once there are more than
+    16 of them; 40 000 on one timestamp take one pass.
 
 ## Out of scope
 

@@ -10,6 +10,7 @@ use crate::quality::Quality;
 use arrow::array::{ArrayRef, Float64Array, RecordBatch, StringArray, TimestampNanosecondArray, UInt8Array};
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 /// What happened to a sample.
@@ -70,6 +71,54 @@ fn same(a: Sample, b: Sample) -> bool {
     a.1 == b.1 && (a.0 == b.0 || (a.0.is_nan() && b.0.is_nan()))
 }
 
+/// The samples of one timestamp, from which matches are taken one at a time.
+///
+/// A match is the earliest sample not taken yet that is the same as the one asked for. Small
+/// groups are searched; a large one (thousands of samples on one timestamp) is indexed, so
+/// taking all of them stays linear.
+struct Pool {
+    samples: Vec<Option<Sample>>,
+    index: Option<HashMap<(u64, u8), VecDeque<usize>>>,
+}
+
+impl Pool {
+    /// Above this many samples the pool is indexed.
+    const SEARCHED: usize = 16;
+
+    /// Equal for exactly the samples [`same`] calls the same: every NaN is one value, and
+    /// the two zeros are.
+    fn key(sample: Sample) -> (u64, u8) {
+        let value = if sample.0.is_nan() { u64::MAX } else { (sample.0 + 0.0).to_bits() };
+        (value, sample.1.as_u8())
+    }
+
+    fn new(samples: impl Iterator<Item = Sample>) -> Self {
+        let samples: Vec<Option<Sample>> = samples.map(Some).collect();
+        let index = (samples.len() > Self::SEARCHED).then(|| {
+            let mut index: HashMap<(u64, u8), VecDeque<usize>> = HashMap::new();
+            for (i, s) in samples.iter().enumerate() {
+                index.entry(Self::key(s.expect("just filled"))).or_default().push_back(i);
+            }
+            index
+        });
+        Self { samples, index }
+    }
+
+    /// Take the earliest sample left that is the same as `wanted`; false when there is none.
+    fn take(&mut self, wanted: Sample) -> bool {
+        let at = match &mut self.index {
+            Some(index) => index.get_mut(&Self::key(wanted)).and_then(VecDeque::pop_front),
+            None => self.samples.iter().position(|s| s.is_some_and(|s| same(s, wanted))),
+        };
+        at.map(|i| self.samples[i] = None).is_some()
+    }
+
+    /// The samples not taken, in their order.
+    fn left(self) -> impl Iterator<Item = Sample> {
+        self.samples.into_iter().flatten()
+    }
+}
+
 fn invalid(reason: impl Into<String>) -> Error {
     Error::InvalidParams { check: "repair".into(), reason: reason.into() }
 }
@@ -123,17 +172,10 @@ impl Lineage {
             };
             let i_end = if raw.ts.get(i) == Some(&t) { group_end(&raw.ts, i) } else { i };
             let j_end = if repaired.ts.get(j) == Some(&t) { group_end(&repaired.ts, j) } else { j };
-            let before: Vec<Sample> = (i..i_end).map(|k| (raw.values[k], raw.quality[k])).collect();
-            let mut after: Vec<Option<Sample>> =
-                (j..j_end).map(|k| Some((repaired.values[k], repaired.quality[k]))).collect();
-            let mut left = Vec::new();
-            for b in before {
-                match after.iter_mut().find(|a| a.is_some_and(|a| same(a, b))) {
-                    Some(matched) => *matched = None,
-                    None => left.push(b),
-                }
-            }
-            let mut rest = after.into_iter().flatten();
+            let mut after = Pool::new((j..j_end).map(|k| (repaired.values[k], repaired.quality[k])));
+            let left: Vec<Sample> =
+                (i..i_end).map(|k| (raw.values[k], raw.quality[k])).filter(|b| !after.take(*b)).collect();
+            let mut rest = after.left();
             for b in left {
                 out.push(t, Some(b), rest.next());
             }
@@ -166,26 +208,19 @@ impl Lineage {
             };
             let j_end = if repaired.ts.get(j) == Some(&t) { group_end(&repaired.ts, j) } else { j };
             let r_end = if self.ts.get(r) == Some(&t) { group_end(&self.ts, r) } else { r };
-            let mut kept: Vec<Option<Sample>> =
-                (j..j_end).map(|k| Some((repaired.values[k], repaired.quality[k]))).collect();
+            let mut kept = Pool::new((j..j_end).map(|k| (repaired.values[k], repaired.quality[k])));
             let mut back = Vec::new();
             for k in r..r_end {
                 if let Some(q) = self.quality_after[k] {
-                    let found = kept.iter_mut().find(|s| s.is_some_and(|s| same(s, (self.after[k], q))));
-                    match found {
-                        Some(slot) => *slot = None,
-                        None => {
-                            return Err(invalid(format!(
-                                "the frame has no sample for the lineage row at {t}"
-                            )))
-                        }
+                    if !kept.take((self.after[k], q)) {
+                        return Err(invalid(format!("the frame has no sample for the lineage row at {t}")));
                     }
                 }
                 if let Some(q) = self.quality_before[k] {
                     back.push((self.before[k], q));
                 }
             }
-            for (v, q) in kept.into_iter().flatten().chain(back) {
+            for (v, q) in kept.left().chain(back) {
                 ts.push(t);
                 values.push(v);
                 quality.push(q);
