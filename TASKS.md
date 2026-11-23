@@ -641,6 +641,16 @@ starts; the plan is the backlog until then.
       - `align.resample` rebuilds whole bins only, so no sample moves out of the window; a
         bin of good samples stays good, as `align` shows it to the checks.
       - The Python binding is left to S11-2.
+- [ ] **Procrastinate 3.12** (found 23 Nov with Dependabot #125; next run, before the next
+      story). 3.12.0 ships five schema migrations since 3.11: a `lock_mode` column with new
+      defer functions, a changed `procrastinate_retry_job_v2`, an index built and one dropped
+      with `CONCURRENTLY` (outside a transaction), and a post step that drops the old defer
+      functions once no 3.11 code runs. It needs an Alembic revision with copies under
+      `migrations/sql/`, as 0011 did for 3.11, and an order for the post steps against the
+      worker's deploy. `test_procrastinate_migrations_since_the_snapshot_are_all_applied`
+      fails until then; the lockfile stays on 3.11.0.
+      - The rest of that group (fastapi 0.165, pydantic 2.14.4, python-multipart 0.0.34, ruff
+        0.17.6) was taken on its own.
 - [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
       `tabayyun-api` and `tabayyun-worker` on staging; then a `synthetic` source with
       `poll_interval_s` gives staging a live, polling source for demos.
