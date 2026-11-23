@@ -312,6 +312,13 @@ fn a_gap_nothing_can_be_estimated_in_costs_nothing() {
     let all = Window::new(0, i64::MAX);
     let out = repair(&raw, all, &Op::ImputeLinear { max_gap_ns: Some(second) }).unwrap();
     assert_eq!((out.unrepaired, out.lineage.len(), out.frame.len()), (6_000_000, 0, 2));
+    // Like-day with 60 days each way finds a reference for 120 of those seconds only: the
+    // same second 1 to 60 days after the first sample and before the last.
+    let out = repair(&raw, all, &Op::ImputeLikeDay { days: 60, same_weekday: false }).unwrap();
+    assert_eq!((out.lineage.len(), out.unrepaired), (120, 6_000_000 - 120));
+    assert_eq!(out.lineage.ts[0], NS_PER_DAY);
+    assert_eq!(out.lineage.after[0], 1.0);
+    assert_eq!(*out.lineage.ts.last().unwrap(), 6_000_001 * second - NS_PER_DAY);
     // Like-day reaches one day from each end of a gap of 400 days; the middle is skipped.
     let minute = MIN;
     let before: Vec<i64> = (0..2 * 24 * 60).map(|i| i * minute).collect();
@@ -422,6 +429,34 @@ proptest! {
         if out.lineage.is_empty() {
             prop_assert_eq!(canonical(&out.frame), canonical(&raw));
         }
+    }
+
+    /// Skipping ahead to what can be estimated misses nothing: like-day adds exactly the
+    /// missing timestamps for which a plain search over all usable samples finds a reference.
+    #[test]
+    fn like_day_adds_every_timestamp_that_has_a_reference(raw in any_frame(), days in 1..4usize) {
+        let all = Window::new(-MIN, i64::MAX);
+        let out = repair(&raw, all, &Op::ImputeLikeDay { days, same_weekday: false }).unwrap();
+        let known: Vec<i64> = (0..raw.len()).filter(|&i| usable(raw.values[i], raw.quality[i])).map(|i| raw.ts[i]).collect();
+        let has_reference = |t: i64| {
+            (1..=days as i64).any(|k| known.iter().any(|u| (u - (t - k * NS_PER_DAY)).abs() <= MIN / 2 || (u - (t + k * NS_PER_DAY)).abs() <= MIN / 2))
+        };
+        let mut expected = Vec::new();
+        let mut missing = 0usize;
+        for pair in raw.ts.windows(2) {
+            let mut t = pair[0] + MIN;
+            while pair[1] - pair[0] > MIN + MIN / 2 && pair[1] - t > MIN / 2 {
+                missing += 1;
+                if has_reference(t) {
+                    expected.push(t);
+                }
+                t += MIN;
+            }
+        }
+        let added: Vec<i64> = (0..out.lineage.len()).filter(|&i| out.lineage.action[i] == Action::Added).map(|i| out.lineage.ts[i]).collect();
+        prop_assert_eq!(&added, &expected);
+        let holes = (0..raw.len()).filter(|&i| !usable(raw.values[i], raw.quality[i])).count();
+        prop_assert_eq!(out.unrepaired, missing - expected.len() + holes - out.lineage.count(Action::Changed));
     }
 
     /// What an imputer writes is finite and estimated, and it never removes a sample.

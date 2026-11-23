@@ -18,9 +18,9 @@ use crate::frame::SeriesFrame;
 use crate::quality::Quality;
 use serde::{Deserialize, Serialize};
 
-/// Most missing timestamps an imputer estimates in one operation. A stray far timestamp
-/// would otherwise ask it for a sample every second across years. Stretches in which nothing
-/// can be estimated are not counted: they are skipped as a whole.
+/// Most samples one operation may add. A stray far timestamp would otherwise ask an imputer
+/// for a sample every second across years. What cannot be estimated is not counted, and is
+/// skipped without being visited.
 pub const MAX_ADDED: usize = 5_000_000;
 
 /// Which of several samples that share a timestamp `dedupe` keeps.
@@ -162,8 +162,7 @@ pub(crate) fn usable(value: f64, quality: Quality) -> bool {
 /// changed. The repaired frame carries no ingest times.
 ///
 /// Errors: an unsorted frame, a window that does not end after its start, parameters the
-/// operation cannot use, or an imputer that would estimate more than [`MAX_ADDED`] missing
-/// timestamps.
+/// operation cannot use, or an operation that would add more than [`MAX_ADDED`] samples.
 pub fn repair(raw: &SeriesFrame, window: Window, op: &Op) -> Result<Repaired> {
     if !raw.is_sorted() {
         return Err(invalid("the frame must be sorted by time"));

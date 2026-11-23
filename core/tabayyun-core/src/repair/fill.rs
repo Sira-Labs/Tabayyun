@@ -49,9 +49,6 @@ fn interval(raw: &SeriesFrame) -> Option<i64> {
     raw.expected_interval_ns().filter(|g| *g > 0)
 }
 
-/// A stretch of time, both ends included, in which no missing timestamp can be estimated.
-type Hopeless = Option<(i128, i128)>;
-
 /// The window's samples with `estimate` applied to every hole, and to every timestamp the
 /// series misses inside the window when `grid` gives its interval.
 ///
@@ -60,9 +57,10 @@ type Hopeless = Option<(i128, i128)>;
 /// may lie outside the window, but nothing is added before the first sample of the frame or
 /// after its last.
 ///
-/// `hopeless` names, for the gap between two neighbouring samples, the stretch in which
-/// `estimate` cannot succeed. Its missing timestamps are counted as unrepaired without being
-/// visited, so a gap of years costs nothing when nothing in it can be estimated.
+/// `hope` answers, for a time inside a gap, with the first time from there on at which
+/// `estimate` can succeed, or `None` when it cannot anywhere in the rest of the gap. The
+/// missing timestamps before that time are counted as unrepaired without being visited, so
+/// a gap of years costs only what can be filled in it.
 fn fill(
     raw: &SeriesFrame,
     lo: usize,
@@ -70,10 +68,11 @@ fn fill(
     window: Window,
     grid: Option<i64>,
     estimate: impl Fn(i64) -> Option<f64>,
-    hopeless: impl Fn(i64, i64) -> Hopeless,
+    hope: impl Fn(i64) -> Option<i64>,
 ) -> Result<Patch> {
     let mut patch = Patch::default();
-    let mut visited = 0usize;
+    let mut added = 0usize;
+    let count = |n: i128| usize::try_from(n).unwrap_or(usize::MAX);
     // The timestamps missing between the samples at `from` and `to`, inside the window. The
     // arithmetic is in i128: the samples may be the whole range of i64 apart.
     let mut bridge = |patch: &mut Patch, from: i64, to: i64| -> Result<()> {
@@ -87,25 +86,29 @@ fn fill(
         let mut t = start + (first - start + grid - 1) / grid * grid;
         // Inside the window, and more than half an interval before the next sample.
         let last = (i128::from(window.end) - 1).min(end - grid / 2 - 1);
-        let dead = hopeless(from, to);
         while t <= last {
-            if let Some((_, dead_end)) = dead.filter(|(a, b)| (*a..=*b).contains(&t)) {
-                let skipped = (dead_end.min(last) - t) / grid + 1;
-                patch.unrepaired =
-                    patch.unrepaired.saturating_add(usize::try_from(skipped).unwrap_or(usize::MAX));
+            // `t` lies inside the window, so it is a timestamp.
+            let at = t as i64;
+            let Some(next) = hope(at).map(i128::from).filter(|h| *h <= last) else {
+                patch.unrepaired = patch.unrepaired.saturating_add(count((last - t) / grid + 1));
+                break;
+            };
+            if next > t {
+                let skipped = (next - t + grid - 1) / grid;
+                patch.unrepaired = patch.unrepaired.saturating_add(count(skipped));
                 t += skipped * grid;
                 continue;
             }
-            visited += 1;
-            if visited > MAX_ADDED {
-                return Err(invalid(format!(
-                    "the operation would estimate more than {MAX_ADDED} missing timestamps"
-                )));
-            }
-            // `t` lies inside the window, so it is a timestamp.
-            let at = t as i64;
             match estimate(at) {
-                Some(v) => patch.push(at, v, Quality::Estimated),
+                Some(v) => {
+                    added += 1;
+                    if added > MAX_ADDED {
+                        return Err(invalid(format!(
+                            "the operation would add more than {MAX_ADDED} samples"
+                        )));
+                    }
+                    patch.push(at, v, Quality::Estimated);
+                }
                 None => patch.unrepaired += 1,
             }
             t += grid;
@@ -156,11 +159,9 @@ pub(super) fn linear(
         Some(v0 + (v1 - v0) * share).filter(|v| v.is_finite())
     };
     // Between two neighbouring samples the usable samples around are the same everywhere:
-    // without them, or with them too far apart, the whole gap is hopeless.
-    let hopeless = |from: i64, to: i64| -> Hopeless {
-        around(from.saturating_add(1)).is_none().then(|| (i128::from(from) + 1, i128::from(to) - 1))
-    };
-    fill(raw, lo, hi, window, interval(raw), estimate, hopeless)
+    // either every missing timestamp of the gap can be estimated, or none.
+    let hope = |t: i64| around(t).map(|_| t);
+    fill(raw, lo, hi, window, interval(raw), estimate, hope)
 }
 
 pub(super) fn like_day(
@@ -187,12 +188,21 @@ pub(super) fn like_day(
         let (sum, n) = reference.fold((0.0, 0usize), |(s, n), v| (s + v, n + 1));
         (n > 0).then(|| sum / n as f64).filter(|v| v.is_finite())
     };
-    // A reference is a usable sample at most `days` steps and half an interval away, and a
-    // gap has none inside: its middle, farther than that from both ends, is hopeless.
-    let reach = i128::from(days as i64 * step) + i128::from(grid / 2);
-    let hopeless = |from: i64, to: i64| -> Hopeless {
-        let (a, b) = (i128::from(from) + reach + 1, i128::from(to) - reach - 1);
-        (a <= b).then_some((a, b))
+    // A time can be estimated when a usable sample lies within half an interval of the same
+    // time some days away. From `t` on, the first such time for one reference day is where
+    // the next usable sample at or after that day's time comes into reach.
+    let tolerance = i128::from(grid / 2);
+    let hope = |t: i64| -> Option<i64> {
+        let t = i128::from(t);
+        (1..=days as i128)
+            .flat_map(|k| [-k * i128::from(step), k * i128::from(step)])
+            .filter_map(|shift| {
+                let from = (t + shift - tolerance).clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64;
+                let sample = known.ts.get(known.ts.partition_point(|&u| u < from))?;
+                Some((i128::from(*sample) - shift - tolerance).max(t))
+            })
+            .min()
+            .and_then(|at| i64::try_from(at).ok())
     };
-    fill(raw, lo, hi, window, Some(grid), estimate, hopeless)
+    fill(raw, lo, hi, window, Some(grid), estimate, hope)
 }
