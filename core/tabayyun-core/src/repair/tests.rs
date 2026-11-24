@@ -553,3 +553,14 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn the_unrepaired_count_stops_at_the_largest_number() {
+    // Three holes around a gap of nearly every timestamp there is, on a rhythm of one
+    // nanosecond: nothing can be estimated, and the count is held, it does not wrap.
+    let ts = vec![i64::MIN, i64::MAX - 1, i64::MAX - 1];
+    let mut raw = SeriesFrame::with_default_quality(SeriesMeta::new("s"), ts, vec![f64::NAN; 3]).unwrap();
+    raw.meta.expected_interval_ns = Some(1);
+    let out = repair(&raw, Window::new(i64::MIN, i64::MAX), &Op::ImputeLinear { max_gap_ns: None }).unwrap();
+    assert_eq!((out.unrepaired, out.lineage.ts.len()), (usize::MAX, 0));
+}

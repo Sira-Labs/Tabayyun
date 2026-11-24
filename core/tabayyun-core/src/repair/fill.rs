@@ -109,7 +109,7 @@ fn fill(
                     }
                     patch.push(at, v, Quality::Estimated);
                 }
-                None => patch.unrepaired += 1,
+                None => patch.unrepaired = patch.unrepaired.saturating_add(1),
             }
             t += grid;
         }
@@ -125,7 +125,7 @@ fn fill(
             Some(v) => patch.push(raw.ts[i], v, Quality::Estimated),
             None => {
                 patch.push(raw.ts[i], raw.values[i], raw.quality[i]);
-                patch.unrepaired += usize::from(hole);
+                patch.unrepaired = patch.unrepaired.saturating_add(usize::from(hole));
             }
         }
         previous = Some(raw.ts[i]);
