@@ -644,3 +644,196 @@ def test_0018_adds_score_days_filled_from_scores_and_downgrades(db_url, fresh_sc
     finally:
         engine.dispose()
         fresh_schema("auto")
+
+
+def test_0019_installs_procrastinate_3_12_and_downgrades(db_url, fresh_schema):
+    """0019 adds lock modes, the new defer functions and the lock index; its downgrade leaves
+    the 3.11 schema, in which a job is deferred, fetched and retried as before."""
+    fresh_schema("auto")
+    engine = create_engine(db_url)
+    functions = text("SELECT proname FROM pg_proc WHERE proname LIKE 'procrastinate\\_defer%' ORDER BY 1")
+    source = text("SELECT prosrc FROM pg_proc WHERE proname = :name")
+    index = text(
+        "SELECT indisvalid FROM pg_index JOIN pg_class ON pg_class.oid = indexrelid "
+        "WHERE relname = 'procrastinate_jobs_todo_doing_lock_idx_v1'"
+    )
+    fetch = text("SELECT id, status FROM procrastinate_fetch_job_v2(ARRAY['q0019']::varchar[], NULL)")
+    try:
+        with engine.begin() as conn:
+            columns = {c["name"] for c in inspect(conn).get_columns("procrastinate_jobs")}
+            assert "lock_mode" in columns
+            assert conn.execute(index).scalar_one() is True
+            # The functions 3.11 calls are still there: its worker may run during the upgrade.
+            assert conn.execute(functions).scalars().all() == [
+                "procrastinate_defer_jobs_v1",
+                "procrastinate_defer_jobs_v2",
+                "procrastinate_defer_periodic_job_v2",
+                "procrastinate_defer_periodic_job_v3",
+            ]
+            retry = conn.execute(source, {"name": "procrastinate_retry_job_v2"}).scalar_one()
+            assert "unique_violation" in retry
+            # A 'mutex' job scheduled for later does not hold its lock; an 'ordered' one does.
+            defer = text(
+                "SELECT unnest(procrastinate_defer_jobs_v2(ARRAY[ROW('q0019', 't', 0, 'L', NULL, "
+                "'{}'::jsonb, CAST(:at AS timestamptz), CAST(:mode AS procrastinate_lock_mode))]"
+                "::procrastinate_job_to_defer_v2[]))"
+            )
+            conn.execute(defer, {"at": "2999-01-01", "mode": "mutex"})
+            due = conn.execute(defer, {"at": None, "mode": "mutex"}).scalar_one()
+            assert conn.execute(fetch).one() == (due, "doing")
+            conn.execute(text("DELETE FROM procrastinate_jobs"))
+            conn.execute(defer, {"at": "2999-01-01", "mode": "ordered"})
+            conn.execute(defer, {"at": None, "mode": "ordered"})
+            assert conn.execute(fetch).one() == (None, None)
+            conn.execute(text("DELETE FROM procrastinate_jobs"))
+        migrate.downgrade(db_url, "0018")
+        assert _current_revision(db_url) == "0018"
+        with engine.begin() as conn:
+            columns = {c["name"] for c in inspect(conn).get_columns("procrastinate_jobs")}
+            assert "lock_mode" not in columns
+            assert conn.execute(index).first() is None
+            assert conn.execute(functions).scalars().all() == [
+                "procrastinate_defer_jobs_v1",
+                "procrastinate_defer_periodic_job_v2",
+            ]
+            types = text("SELECT count(*) FROM pg_type WHERE typname LIKE 'procrastinate\\_%lock\\_mode'")
+            assert conn.execute(types).scalar_one() == 0
+            retry = conn.execute(source, {"name": "procrastinate_retry_job_v2"}).scalar_one()
+            assert "unique_violation" not in retry
+            fetch_job = conn.execute(source, {"name": "procrastinate_fetch_job_v2"}).scalar_one()
+            assert "jobs.lock IS NULL" in fetch_job and "lock_mode" not in fetch_job
+            # 3.11's calls work: a periodic defer, the fetch and a retry.
+            job = conn.execute(
+                text(
+                    "SELECT procrastinate_defer_periodic_job_v2("
+                    "'q0019', 'L', NULL, 't', 0, 'p', 1, '{}'::jsonb)"
+                )
+            ).scalar_one()
+            assert conn.execute(fetch).one() == (job, "doing")
+            conn.execute(text("SELECT procrastinate_retry_job_v2(:id, now(), NULL, NULL, NULL)"), {"id": job})
+            status = text("SELECT status, attempts FROM procrastinate_jobs WHERE id = :id")
+            assert conn.execute(status, {"id": job}).one() == ("todo", 1)
+            conn.execute(text("DELETE FROM procrastinate_periodic_defers"))
+            conn.execute(text("DELETE FROM procrastinate_jobs"))
+        migrate.upgrade(db_url, "head", timescale="auto")
+        with engine.connect() as conn:
+            assert conn.execute(index).scalar_one() is True
+    finally:
+        engine.dispose()
+        fresh_schema("auto")
+
+
+def test_0019_can_be_run_again_after_an_interrupted_index_build(db_url, fresh_schema):
+    """0019 builds its index outside a transaction, first. An interrupted upgrade leaves the
+    database at 0018 with that index, invalid or complete; running it again finishes."""
+    fresh_schema("auto")
+    engine = create_engine(db_url)
+    name = "procrastinate_jobs_todo_doing_lock_idx_v1"
+    state = text(
+        "SELECT indisvalid, indexdef FROM pg_index JOIN pg_class ON pg_class.oid = indexrelid "
+        "JOIN pg_indexes ON indexname = relname WHERE relname = :name"
+    )
+    try:
+        for left_valid in (False, True):
+            migrate.downgrade(db_url, "0018")
+            with engine.begin() as conn:
+                assert conn.execute(state, {"name": name}).first() is None
+                if left_valid:
+                    conn.execute(
+                        text(
+                            f"CREATE INDEX {name} ON procrastinate_jobs (lock) WHERE status = ANY "
+                            "(ARRAY['todo'::procrastinate_job_status, 'doing'::procrastinate_job_status])"
+                        )
+                    )
+                else:
+                    conn.execute(text(f"CREATE INDEX {name} ON procrastinate_jobs (id)"))
+                    conn.execute(
+                        text(
+                            "UPDATE pg_index SET indisvalid = false "
+                            "WHERE indexrelid = CAST(:name AS regclass)"
+                        ),
+                        {"name": name},
+                    )
+            migrate.upgrade(db_url, "0019", timescale="auto")
+            assert _current_revision(db_url) == "0019"
+            with engine.connect() as conn:
+                valid, definition = conn.execute(state, {"name": name}).one()
+                assert valid is True
+                assert "(lock) WHERE" in definition
+    finally:
+        engine.dispose()
+        fresh_schema("auto")
+
+
+# What Procrastinate 3.12's own schema no longer has and ours keeps until its two "post"
+# migrations run (see revision 0019).
+KEPT_FOR_3_11_WORKERS = {
+    ("function", "procrastinate_defer_jobs_v1"),
+    ("function", "procrastinate_defer_periodic_job_v2"),
+    ("type", "procrastinate_job_to_defer_v1"),
+    ("index", "procrastinate_jobs_id_lock_idx_v1"),
+}
+PROCRASTINATE_OBJECTS = """
+SELECT 'function', proname, pg_get_function_arguments(p.oid) || ' -> '
+       || pg_get_function_result(p.oid) || E'\\n' || prosrc
+  FROM pg_proc p WHERE pronamespace = current_schema()::regnamespace AND proname LIKE 'procrastinate\\_%'
+UNION ALL
+SELECT 'column', table_name || '.' || column_name,
+       udt_name || ' ' || is_nullable || ' ' || coalesce(column_default, '')
+  FROM information_schema.columns
+ WHERE table_schema = current_schema() AND table_name LIKE 'procrastinate\\_%'
+UNION ALL
+SELECT 'index', indexname, replace(indexdef, ' ON ' || schemaname || '.', ' ON ')
+  FROM pg_indexes WHERE schemaname = current_schema() AND tablename LIKE 'procrastinate\\_%'
+UNION ALL
+SELECT 'type', typname, coalesce(
+           (SELECT string_agg(enumlabel, ',' ORDER BY enumsortorder) FROM pg_enum WHERE enumtypid = t.oid),
+           (SELECT string_agg(attname || ' ' || format_type(atttypid, atttypmod), ',' ORDER BY attnum)
+              FROM pg_attribute WHERE attrelid = t.typrelid AND attnum > 0 AND NOT attisdropped))
+  FROM pg_type t LEFT JOIN pg_class c ON c.oid = t.typrelid
+ WHERE typnamespace = current_schema()::regnamespace AND typname LIKE 'procrastinate\\_%'
+   AND (typtype = 'e' OR (typtype = 'c' AND c.relkind = 'c'))
+UNION ALL
+SELECT 'trigger', tgname, replace(pg_get_triggerdef(g.oid), ' ON ' || current_schema() || '.', ' ON ')
+  FROM pg_trigger g JOIN pg_class c ON c.oid = g.tgrelid
+ WHERE c.relnamespace = current_schema()::regnamespace AND NOT tgisinternal
+   AND c.relname LIKE 'procrastinate\\_%'
+UNION ALL
+SELECT 'constraint', conname, pg_get_constraintdef(o.oid)
+  FROM pg_constraint o JOIN pg_class c ON c.oid = o.conrelid
+ WHERE c.relnamespace = current_schema()::regnamespace AND c.relname LIKE 'procrastinate\\_%'
+"""
+
+
+def test_the_migrated_queue_schema_is_procrastinates_own_plus_what_3_11_needs(db_url, fresh_schema):
+    """Snapshot plus migrations give the schema the installed Procrastinate would create
+    itself: every function, column, index, type, trigger and constraint is the same, and ours
+    only has more, the objects the 3.12 "post" migrations will drop."""
+    from importlib import resources
+
+    fresh_schema("auto")
+    own_schema = resources.files("procrastinate.sql").joinpath("schema.sql").read_text()
+    engine = create_engine(db_url)
+
+    def objects(conn, schema: str) -> dict[tuple[str, str], str]:
+        conn.execute(text(f"SET LOCAL search_path TO {schema}"))
+        rows = conn.execute(text(PROCRASTINATE_OBJECTS)).all()
+        assert len({(kind, name) for kind, name, _ in rows}) == len(rows)
+        return {(kind, name): definition for kind, name, definition in rows}
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("DROP SCHEMA IF EXISTS procrastinate_reference CASCADE"))
+            conn.execute(text("CREATE SCHEMA procrastinate_reference"))
+            conn.execute(text("SET LOCAL search_path TO procrastinate_reference"))
+            with conn.connection.dbapi_connection.cursor() as cursor:
+                cursor.execute(own_schema)
+            theirs = objects(conn, "procrastinate_reference")
+            ours = objects(conn, "public")
+            conn.execute(text("DROP SCHEMA procrastinate_reference CASCADE"))
+        assert len(theirs) > 50
+        assert set(ours) - set(theirs) == KEPT_FOR_3_11_WORKERS
+        assert set(theirs) - set(ours) == set()
+        assert {key: ours[key] for key in theirs} == theirs
+    finally:
+        engine.dispose()

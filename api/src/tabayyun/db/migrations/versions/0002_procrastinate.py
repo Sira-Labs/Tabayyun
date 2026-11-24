@@ -8,8 +8,8 @@ through the driver cursor without parameter formatting. Autogenerate ignores
 `procrastinate_*` tables (see env.py).
 
 Upgrading Procrastinate later: add a new revision that executes the SQL files it ships under
-`procrastinate/sql/migrations/` between 3.9.0 and the new version, and update the snapshot
-test in `tests/test_migration_helpers.py`.
+`procrastinate/sql/migrations/` between 3.9.0 and the new version, and update the list
+in `tests/test_migration_helpers.py` (0011 and 0019 did).
 
 Revision ID: 0002
 Revises: 0001

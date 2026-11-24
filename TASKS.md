@@ -641,16 +641,28 @@ starts; the plan is the backlog until then.
       - `align.resample` rebuilds whole bins only, so no sample moves out of the window; a
         bin of good samples stays good, as `align` shows it to the checks.
       - The Python binding is left to S11-2.
-- [ ] **Procrastinate 3.12** (found 23 Nov with Dependabot #125; next run, before the next
-      story). 3.12.0 ships five schema migrations since 3.11: a `lock_mode` column with new
-      defer functions, a changed `procrastinate_retry_job_v2`, an index built and one dropped
-      with `CONCURRENTLY` (outside a transaction), and a post step that drops the old defer
-      functions once no 3.11 code runs. It needs an Alembic revision with copies under
-      `migrations/sql/`, as 0011 did for 3.11, and an order for the post steps against the
-      worker's deploy. `test_procrastinate_migrations_since_the_snapshot_are_all_applied`
-      fails until then; the lockfile stays on 3.11.0.
+- [x] **Procrastinate 3.12** (24 Nov, no spec; replaces Dependabot #125 and #129). Migration
+      0019 runs the three "pre" migrations of 3.12.0 from copies under `migrations/sql/`.
+      - The index is built first and outside a transaction: it does not depend on the two
+        scripts, so an interrupted upgrade leaves at most an invalid index, which the next
+        run drops and rebuilds. The scripts and the revision stamp commit together.
+      - The two "post" migrations are not run. The api migrates when it starts, and the
+        worker of the previous release may still defer jobs through
+        `procrastinate_defer_jobs_v1` and `procrastinate_defer_periodic_job_v2` until it is
+        replaced.
+      - A database test installs Procrastinate's own `schema.sql` into a scratch schema and
+        compares functions, columns, indexes, types, triggers and constraints with the
+        migrated one: equal, except for the four objects the post steps drop. It replaces
+        the text comparison with the 3.9.0 snapshot, which no longer holds.
       - The rest of that group (fastapi 0.165, pydantic 2.14.4, python-multipart 0.0.34, ruff
-        0.17.6) was taken on its own.
+        0.17.6) was taken on its own on 23 Nov.
+- [ ] **Procrastinate 3.12, post steps**: a revision 0020 that runs
+      `03.12.00_50_post_add_lock_mode.sql` and `03.12.00_51_post_drop_id_lock_index.sql`
+      (drop outside a transaction), and moves both from "waiting" to a copy in
+      `PROCRASTINATE_MIGRATIONS` and out of `KEPT_FOR_3_11_WORKERS` in the tests. Take it
+      once a release with 0019 has reached production (`promote.yml`, the owner's step), so
+      that no deployment goes from a 3.11 worker straight to a schema without those
+      functions; nothing waits on it, the old objects are only unused.
 - [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
       `tabayyun-api` and `tabayyun-worker` on staging; then a `synthetic` source with
       `poll_interval_s` gives staging a live, polling source for demos.
