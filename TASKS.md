@@ -630,6 +630,17 @@ starts; the plan is the backlog until then.
         window did not stand out on a single blue ramp.
       - Not exercised here: a real `tby.correlation_break` finding opened in the browser,
         and the scatter on staging's data.
+- [x] **034 Repair module** — `docs/specs/034-repair-module.md` (S11-1, 23 Nov). Every
+      criterion is met; nothing calls the module yet.
+      - The lineage is computed in one place as the difference between the raw and the
+        repaired frame, so an operation cannot report something else than it did; `revert`
+        gives the raw samples back, which the property test checks for random frames.
+      - Imputers add missing timestamps only between existing samples and only inside the
+        window, need usable samples to build on, and count what they could not estimate
+        (`unrepaired`) instead of guessing.
+      - `align.resample` rebuilds whole bins only, so no sample moves out of the window; a
+        bin of good samples stays good, as `align` shows it to the checks.
+      - The Python binding is left to S11-2.
 - [ ] **Procrastinate 3.12** (found 23 Nov with Dependabot #125; next run, before the next
       story). 3.12.0 ships five schema migrations since 3.11: a `lock_mode` column with new
       defer functions, a changed `procrastinate_retry_job_v2`, an index built and one dropped

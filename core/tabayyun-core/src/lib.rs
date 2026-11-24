@@ -8,6 +8,8 @@
 //! - A [`cross::CrossCheck`] runs on the members of a [`cross::SeriesGroup`], put on one
 //!   grid by [`align`]; [`Registry::run_multi`] runs both kinds over several series (spec 008).
 //! - [`score`] turns findings into per-dimension and overall scores.
+//! - [`repair`] holds the repair operations: each returns a new frame and the lineage of what
+//!   it changed, and never touches the raw frame (ADR-0010, spec 034).
 //! - [`seasonal`] detects a series' dominant period and seasonal strength (spec 012).
 //! - [`cache`] stores raw observations as Parquet on local disk or S3 (spec 006); it is the
 //!   only module that does I/O.
@@ -28,6 +30,7 @@ pub mod frame;
 pub mod profile;
 pub mod quality;
 pub mod registry;
+pub mod repair;
 pub mod residual;
 pub mod scatter;
 pub mod score;
