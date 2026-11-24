@@ -1,6 +1,7 @@
 import pytest
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 
 from tabayyun.db import migrate
 from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID
@@ -670,8 +671,24 @@ def test_0019_installs_procrastinate_3_12_and_downgrades(db_url, fresh_schema):
                 "procrastinate_defer_periodic_job_v2",
                 "procrastinate_defer_periodic_job_v3",
             ]
-            retry = conn.execute(source, {"name": "procrastinate_retry_job_v2"}).scalar_one()
-            assert "unique_violation" in retry
+            # A running job whose retry meets a queued job with the same queueing lock is
+            # closed as failed; a failed one in that position still raises and stays as it is.
+            job = text(
+                "INSERT INTO procrastinate_jobs (queue_name, task_name, queueing_lock, status) "
+                "VALUES ('q0019', 't', 'Q', CAST(:status AS procrastinate_job_status)) RETURNING id"
+            )
+            retry_job = text("SELECT procrastinate_retry_job_v2(:id, now(), NULL, NULL, NULL)")
+            state = text("SELECT status, attempts FROM procrastinate_jobs WHERE id = :id")
+            running = conn.execute(job, {"status": "doing"}).scalar_one()
+            failed = conn.execute(job, {"status": "failed"}).scalar_one()
+            conn.execute(job, {"status": "todo"})
+            conn.execute(retry_job, {"id": running})
+            assert conn.execute(state, {"id": running}).one() == ("failed", 1)
+            with pytest.raises(IntegrityError, match="procrastinate_jobs_queueing_lock_idx"):
+                with conn.begin_nested():
+                    conn.execute(retry_job, {"id": failed})
+            assert conn.execute(state, {"id": failed}).one() == ("failed", 0)
+            conn.execute(text("DELETE FROM procrastinate_jobs"))
             # A 'mutex' job scheduled for later does not hold its lock; an 'ordered' one does.
             defer = text(
                 "SELECT unnest(procrastinate_defer_jobs_v2(ARRAY[ROW('q0019', 't', 0, 'L', NULL, "

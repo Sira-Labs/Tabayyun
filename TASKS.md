@@ -659,10 +659,14 @@ starts; the plan is the backlog until then.
 - [ ] **Procrastinate 3.12, post steps**: a revision 0020 that runs
       `03.12.00_50_post_add_lock_mode.sql` and `03.12.00_51_post_drop_id_lock_index.sql`
       (drop outside a transaction), and moves both from "waiting" to a copy in
-      `PROCRASTINATE_MIGRATIONS` and out of `KEPT_FOR_3_11_WORKERS` in the tests. Take it
-      once a release with 0019 has reached production (`promote.yml`, the owner's step), so
-      that no deployment goes from a 3.11 worker straight to a schema without those
-      functions; nothing waits on it, the old objects are only unused.
+      `PROCRASTINATE_MIGRATIONS` and out of `KEPT_FOR_3_11_WORKERS` in the tests. It holds
+      for every installation, not only for ours: whoever applies 0020 must have run a release
+      with 0019 and replaced the workers first, or a 3.11 worker defers into functions that
+      are gone while the api migrates. So the release with 0020 says in `deploy/README.md`
+      and in its changelog entry that an installation upgrades through a release with 0019
+      first, and it is not cut before a release with 0019 has
+      reached our production (`promote.yml`, the owner's step). Nothing waits on it; until
+      then the old objects are only unused.
 - [ ] Owner, optional: set `TABAYYUN_MASTER_KEY` (`openssl rand -base64 32`, same value) on
       `tabayyun-api` and `tabayyun-worker` on staging; then a `synthetic` source with
       `poll_interval_s` gives staging a live, polling source for demos.
