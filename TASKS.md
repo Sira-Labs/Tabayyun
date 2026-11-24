@@ -656,13 +656,31 @@ starts; the plan is the backlog until then.
         the text comparison with the 3.9.0 snapshot, which no longer holds.
       - The rest of that group (fastapi 0.165, pydantic 2.14.4, python-multipart 0.0.34, ruff
         0.17.6) was taken on its own on 23 Nov.
-- [ ] **Procrastinate 3.12, post steps**: a revision 0020 that runs
+- [x] **035 Corrections API** — `docs/specs/035-corrections-api.md` (S11-2, 24 Nov). Every
+      criterion is met. Nothing reads the corrected layer through the API yet (S11-3) and
+      there is no page (S11-4).
+      - A version holds only the repaired rows of its window; the corrected layer is raw
+        with the approved windows laid over in version order, composed on read.
+      - Versions are allocated when proposed; a rejected or failed one is never part of the
+        layer. Approving is refused as `stale` when an overlapping correction was approved
+        after this one was computed, so approved corrections agree in version order.
+      - `corrected_ranges` holds ranges with counts, not values: before is the base layer,
+        after is the version's rows in the cache.
+      - Operations refuse unknown parameters now, and a proposal is tried against the
+        series' metadata before it is stored.
+      - Refusals carry their code as the `detail` string, as `window_too_large` does.
+      - Migration 0020; the Procrastinate post steps take a later number.
+- [ ] **Corrections, loose ends** (found with 035): a correction whose worker dies while
+      computing stays `proposed` (it can be rejected and proposed again; a reaper like the
+      runs' fits with the publish job, S11-5); the cache returns one row per timestamp, so
+      `dedupe` has nothing to do on cached data until a read can return every stored row.
+- [ ] **Procrastinate 3.12, post steps**: a later revision that runs
       `03.12.00_50_post_add_lock_mode.sql` and `03.12.00_51_post_drop_id_lock_index.sql`
       (drop outside a transaction), and moves both from "waiting" to a copy in
       `PROCRASTINATE_MIGRATIONS` and out of `KEPT_FOR_3_11_WORKERS` in the tests. It holds
-      for every installation, not only for ours: whoever applies 0020 must have run a release
+      for every installation, not only for ours: whoever applies that revision must have run a release
       with 0019 and replaced the workers first, or a 3.11 worker defers into functions that
-      are gone while the api migrates. So the release with 0020 says in `deploy/README.md`
+      are gone while the api migrates. So the release that carries it says in `deploy/README.md`
       and in its changelog entry that an installation upgrades through a release with 0019
       first, and it is not cut before a release with 0019 has
       reached our production (`promote.yml`, the owner's step). Nothing waits on it; until

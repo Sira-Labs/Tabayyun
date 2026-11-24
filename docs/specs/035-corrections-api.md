@@ -88,8 +88,10 @@ All under the workspace of the series; ids that are not UUIDs or not visible are
   `{"method", "params": {}, "from": "<ns>", "to": "<ns>", "reason", "finding_id": null}`
   → 201, the correction (below), status `proposed`; the job `apply_repair` is queued (run
   in the request in inline mode, so the answer is then already `computed` or `failed`).
+  `from` and `to` are ns since the epoch, as a decimal string or an integer.
 - `GET /api/series/{series_id}/corrections?status=&limit=50&cursor=` (viewer) →
-  `{"items": [correction…], "next_cursor"}`, newest version first.
+  `{"items": [correction…], "next_cursor"}`, newest version first; `limit` 1 to 200, the
+  cursor is opaque.
 - `GET /api/corrections/{id}` (viewer) → the correction with `ranges`.
 - `POST /api/corrections/{id}/approve` and `/reject` (editor), body `{"note": null}` →
   200, the correction.
@@ -111,7 +113,9 @@ A correction:
 ```
 
 ns values are strings, as everywhere (`params` keys ending in `_ns` too, and they are
-accepted as strings or integers). `ranges` is only in the single-correction answer.
+accepted as strings or integers). `ranges` is only in the single-correction answer. `stats`
+is null until the correction is computed. Refusals carry their code as the `detail` string
+(`{"detail": "stale"}`), like `window_too_large` elsewhere.
 
 ### Settings
 
@@ -134,7 +138,11 @@ accepted as strings or integers). `ranges` is only in the single-correction answ
    window; the repaired rows inside the window are written to `corrected/v{version}`, then
    `stats`, `base_version`, the ranges and `computed` are stored in one transaction. Any
    error of the core or the cache → `failed` with its first line. A correction that is not
-   `proposed` when the job starts is left alone.
+   `proposed` when the job starts is left alone. When another correction of the series is
+   approved between reading the base and storing the result, the correction is `failed`
+   ("the corrected layer changed while this was computed; propose it again"): its rows were
+   built on the older base. `computed_at` is set for `failed` too. A repair that leaves no
+   rows in its window writes nothing; the layer then has no rows there.
 3. **The corrected layer.** `corrected@v{n}` over `[a, b)` is the raw rows of `[a, b)` in
    which, for every approved correction of version ≤ n in ascending order, the rows inside
    its window are replaced by the rows of its version in the cache. `corrected@latest` is
@@ -143,8 +151,10 @@ accepted as strings or integers). `ranges` is only in the single-correction answ
 4. **Approve.** Only `computed` → `approved`; anything else is 409 `not_computed`. It is 409
    `stale` when a correction of the same series whose window overlaps was approved after
    this one was computed: its rows were built without that one; propose it again.
-   Approved corrections are therefore consistent in version order.
-5. **Reject.** `proposed` or `computed` → `rejected`; others 409 `already_decided`. A
+   Approved corrections are therefore consistent in version order. "After" is by the
+   database's clock, taken under a lock on the series row.
+5. **Reject.** `proposed` or `computed` → `rejected`; others (also `failed`, which is
+   already final) 409 `already_decided`. A
    rejected version stays in the cache and in the list and is never part of the layer.
 6. **Audit.** `correction.proposed`, `correction.approved`, `correction.rejected` are audit
    events with the actor, series, version and method.
@@ -154,14 +164,14 @@ accepted as strings or integers). `ranges` is only in the single-correction answ
 
 ## Acceptance criteria
 
-- [ ] The cache accepts `corrected/v{n}` and still refuses other layers with a slash.
-- [ ] `Lineage::ranges` splits at untouched samples and joins down to `max`.
-- [ ] `tabayyun_core.repair` returns the window's rows, the counts and the ranges.
-- [ ] Proposing validates through the core and allocates versions without gaps or doubles.
-- [ ] Computing writes `corrected/v{n}` and the ranges; raw rows and raw coverage are the
+- [x] The cache accepts `corrected/v{n}` and still refuses other layers with a slash.
+- [x] `Lineage::ranges` splits at untouched samples and joins down to `max`.
+- [x] `tabayyun_core.repair` returns the window's rows, the counts and the ranges.
+- [x] Proposing validates through the core and allocates versions without gaps or doubles.
+- [x] Computing writes `corrected/v{n}` and the ranges; raw rows and raw coverage are the
       same before and after.
-- [ ] A second correction is computed on top of the first approved one.
-- [ ] Approve, reject, `stale`, `not_computed`, `already_decided`, roles and tenancy behave
+- [x] A second correction is computed on top of the first approved one.
+- [x] Approve, reject, `stale`, `not_computed`, `already_decided`, roles and tenancy behave
       as above, and the three audit events are written.
 
 ## Test cases
@@ -178,7 +188,33 @@ accepted as strings or integers). `ranges` is only in the single-correction answ
 
 ## Implementation notes
 
-(filled in when done)
+- A version holds only the repaired rows of its window. The corrected layer is composed on
+  read (`services/corrections.overlay`): raw, then each approved window replaced in version
+  order. A full copy of the series per version would make a one-hour fix of a year of
+  one-second data cost a year of rows; the window's rows cost an hour.
+- `corrected_ranges` refers to values instead of copying them: before is the base layer in
+  the range (raw and approved versions never change), after is the version's rows. Ranges
+  are the lineage cut at samples the repair left alone, at most 1000 per correction.
+- Versions are allocated when proposed, as the architecture's data flow has it, so a
+  rejected or failed correction leaves a number that is never part of the layer. The
+  `stale` rule keeps approved, overlapping corrections consistent whatever order they were
+  proposed and approved in.
+- The row limit is checked twice: on the coverage estimate before the read, and on the rows
+  read, because coverage spreads a range's rows evenly.
+- No `coverage` is recorded for corrected versions; `corrections` says what each one holds.
+- Operations refuse unknown parameters now (`deny_unknown_fields` on the core's `Op`), so a
+  misspelt parameter is a 422 instead of a silently ignored one.
+- `validate_repair` tries the operation on a day of samples one interval apart with the
+  series' metadata: what depends on the metadata (a clamp without bounds on a series
+  without physical limits) is refused when proposed, not when computed.
+- Known limits:
+  - The cache keeps one row per timestamp (the newest write wins on read), so samples that
+    share a timestamp never reach a correction from the cache and `dedupe` has nothing to
+    do there. It matters once a read can return every stored row; not changed here.
+  - A correction whose worker dies while computing stays `proposed`; it can be rejected and
+    proposed again. There is no reaper yet (`TASKS.md`).
+- Not exercised: the job through a running worker (the tests run it inline and call
+  `compute` directly), and corrections on staging's data.
 
 ## Out of scope
 

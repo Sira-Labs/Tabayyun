@@ -11,7 +11,14 @@ All notable changes to this project are documented here. The format follows
   `dedupe`, `impute.linear`, `impute.like_day`, `align.resample` or `transform.affine` to a
   window of a series and returns a new frame plus a lineage with one row per sample that
   was changed, added or removed. The raw frame is only read, and the lineage gives the raw
-  samples back. Nothing uses the module yet; corrections (sprint 11) build on it.
+  samples back.
+- Corrections (spec 035): an editor proposes a repair for a window of a series with a reason
+  (`POST /api/series/{id}/corrections`), the worker computes it on top of the series'
+  approved corrections and stores the repaired window as the next version of the corrected
+  layer (`corrected/v{n}` in the cache), and an editor approves or rejects it. What a
+  correction changed is recorded as ranges with counts; the raw layer is never written. No
+  endpoint reads the corrected layer yet and there is no page for it: both follow in
+  sprint 11.
 
 ### Changed
 - Procrastinate 3.12 with migration 0019, which runs its three "pre" schema migrations: jobs
