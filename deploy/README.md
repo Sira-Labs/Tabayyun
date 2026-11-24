@@ -165,6 +165,10 @@ controls whether findings, metrics and scores become hypertables: `on` requires 
 extension, `off` never uses it (Apache-2-only mode, ADR-0003). Take a `pg_dump` before
 upgrading a production database.
 
+Migration 0019 (Procrastinate 3.12) builds an index on the job queue concurrently before its
+other steps; if the api stops during that build, its next start drops the unfinished index
+and builds it again.
+
 Migration 0018 fills `score_days` from `scores` in one statement inside the migration's
 transaction; on an installation with millions of scores the api's start takes that long once.
 

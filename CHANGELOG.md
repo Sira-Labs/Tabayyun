@@ -13,6 +13,13 @@ All notable changes to this project are documented here. The format follows
   was changed, added or removed. The raw frame is only read, and the lineage gives the raw
   samples back. Nothing uses the module yet; corrections (sprint 11) build on it.
 
+### Changed
+- Procrastinate 3.12 with migration 0019, which runs its three "pre" schema migrations: jobs
+  get a lock mode, a retry that collides with a queued job closes the running one instead
+  of keeping its lock, and the lock check of the job fetch has an index. The old defer
+  functions and the `(id, lock)` index stay until a later migration, so the worker of the
+  previous release keeps working while a deployment upgrades.
+
 ## [0.4.0] - 2026-11-22
 
 Sprint 10: suites, triage, alerts, overview. Quality is monitored continuously instead of

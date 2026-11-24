@@ -38,11 +38,25 @@ def _load(name: str):
     return module
 
 
-def test_procrastinate_migrations_since_the_snapshot_are_all_applied():
-    """Revision 0002 applies the 3.9.0 snapshot and 0011 the one migration shipped since.
+# Procrastinate's migrations since the 3.9.0 snapshot of revision 0002, and our copy of each.
+# None: not applied yet (see revision 0019 for why the 3.12 "post" steps wait).
+PROCRASTINATE_MIGRATIONS = {
+    "03.11.00_01_pre_fetch_job_skip_null_lock.sql": "procrastinate_3.11.0_fetch_job_skip_null_lock.sql",
+    "03.12.00_01_pre_add_lock_mode.sql": "procrastinate_3.12.0_01_add_lock_mode.sql",
+    "03.12.00_02_pre_retry_job_fail_on_queueing_lock_conflict.sql": (
+        "procrastinate_3.12.0_02_retry_job_fail_on_queueing_lock_conflict.sql"
+    ),
+    "03.12.00_03_pre_add_todo_doing_lock_index.sql": "procrastinate_3.12.0_03_add_todo_doing_lock_index.sql",
+    "03.12.00_50_post_add_lock_mode.sql": None,
+    "03.12.00_51_post_drop_id_lock_index.sql": None,
+}
+
+
+def test_procrastinate_migrations_since_the_snapshot_are_all_accounted_for():
+    """Revision 0002 applies the 3.9.0 snapshot, 0011 and 0019 the migrations shipped since.
 
     A Procrastinate upgrade that ships another migration file fails here: add a revision that
-    runs it, with a copy under `migrations/sql/`.
+    runs it, with a copy under `migrations/sql/`, or list it as waiting with the reason.
     """
     from importlib import resources
 
@@ -50,32 +64,27 @@ def test_procrastinate_migrations_since_the_snapshot_are_all_applied():
     since_snapshot = sorted(
         f.name for f in shipped.iterdir() if f.name.endswith(".sql") and f.name[:8] > "03.09.00"
     )
-    assert since_snapshot == ["03.11.00_01_pre_fetch_job_skip_null_lock.sql"]
-    ours = (MIGRATIONS_DIR / "sql" / "procrastinate_3.11.0_fetch_job_skip_null_lock.sql").read_text()
-    assert ours == shipped.joinpath(since_snapshot[0]).read_text()
+    assert since_snapshot == sorted(PROCRASTINATE_MIGRATIONS)
+    for name, copy in PROCRASTINATE_MIGRATIONS.items():
+        if copy is not None:
+            assert (MIGRATIONS_DIR / "sql" / copy).read_text() == shipped.joinpath(name).read_text(), name
 
 
-def test_procrastinate_schema_differs_from_the_snapshot_only_in_fetch_job():
-    """Outside `procrastinate_fetch_job_v2`, the installed schema is the 3.9.0 snapshot, and
-    the installed function is the one revision 0011 installs."""
-    from importlib import resources
-
-    m = _load("0011_procrastinate_3_11.py")
-    snapshot = (MIGRATIONS_DIR / "sql" / "procrastinate_schema_3.9.0.sql").read_text()
-    installed = resources.files("procrastinate.sql").joinpath("schema.sql").read_text()
-    old, new = m.function_block(snapshot), m.function_block(installed)
-    assert old != new
-    assert snapshot.replace(old, "") == installed.replace(new, "")
-    migration = m.MIGRATION_3_11.read_text()
-    assert m.function_block(
-        migration, "CREATE OR REPLACE FUNCTION procrastinate_fetch_job_v2("
-    ) == new.replace("CREATE FUNCTION", "CREATE OR REPLACE FUNCTION", 1)
+def test_0019_restores_the_functions_of_3_11_from_the_snapshot():
+    """The downgrade of 0019 finds each function it puts back, whole, in the 3.9.0 snapshot."""
+    m = _load("0019_procrastinate_3_12.py")
+    snapshot = m.SCHEMA_3_9.read_text()
+    for header in m.RESTORED_FROM_3_9:
+        block = m.function_block(snapshot, header)
+        assert block.startswith(header) and block.rstrip().endswith("$$;")
+        assert "lock_mode" not in block and "procrastinate_defer_jobs_v2" not in block
 
 
 def test_function_block_reports_a_missing_function():
     """A schema without the function is an error, not an empty downgrade."""
     import pytest
 
-    m = _load("0011_procrastinate_3_11.py")
-    with pytest.raises(ValueError, match="no complete function"):
-        m.function_block("CREATE TABLE x ();\n")
+    for name in ("0011_procrastinate_3_11.py", "0019_procrastinate_3_12.py"):
+        m = _load(name)
+        with pytest.raises(ValueError, match="no complete function"):
+            m.function_block("CREATE TABLE x ();\n", "CREATE FUNCTION procrastinate_fetch_job_v2(")
