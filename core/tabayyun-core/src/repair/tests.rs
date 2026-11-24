@@ -564,3 +564,51 @@ fn the_unrepaired_count_stops_at_the_largest_number() {
     let out = repair(&raw, Window::new(i64::MIN, i64::MAX), &Op::ImputeLinear { max_gap_ns: None }).unwrap();
     assert_eq!((out.unrepaired, out.lineage.ts.len()), (usize::MAX, 0));
 }
+
+#[test]
+fn ranges_split_at_untouched_samples() {
+    // Minutes 0..10, holes at 2, 3 and 7; minute 5 is clamped. Three runs: the gap 2..3, the
+    // sample at 5 and the gap at 7, each separated from the next by samples left alone.
+    let mut raw = at(&[0, 1, 4, 5, 6, 8, 9], &[1.0, 1.0, 1.0, 9.0, 1.0, 1.0, 1.0]);
+    raw.meta.expected_interval_ns = Some(MIN);
+    let filled = repair(&raw, w(0, 10), &Op::ImputeLinear { max_gap_ns: None }).unwrap();
+    let clamped = repair(&filled.frame, w(0, 10), &Op::Clamp { min: None, max: Some(2.0) }).unwrap();
+    let lineage = Lineage::diff(&raw, &clamped.frame);
+    let range = |start: i64, end: i64, changed, added| LineageRange {
+        start_ns: start * MIN,
+        end_ns: end * MIN + 1,
+        changed,
+        added,
+        removed: 0,
+    };
+    assert_eq!(
+        lineage.ranges(&clamped.frame.ts, 1000),
+        vec![range(2, 3, 0, 2), range(5, 5, 1, 0), range(7, 7, 0, 1)]
+    );
+    // Removed samples are not in the repaired frame; they still count and still join.
+    let doubled = at(&[0, 1, 1, 2, 5, 5], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    let deduped = repair(&doubled, w(0, 10), &Op::Dedupe { keep: Keep::First }).unwrap();
+    let ranges = deduped.lineage.ranges(&deduped.frame.ts, 1000);
+    assert_eq!(
+        ranges.iter().map(|r| (r.start_ns / MIN, r.removed)).collect::<Vec<_>>(),
+        vec![(1, 1), (5, 1)]
+    );
+    assert!(Lineage::diff(&raw, &raw).ranges(&raw.ts, 1000).is_empty());
+}
+
+#[test]
+fn ranges_join_down_to_the_limit() {
+    // Every second sample is clamped: 50 ranges of one sample each.
+    let ts: Vec<i64> = (0..100).collect();
+    let values: Vec<f64> = (0..100).map(|i| if i % 2 == 0 { 9.0 } else { 1.0 }).collect();
+    let out = repair(&at(&ts, &values), w(0, 100), &Op::Clamp { min: None, max: Some(2.0) }).unwrap();
+    assert_eq!(out.lineage.ranges(&out.frame.ts, 1000).len(), 50);
+    for max in [1, 7, 49, 50] {
+        let joined = out.lineage.ranges(&out.frame.ts, max);
+        assert!(joined.len() <= max, "{max}");
+        assert_eq!(joined.iter().map(|r| r.changed).sum::<usize>(), 50);
+        assert_eq!((joined[0].start_ns, joined[joined.len() - 1].end_ns), (0, 98 * MIN + 1));
+        assert!(joined.windows(2).all(|p| p[0].end_ns <= p[1].start_ns));
+    }
+    assert_eq!(out.lineage.ranges(&out.frame.ts, 0).len(), 1);
+}

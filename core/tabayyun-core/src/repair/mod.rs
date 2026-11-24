@@ -10,7 +10,7 @@ mod fill;
 mod lineage;
 mod ops;
 
-pub use lineage::{Action, Lineage};
+pub use lineage::{Action, Lineage, LineageRange};
 
 use crate::error::{Error, Result};
 use crate::finding::Window;
@@ -43,7 +43,7 @@ fn default_days() -> usize {
 /// A repair operation with its parameters. In JSON the method is the tag:
 /// `{"method": "clamp", "min": 0.0}`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "method")]
+#[serde(deny_unknown_fields, tag = "method")]
 pub enum Op {
     /// Every sample in the window becomes a null of bad quality.
     #[serde(rename = "mask")]

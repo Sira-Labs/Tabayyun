@@ -22,12 +22,14 @@ __all__ = [
     "compare_series",
     "downsample_m4",
     "profile",
+    "repair",
     "residual",
     "run_checks",
     "run_checks_multi",
     "scatter",
     "synth",
     "validate_configs",
+    "validate_repair",
     "__version__",
 ]
 
@@ -325,3 +327,43 @@ def scatter(
             quality_col,
         )
     )
+
+
+def repair(
+    table: Any,
+    meta: dict[str, Any],
+    start_ns: int,
+    end_ns: int,
+    op: dict[str, Any],
+    *,
+    ts_col: str = "ts",
+    value_col: str = "value",
+    quality_col: str | None = None,
+    max_ranges: int = 1000,
+) -> dict[str, Any]:
+    """Apply one repair operation to ``[start_ns, end_ns)`` of a series (specs 034, 035).
+
+    ``op`` names the method and its parameters, for example
+    ``{"method": "impute.linear", "max_gap_ns": 3_600_000_000_000}``. The table is only read.
+
+    Returns ``method``, ``unrepaired`` (holes and missing timestamps left as they were),
+    ``changed``, ``added`` and ``removed`` (samples that differ from the input), ``rows`` and
+    ``window`` (the repaired rows inside the window, a ``pyarrow.RecordBatch`` with ``ts``,
+    ``value`` and ``quality``), and ``ranges``: the touched timestamps as at most
+    ``max_ranges`` runs ``{start_ns, end_ns, changed, added, removed}``.
+
+    Raises ``ValueError`` for an unknown method, a refused parameter or an empty window.
+    """
+    out = dict(
+        _native.repair(
+            table, json.dumps(meta), start_ns, end_ns, json.dumps(op), ts_col, value_col, quality_col, max_ranges
+        )
+    )
+    out["ranges"] = json.loads(out["ranges"])
+    return out
+
+
+def validate_repair(meta: dict[str, Any], op: dict[str, Any]) -> None:
+    """Raise ``ValueError`` when ``op`` is unknown or refuses its parameters for a series with
+    the metadata ``meta`` (spec 035)."""
+    _native.validate_repair(json.dumps(meta), json.dumps(op))

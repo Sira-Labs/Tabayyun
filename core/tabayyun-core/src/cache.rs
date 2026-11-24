@@ -246,7 +246,7 @@ impl Cache {
     /// Write one series. The frame is sorted and de-duplicated first; each UTC month becomes
     /// one immutable object. An empty frame writes nothing.
     pub fn write(&self, layer: &str, source_id: &str, frame: &SeriesFrame) -> Result<WriteReport> {
-        check_segment("layer", layer)?;
+        check_layer(layer)?;
         check_segment("source_id", source_id)?;
         let (frame, _) = frame.normalized();
         let n = frame.len();
@@ -317,7 +317,7 @@ impl Cache {
         start_ns: i64,
         end_ns: i64,
     ) -> Result<(Vec<SeriesFrame>, ReadStats)> {
-        check_segment("layer", layer)?;
+        check_layer(layer)?;
         check_segment("source_id", source_id)?;
         let mut stats = ReadStats::default();
         let empty = |ids: &[&str]| {
@@ -420,6 +420,20 @@ struct Row {
     value: f64,
     quality: Quality,
     ingest_ts: Option<i64>,
+}
+
+/// A layer is one path segment (`raw`) or a version of the corrected layer, `corrected/v{n}`
+/// with n from 1 and no leading zero (ADR-0010).
+fn check_layer(layer: &str) -> Result<()> {
+    if let Some(version) = layer.strip_prefix("corrected/v") {
+        let plain =
+            !version.is_empty() && !version.starts_with('0') && version.bytes().all(|b| b.is_ascii_digit());
+        if plain && version.parse::<u32>().is_ok() {
+            return Ok(());
+        }
+        return Err(invalid("layer", format!("`{layer}` is not a version of the corrected layer")));
+    }
+    check_segment("layer", layer)
 }
 
 /// Path segments come from ids the API controls, but a `/` or `..` would escape the layout.
@@ -711,6 +725,28 @@ mod tests {
         assert_eq!(year_month(month_start_ns(2026, 13)), (2027, 1));
         assert_eq!(months_between(month_start_ns(2025, 11) + DAY, month_start_ns(2026, 2) + DAY).len(), 4);
         assert_eq!(months_between(month_start_ns(2026, 1), month_start_ns(2026, 2)), vec![(2026, 1)]);
+    }
+
+    #[test]
+    fn corrected_version_layers() {
+        let (_dir, cache) = temp_store();
+        let raw = hourly("series-a", jan15(), 48, 0.0);
+        let fixed = hourly("series-a", jan15() + DAY, 24, 100.0);
+        cache.write("raw", "src", &raw).unwrap();
+        let report = cache.write("corrected/v1", "src", &fixed).unwrap();
+        assert!(report.files.iter().all(|f| f.contains("corrected/v1/src/")));
+        let (s, e) = (jan15(), jan15() + 2 * DAY);
+        // A version holds what was written to it, and the raw layer is as it was.
+        let v1 = cache.read("corrected/v1", "src", &["series-a"], s, e).unwrap();
+        assert_eq!((v1[0].ts.clone(), v1[0].values.clone()), (fixed.ts.clone(), fixed.values.clone()));
+        assert!(cache.read("corrected/v2", "src", &["series-a"], s, e).unwrap()[0].is_empty());
+        assert_eq!(cache.read("raw", "src", &["series-a"], s, e).unwrap()[0].values, raw.values);
+        for layer in
+            ["corrected/v0", "corrected/v01", "corrected/v", "corrected/v1/x", "corrected/x", "a/b", ".."]
+        {
+            assert!(cache.write(layer, "src", &fixed).is_err(), "{layer}");
+            assert!(cache.read(layer, "src", &["series-a"], s, e).is_err(), "{layer}");
+        }
     }
 
     #[test]
