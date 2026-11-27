@@ -45,11 +45,15 @@ curve in the chart by switching the layer, with the raw one still the default.
 - `GET /api/compare/chart`, `GET /api/compare/scatter`,
 - `GET /api/series-groups/{group_id}/residual`.
 
-The answers of chart and profile keep their `layer` field (the name that was asked for) and
-get `layer_version`: the version that was read, null for raw and for a series without an
-approved correction. The compare answers get `layer` and, per series, `layer_version`. ETags
-include the version, so a client's cached raw answer is never taken for a corrected one and
-an approval changes the tag. Default windows, extents and the row estimate stay those of the
+Without `layer`, or with `layer=raw`, bodies and ETags are what they were. For another
+layer the answers say what was read: the chart adds `layer_version` to its `layer`; the
+profile adds `layer` and `layer_version`; the compare chart adds `layer` and
+`series[].layer_version`; the scatter adds `layer`, `x.layer_version` and
+`y.layer_version`; the residual adds `layer` and `layer_versions` (`{series id: version}`).
+A version is null for a series without an approved correction. The ETag of such an answer
+holds the name asked for, the version read and a mark of the approved corrections up to it
+(their number and the newest approval), so a cached raw answer is never taken for a
+corrected one and any approval that changes the layer changes the tag. Default windows, extents and the row estimate stay those of the
 raw layer's coverage; the limit of spec 025 is checked against it.
 
 ### Scores
@@ -86,28 +90,32 @@ approved (run in the request in inline mode).
    `corrected@latest` rows of that window, runs the checks on each with the series' metadata
    and baseline as a run would, and stores one `scores` row with `layer = 'corrected'`, the
    corrected result, `run_id` of that run, and `baseline` = the raw result; and the
-   `score_days` row of the layer `corrected`. No findings or metrics are stored for it.
-4. **Nothing to score.** A series that was never scored, a window with more rows than
-   `TABAYYUN_CORRECTION_MAX_ROWS`, or a cache error: no row is written, the reason is
+   `score_days` row of the layer `corrected`. No findings or metrics are stored for it. This
+   holds for a newest score from an upload run too (its window and checks are the run's).
+4. **Nothing to score.** A series that was never scored, a window without rows or with more
+   rows than `TABAYYUN_CORRECTION_MAX_ROWS` (by the coverage estimate, and by the rows
+   read), a cache error, or checks the core refuses: no row is written, the reason is
    logged, and the approval stands.
 5. **Version.** The row's version is the highest approved version when the rows were read
-   (`scores.baseline.version`); a later approval queues the job again and its row is newer.
+   (stored in `scores.baseline`, returned as the item's `version`); a later approval queues
+   the job again and its row is newer. `corrected_score` is the newest such row.
 6. **Raw is unchanged.** No raw score, finding or metric is written or changed by this job,
-   and the overview, the series list's score and the alerts keep reading the raw layer.
+   and the overview, the series' `latest_score`, run count and `last_run_at`, and the
+   alerts' previous score keep reading the raw layer.
 7. **Tenancy and roles** as for the routes today (viewer reads; other workspaces 404).
 
 ## Acceptance criteria
 
-- [ ] `layer` is parsed and refused as above on all five routes; without it the answers are
+- [x] `layer` is parsed and refused as above on all five routes; without it the answers are
       byte-identical to before.
-- [ ] Chart and profile of `corrected@latest` and `corrected@v{n}` show the corrected rows,
+- [x] Chart and profile of `corrected@latest` and `corrected@v{n}` show the corrected rows,
       with `layer_version` and an ETag that differs from the raw one.
-- [ ] Compare chart, scatter and residual read `corrected@latest` per series.
-- [ ] Approving a correction that fills a gap stores a `corrected` score higher than its
+- [x] Compare chart, scatter and residual read `corrected@latest` per series.
+- [x] Approving a correction that fills a gap stores a `corrected` score higher than its
       `baseline`, and the series answers `corrected_score` with both numbers.
-- [ ] A series without a score, and a window over the row limit, write nothing and the
+- [x] A series without a score, and a window over the row limit, write nothing and the
       approval succeeds.
-- [ ] Raw scores, findings and metrics are the same before and after the job.
+- [x] Raw scores, findings and metrics are the same before and after the job.
 
 ## Test cases
 
@@ -122,7 +130,30 @@ approved (run in the request in inline mode).
 
 ## Implementation notes
 
-(filled in when done)
+- The new fields appear only for a layer other than raw, so the default answers are byte
+  for byte what they were; the test `default_is_raw_and_unchanged` compares bodies and ETags
+  of all five routes before and after an approval.
+- `layer` is parsed by us (`services/layers.py`) on every route, also on chart and profile,
+  which took `Literal["raw"]` before: a bad name is now the same 422 everywhere, and it is
+  refused before the series is looked up.
+- A layer at a version can change without its number changing: a lower version elsewhere on
+  the series may be approved later. The ETag therefore carries a mark of the approved
+  corrections up to the version, not only the version.
+- Both layers are scored through `run_checks_multi` without groups, with the run's checks
+  that look at one series. For a series in no group the raw result is the run's own score;
+  for one in a group it is the like-for-like number, which is why it is stored as
+  `baseline` instead of read from the raw row.
+- A corrected score has its run's `run_id` and is newer than the run's raw score, so every
+  place that meant "the series' newest score" names the raw layer now: the series' stats
+  and the alerts' previous score, besides the overview, which did already.
+- Migration 0021 adds `scores.baseline` without rewriting the table. Its downgrade deletes
+  the `corrected` rows of `scores` and `score_days`: code before 0021 reads scores without
+  a layer in two places and would take them for raw ones.
+- Corrected reads carry `ts`, `value` and `quality`, no `ingest_ts`; nothing after the read
+  on these five routes uses it.
+- Not exercised: `rescore_corrected` through a running worker (the tests check the queued
+  job and call `rescoring.rescore`), the downgrade of 0021 on its own, the inline path's
+  database error, and all of this on staging's data.
 
 ## Out of scope
 

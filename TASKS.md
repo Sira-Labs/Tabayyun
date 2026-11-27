@@ -670,6 +670,19 @@ starts; the plan is the backlog until then.
         series' metadata before it is stored.
       - Refusals carry their code as the `detail` string, as `window_too_large` does.
       - Migration 0020; the Procrastinate post steps take a later number.
+- [x] **036 Layer reads and re-scoring** — `docs/specs/036-layer-reads-and-rescoring.md`
+      (S11-3, 27 Nov). Every criterion is met; the web's layer switch and the score pair on
+      the series page are S11-4.
+      - New fields appear only for a layer other than raw, so default answers and ETags are
+        unchanged byte for byte.
+      - `corrected@v{n}` only where one series is read; versions count per series.
+      - The corrected score carries the raw layer scored the same way (`scores.baseline`):
+        checks across series are left out of both, so the pair is like for like even for a
+        series in a group.
+      - Every "newest score of a series" names the raw layer now (series stats, alerts'
+        previous score), because a corrected score is newer and has the same run.
+      - Extents, default windows and the row estimate of a corrected read are the raw
+        layer's coverage; a correction that adds samples beyond it is read but not counted.
 - [ ] **Corrections, loose ends** (found with 035): a correction whose worker dies while
       computing stays `proposed` (it can be rejected and proposed again; a reaper like the
       runs' fits with the publish job, S11-5); the cache returns one row per timestamp, so
