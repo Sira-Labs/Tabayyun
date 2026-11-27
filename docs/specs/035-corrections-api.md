@@ -150,7 +150,9 @@ is null until the correction is computed. Refusals carry their code as the `deta
    reading it through the API is spec 036.)
 4. **Approve.** Only `computed` → `approved`; anything else is 409 `not_computed`. It is 409
    `stale` when a correction of the same series whose window overlaps was approved after
-   this one was computed: its rows were built without that one; propose it again.
+   this one was computed: its rows were built without that one; propose it again. It is
+   also `stale` when an overlapping correction with a higher version is approved already,
+   whenever this one was computed: the layer would lay that one over it.
    Approved corrections are therefore consistent in version order. "After" is by the
    database's clock, taken under a lock on the series row.
 5. **Reject.** `proposed` or `computed` → `rejected`; others (also `failed`, which is
@@ -183,7 +185,7 @@ is null until the correction is computed. Refusals carry their code as the `deta
   `context_margin_per_operation`, `params_ns_as_strings`.
 - **API, database** (`api/tests/db/test_corrections_api.py`): `propose_compute_approve`,
   `raw_is_untouched`, `second_correction_builds_on_the_first`, `rejected_is_not_in_the_layer`,
-  `stale_approval`, `validation`, `window_too_large`, `roles_and_tenancy`, `audit_events`,
+  `stale_approval`, `a_lower_version_under_an_approved_one_is_stale`, `validation`, `window_too_large`, `roles_and_tenancy`, `audit_events`,
   `versions_are_allocated_once`.
 
 ## Implementation notes
@@ -207,6 +209,15 @@ is null until the correction is computed. Refusals carry their code as the `deta
 - `validate_repair` tries the operation on a day of samples one interval apart with the
   series' metadata: what depends on the metadata (a clamp without bounds on a series
   without physical limits) is refused when proposed, not when computed.
+- From the review:
+  - Approval also looks at version numbers, not only at times: a lower version computed
+    after a higher, overlapping one was approved would be approved and then have no effect.
+  - `mask` is a struct variant in the core, because serde ignores further fields of a unit
+    variant; `{"method": "mask", "unexpected": 1}` is refused like any unknown parameter.
+  - `validate_repair` tries an operation on fewer samples when the interval is so long that
+    a day of them would end beyond the last timestamp.
+  - The overview's day is a dependency of its route (`routers/overview.today`), which its
+    tests hold still: the suite failed in CI when it ran across midnight UTC.
 - Known limits:
   - The cache keeps one row per timestamp (the newest write wins on read), so samples that
     share a timestamp never reach a correction from the cache and `dedupe` has nothing to

@@ -325,6 +325,7 @@ def test_repair_refuses_a_bad_operation():
     for op, message in [
         ({"method": "smooth"}, "unknown variant"),
         ({"method": "clamp", "minimum": 1.0}, "unknown field"),
+        ({"method": "mask", "unexpected": 1}, "unknown field"),
         ({"method": "transform.affine", "scale": 0.0}, "scale"),
         ({"method": "impute.like_day", "days": 0}, "days"),
         ({"method": "align.resample"}, "grid_ns"),
@@ -345,5 +346,7 @@ def test_repair_refuses_a_bad_operation():
         {"method": "transform.affine", "scale": 2.0, "offset": 1.0},
     ]:
         tc.validate_repair(meta, op)
+    # An interval of more than a century: the samples the operation is tried on still fit.
+    tc.validate_repair({"id": "s", "expected_interval_ns": 4 * 10**18}, {"method": "mask"})
     # Without metadata there is still an interval to try the operation on.
     tc.validate_repair({"id": "s"}, {"method": "impute.like_day"})

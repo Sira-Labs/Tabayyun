@@ -46,8 +46,10 @@ fn default_days() -> usize {
 #[serde(deny_unknown_fields, tag = "method")]
 pub enum Op {
     /// Every sample in the window becomes a null of bad quality.
+    // A struct variant: serde ignores further fields of a unit variant, and an operation
+    // refuses parameters it does not know.
     #[serde(rename = "mask")]
-    Mask,
+    Mask {},
     /// Values below `min` become `min`, values above `max` become `max`, as estimated. A
     /// bound that is not given is the series' physical limit.
     #[serde(rename = "clamp")]
@@ -101,7 +103,7 @@ impl Op {
     /// The method's name, as corrections store it.
     pub fn method(&self) -> &'static str {
         match self {
-            Op::Mask => "mask",
+            Op::Mask {} => "mask",
             Op::Clamp { .. } => "clamp",
             Op::Dedupe { .. } => "dedupe",
             Op::ImputeLinear { .. } => "impute.linear",
@@ -173,7 +175,7 @@ pub fn repair(raw: &SeriesFrame, window: Window, op: &Op) -> Result<Repaired> {
     let lo = raw.ts.partition_point(|&t| t < window.start);
     let hi = raw.ts.partition_point(|&t| t < window.end);
     let patch = match op {
-        Op::Mask => ops::mask(raw, lo, hi),
+        Op::Mask {} => ops::mask(raw, lo, hi),
         Op::Clamp { min, max } => ops::clamp(raw, lo, hi, *min, *max)?,
         Op::Dedupe { keep } => ops::dedupe(raw, lo, hi, *keep),
         Op::TransformAffine { scale, offset } => ops::affine(raw, lo, hi, *scale, *offset)?,

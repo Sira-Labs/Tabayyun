@@ -587,8 +587,9 @@ fn validate_repair(meta_json: &str, op_json: &str) -> PyResult<()> {
     let op: Op = serde_json::from_str(op_json).map_err(err)?;
     let meta: SeriesMeta = serde_json::from_str(meta_json).map_err(err)?;
     let step = meta.expected_interval_ns.filter(|ns| *ns > 0).unwrap_or(60_000_000_000);
-    // A day of samples, so that an operation on a coarser grid still has whole bins.
-    let n = (86_400_000_000_000 / step).clamp(3, 1440);
+    // A day of samples, so that an operation on a coarser grid still has whole bins; fewer
+    // for an interval so long that the window's end would not be a timestamp any more.
+    let n = (86_400_000_000_000 / step).clamp(3, 1440).min(i64::MAX / step);
     let ts: Vec<i64> = (0..n).map(|i| i * step).collect();
     let frame = SeriesFrame::with_default_quality(meta, ts, vec![0.0; n as usize]).map_err(err)?;
     apply_repair(&frame, Window::new(0, n * step), &op).map(|_| ()).map_err(err)

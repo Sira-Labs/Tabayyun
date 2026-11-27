@@ -270,6 +270,28 @@ async def test_stale_approval(lab):
     assert latest[20] is None and latest[30] == 30.0
 
 
+async def test_a_lower_version_under_an_approved_one_is_stale(lab):
+    """A correction computed after a higher, overlapping version was approved has that one in
+    its base, yet the layer would lay the higher one over it: approving it is refused."""
+    async with lab.client() as c:
+        low = await lab.propose(c, "transform.affine", 0, 5, offset=1)
+        high = await lab.propose(c, "transform.affine", 3, 8, offset=10)
+        elsewhere = await lab.propose(c, "transform.affine", 20, 22, offset=1)
+        assert (await c.post(f"/api/corrections/{high['id']}/approve")).status_code == 200
+        # As if the worker had reached the lower versions only now, after that approval.
+        lab.env.sql(
+            "UPDATE corrections SET computed_at = clock_timestamp() WHERE id IN (:low, :elsewhere)",
+            low=low["id"],
+            elsewhere=elsewhere["id"],
+        )
+        stale = await c.post(f"/api/corrections/{low['id']}/approve")
+        assert (stale.status_code, stale.json()) == (409, {"detail": "stale"})
+        # A lower version whose window does not touch the approved one is unaffected.
+        assert (await c.post(f"/api/corrections/{elsewhere['id']}/approve")).status_code == 200
+    latest = dict((h, v) for h, v, _ in await lab.layer("latest"))
+    assert [latest[h] for h in (0, 3, 7, 20)] == [0.0, 13.0, 17.0, 21.0]
+
+
 async def test_validation(lab):
     """A refused operation is 422 with the core's message; windows, reasons, findings, ids,
     filters and cursors are checked."""
@@ -289,6 +311,7 @@ async def test_validation(lab):
         assert await refused(method="dedupe", params={"keep": "middle"})
         assert "max_gap_ns" in await refused(method="impute.linear", params={"max_gap_ns": "1h"})
         assert "method" in await refused(params={"method": "clamp"})
+        assert "unknown field" in await refused(params={"unexpected": 1})
         assert "later than from" in await refused(**{"from": at(2), "to": at(2)})
         assert "from" in await refused(**{"from": "2026-01-01T00:00:00Z"})
         assert "to" in await refused(to=str(2**63))

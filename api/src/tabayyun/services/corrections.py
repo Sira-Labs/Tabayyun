@@ -25,7 +25,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import structlog
 import tabayyun_core
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tabayyun.authz.scope import Scope
@@ -675,7 +675,8 @@ async def approve(
     Raises:
         NotComputedError: the correction is in any other status.
         StaleError: an overlapping correction of the series was approved after this one was
-            computed, so its rows were built without that one.
+            computed, so its rows were built without that one; or one with a higher version
+            is approved already, which the layer would lay over this one.
     """
     await _locked(session, correction)
     if correction.status != "computed":
@@ -688,12 +689,12 @@ async def approve(
             Correction.status == "approved",
             Correction.window_start_ns < correction.window_end_ns,
             Correction.window_end_ns > correction.window_start_ns,
-            Correction.decided_at > correction.computed_at,
+            or_(Correction.decided_at > correction.computed_at, Correction.version > correction.version),
         )
         .limit(1)
     )
     if newer is not None:
-        raise StaleError(f"version {newer} was approved after this one was computed")
+        raise StaleError(f"version {newer} was approved; this one was built without it or lies under it")
     return await _decide(session, correction, "approved", user_id, note)
 
 

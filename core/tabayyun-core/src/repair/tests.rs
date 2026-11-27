@@ -51,7 +51,7 @@ fn rows(l: &Lineage) -> Vec<(i64, Action, String, String)> {
 #[test]
 fn mask_nulls_the_window_and_nothing_else() {
     let raw = frame(&[1.0, 2.0, 3.0, 4.0, 5.0]);
-    let out = repair(&raw, w(1, 3), &Op::Mask).unwrap();
+    let out = repair(&raw, w(1, 3), &Op::Mask {}).unwrap();
     assert_eq!(out.method, "mask");
     assert_eq!(shown(&out.frame.values), shown(&[1.0, NAN, NAN, 4.0, 5.0]));
     assert_eq!(out.frame.quality, vec![G, B, B, G, G]);
@@ -63,7 +63,7 @@ fn mask_nulls_the_window_and_nothing_else() {
     assert_eq!(out.lineage.quality_before, vec![Some(G), Some(G)]);
     assert_eq!(out.lineage.quality_after, vec![Some(B), Some(B)]);
     // Masking what is masked already changes nothing.
-    let again = repair(&out.frame, w(1, 3), &Op::Mask).unwrap();
+    let again = repair(&out.frame, w(1, 3), &Op::Mask {}).unwrap();
     assert!(again.lineage.is_empty() && canonical(&again.frame) == canonical(&out.frame));
 }
 
@@ -278,14 +278,14 @@ fn operations_read_from_json_and_name_their_method() {
 #[test]
 fn invalid_frames_and_windows_are_errors() {
     let raw = frame(&[1.0, 2.0]);
-    assert!(repair(&raw, w(1, 1), &Op::Mask).is_err());
-    assert!(repair(&raw, w(2, 1), &Op::Mask).is_err());
+    assert!(repair(&raw, w(1, 1), &Op::Mask {}).is_err());
+    assert!(repair(&raw, w(2, 1), &Op::Mask {}).is_err());
     let unsorted = at(&[1, 0], &[1.0, 2.0]);
-    assert!(repair(&unsorted, w(0, 2), &Op::Mask).is_err());
+    assert!(repair(&unsorted, w(0, 2), &Op::Mask {}).is_err());
     // An empty frame and a window without samples are fine.
     let empty = frame(&[]);
-    assert!(repair(&empty, w(0, 5), &Op::Mask).unwrap().lineage.is_empty());
-    assert!(repair(&raw, w(5, 9), &Op::Mask).unwrap().lineage.is_empty());
+    assert!(repair(&empty, w(0, 5), &Op::Mask {}).unwrap().lineage.is_empty());
+    assert!(repair(&raw, w(5, 9), &Op::Mask {}).unwrap().lineage.is_empty());
 }
 
 #[test]
@@ -443,7 +443,7 @@ fn many_samples_on_one_timestamp_are_matched_in_one_pass() {
 
 fn any_op() -> impl Strategy<Value = Op> {
     prop_oneof![
-        Just(Op::Mask),
+        Just(Op::Mask {}),
         (-50.0..50.0f64, 0.0..60.0f64)
             .prop_map(|(min, width)| Op::Clamp { min: Some(min), max: Some(min + width) }),
         prop_oneof![Just(Keep::First), Just(Keep::Last), Just(Keep::Mean)]
