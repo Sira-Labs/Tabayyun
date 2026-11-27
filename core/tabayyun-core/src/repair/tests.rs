@@ -51,7 +51,7 @@ fn rows(l: &Lineage) -> Vec<(i64, Action, String, String)> {
 #[test]
 fn mask_nulls_the_window_and_nothing_else() {
     let raw = frame(&[1.0, 2.0, 3.0, 4.0, 5.0]);
-    let out = repair(&raw, w(1, 3), &Op::Mask).unwrap();
+    let out = repair(&raw, w(1, 3), &Op::Mask {}).unwrap();
     assert_eq!(out.method, "mask");
     assert_eq!(shown(&out.frame.values), shown(&[1.0, NAN, NAN, 4.0, 5.0]));
     assert_eq!(out.frame.quality, vec![G, B, B, G, G]);
@@ -63,7 +63,7 @@ fn mask_nulls_the_window_and_nothing_else() {
     assert_eq!(out.lineage.quality_before, vec![Some(G), Some(G)]);
     assert_eq!(out.lineage.quality_after, vec![Some(B), Some(B)]);
     // Masking what is masked already changes nothing.
-    let again = repair(&out.frame, w(1, 3), &Op::Mask).unwrap();
+    let again = repair(&out.frame, w(1, 3), &Op::Mask {}).unwrap();
     assert!(again.lineage.is_empty() && canonical(&again.frame) == canonical(&out.frame));
 }
 
@@ -278,14 +278,14 @@ fn operations_read_from_json_and_name_their_method() {
 #[test]
 fn invalid_frames_and_windows_are_errors() {
     let raw = frame(&[1.0, 2.0]);
-    assert!(repair(&raw, w(1, 1), &Op::Mask).is_err());
-    assert!(repair(&raw, w(2, 1), &Op::Mask).is_err());
+    assert!(repair(&raw, w(1, 1), &Op::Mask {}).is_err());
+    assert!(repair(&raw, w(2, 1), &Op::Mask {}).is_err());
     let unsorted = at(&[1, 0], &[1.0, 2.0]);
-    assert!(repair(&unsorted, w(0, 2), &Op::Mask).is_err());
+    assert!(repair(&unsorted, w(0, 2), &Op::Mask {}).is_err());
     // An empty frame and a window without samples are fine.
     let empty = frame(&[]);
-    assert!(repair(&empty, w(0, 5), &Op::Mask).unwrap().lineage.is_empty());
-    assert!(repair(&raw, w(5, 9), &Op::Mask).unwrap().lineage.is_empty());
+    assert!(repair(&empty, w(0, 5), &Op::Mask {}).unwrap().lineage.is_empty());
+    assert!(repair(&raw, w(5, 9), &Op::Mask {}).unwrap().lineage.is_empty());
 }
 
 #[test]
@@ -443,7 +443,7 @@ fn many_samples_on_one_timestamp_are_matched_in_one_pass() {
 
 fn any_op() -> impl Strategy<Value = Op> {
     prop_oneof![
-        Just(Op::Mask),
+        Just(Op::Mask {}),
         (-50.0..50.0f64, 0.0..60.0f64)
             .prop_map(|(min, width)| Op::Clamp { min: Some(min), max: Some(min + width) }),
         prop_oneof![Just(Keep::First), Just(Keep::Last), Just(Keep::Mean)]
@@ -563,4 +563,52 @@ fn the_unrepaired_count_stops_at_the_largest_number() {
     raw.meta.expected_interval_ns = Some(1);
     let out = repair(&raw, Window::new(i64::MIN, i64::MAX), &Op::ImputeLinear { max_gap_ns: None }).unwrap();
     assert_eq!((out.unrepaired, out.lineage.ts.len()), (usize::MAX, 0));
+}
+
+#[test]
+fn ranges_split_at_untouched_samples() {
+    // Minutes 0..10, holes at 2, 3 and 7; minute 5 is clamped. Three runs: the gap 2..3, the
+    // sample at 5 and the gap at 7, each separated from the next by samples left alone.
+    let mut raw = at(&[0, 1, 4, 5, 6, 8, 9], &[1.0, 1.0, 1.0, 9.0, 1.0, 1.0, 1.0]);
+    raw.meta.expected_interval_ns = Some(MIN);
+    let filled = repair(&raw, w(0, 10), &Op::ImputeLinear { max_gap_ns: None }).unwrap();
+    let clamped = repair(&filled.frame, w(0, 10), &Op::Clamp { min: None, max: Some(2.0) }).unwrap();
+    let lineage = Lineage::diff(&raw, &clamped.frame);
+    let range = |start: i64, end: i64, changed, added| LineageRange {
+        start_ns: start * MIN,
+        end_ns: end * MIN + 1,
+        changed,
+        added,
+        removed: 0,
+    };
+    assert_eq!(
+        lineage.ranges(&clamped.frame.ts, 1000),
+        vec![range(2, 3, 0, 2), range(5, 5, 1, 0), range(7, 7, 0, 1)]
+    );
+    // Removed samples are not in the repaired frame; they still count and still join.
+    let doubled = at(&[0, 1, 1, 2, 5, 5], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    let deduped = repair(&doubled, w(0, 10), &Op::Dedupe { keep: Keep::First }).unwrap();
+    let ranges = deduped.lineage.ranges(&deduped.frame.ts, 1000);
+    assert_eq!(
+        ranges.iter().map(|r| (r.start_ns / MIN, r.removed)).collect::<Vec<_>>(),
+        vec![(1, 1), (5, 1)]
+    );
+    assert!(Lineage::diff(&raw, &raw).ranges(&raw.ts, 1000).is_empty());
+}
+
+#[test]
+fn ranges_join_down_to_the_limit() {
+    // Every second sample is clamped: 50 ranges of one sample each.
+    let ts: Vec<i64> = (0..100).collect();
+    let values: Vec<f64> = (0..100).map(|i| if i % 2 == 0 { 9.0 } else { 1.0 }).collect();
+    let out = repair(&at(&ts, &values), w(0, 100), &Op::Clamp { min: None, max: Some(2.0) }).unwrap();
+    assert_eq!(out.lineage.ranges(&out.frame.ts, 1000).len(), 50);
+    for max in [1, 7, 49, 50] {
+        let joined = out.lineage.ranges(&out.frame.ts, max);
+        assert!(joined.len() <= max, "{max}");
+        assert_eq!(joined.iter().map(|r| r.changed).sum::<usize>(), 50);
+        assert_eq!((joined[0].start_ns, joined[joined.len() - 1].end_ns), (0, 98 * MIN + 1));
+        assert!(joined.windows(2).all(|p| p[0].end_ns <= p[1].start_ns));
+    }
+    assert_eq!(out.lineage.ranges(&out.frame.ts, 0).len(), 1);
 }

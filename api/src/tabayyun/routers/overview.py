@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -17,6 +17,11 @@ router = APIRouter(prefix="/api/overview", tags=["overview"])
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
+def today() -> date:
+    """The UTC day a request is answered on; a dependency, so a test can hold the day still."""
+    return datetime.now(UTC).date()
+
+
 def _refuse(field: str, message: str) -> HTTPException:
     return HTTPException(status_code=422, detail=[{"field": field, "message": message}])
 
@@ -25,6 +30,7 @@ def _refuse(field: str, message: str) -> HTTPException:
 async def get_overview(
     session: SessionDep,
     scope: ReadScope,
+    on: Annotated[date, Depends(today)],
     days: Annotated[int, Query()] = overview_service.DEFAULT_WINDOW,
     asset: Annotated[str | None, Query()] = None,
     source: Annotated[str | None, Query()] = None,
@@ -43,4 +49,4 @@ async def get_overview(
         except ValueError as exc:
             raise _refuse("source", "must be a source id") from exc
     filters = overview_service.Filters(days=days, asset=prefix, source=source_id)
-    return await overview_service.overview(session, scope, filters, today=datetime.now(UTC).date())
+    return await overview_service.overview(session, scope, filters, today=on)

@@ -18,6 +18,13 @@ import tabayyun_core
 from tabayyun.settings import Settings
 
 RAW_LAYER = "raw"
+# Columns of a corrected-layer version: no ingest time, the rows are computed.
+LAYER_COLUMNS = ("ts", "value", "quality")
+
+
+def corrected_layer(version: int) -> str:
+    """The cache layer of a corrected version (spec 035)."""
+    return f"corrected/v{version}"
 
 
 def store_config(settings: Settings) -> dict[str, Any]:
@@ -128,3 +135,40 @@ class RunCache:
         except Exception as exc:  # noqa: BLE001
             raise _cache_error(exc) from exc
         return {sid: b for sid, b in batches.items() if b.num_rows > 0}
+
+    def write_layer(self, *, layer: str, source_id: str, series_id: str, batch: pa.RecordBatch) -> CacheWrite:
+        """Write rows (`ts`, `value`, `quality`) of one series to a corrected layer; blocking.
+
+        Raises:
+            ValueError: `layer` is the raw layer, which only `write_series` writes.
+            CacheError: the store cannot be opened or the write failed, whatever the cause.
+        """
+        if layer == RAW_LAYER:
+            raise ValueError("write_layer does not write the raw layer")
+        try:
+            report = self._open().write(layer, source_id, batch, {"id": series_id}, quality_col="quality")
+        # As in `write_series`: whatever the core raises is one line for the caller to store.
+        except Exception as exc:  # noqa: BLE001
+            raise _cache_error(exc) from exc
+        return CacheWrite(
+            rows=int(report["rows"]),
+            files=len(report["files"]),
+            start_ns=int(report["start_ns"]),
+            end_ns=int(report["end_ns"]),
+        )
+
+    def read_layer(
+        self, *, layer: str, source_id: str, series_id: str, start_ns: int, end_ns: int
+    ) -> pa.RecordBatch | None:
+        """Rows of one series in any layer over `[start_ns, end_ns)`, None without rows; blocking.
+
+        Raises:
+            CacheError: the store cannot be opened or read, whatever the cause.
+        """
+        try:
+            batches = self._open().read(layer, source_id, [series_id], start_ns, end_ns)
+        # As in `read_series`.
+        except Exception as exc:  # noqa: BLE001
+            raise _cache_error(exc) from exc
+        batch = batches.get(series_id)
+        return batch if batch is not None and batch.num_rows > 0 else None

@@ -50,6 +50,17 @@ pub struct Lineage {
 
 /// Two lineages are equal when their rows are; an absent value equals an absent value, which
 /// the NaN that stands for it would not.
+/// A run of timestamps a repair touched, with no untouched sample among them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct LineageRange {
+    pub start_ns: i64,
+    /// The last touched timestamp plus one.
+    pub end_ns: i64,
+    pub changed: usize,
+    pub added: usize,
+    pub removed: usize,
+}
+
 impl PartialEq for Lineage {
     fn eq(&self, other: &Self) -> bool {
         let values = |a: &[f64], b: &[f64]| {
@@ -153,6 +164,46 @@ impl Lineage {
         self.after.push(after.map_or(f64::NAN, |s| s.0));
         self.quality_before.push(before.map(|s| s.1));
         self.quality_after.push(after.map(|s| s.1));
+    }
+
+    /// The lineage as runs of touched timestamps (spec 035). `frame_ts` are the repaired
+    /// frame's timestamps, sorted: two consecutive lineage timestamps are in one range unless
+    /// one of them lies strictly between, which is a sample the repair left alone. More than
+    /// `max` ranges are joined with their neighbours, evenly, so that at most `max` remain.
+    pub fn ranges(&self, frame_ts: &[i64], max: usize) -> Vec<LineageRange> {
+        let mut ranges: Vec<LineageRange> = Vec::new();
+        for (i, &t) in self.ts.iter().enumerate() {
+            let separated = i > 0 && {
+                let previous = self.ts[i - 1];
+                let next = frame_ts.partition_point(|&u| u <= previous);
+                frame_ts.get(next).is_some_and(|&u| u < t)
+            };
+            if i == 0 || separated {
+                ranges.push(LineageRange { start_ns: t, end_ns: t, changed: 0, added: 0, removed: 0 });
+            }
+            let range = ranges.last_mut().expect("a range was pushed for the first row");
+            range.end_ns = t.saturating_add(1);
+            match self.action[i] {
+                Action::Changed => range.changed += 1,
+                Action::Added => range.added += 1,
+                Action::Removed => range.removed += 1,
+            }
+        }
+        let max = max.max(1);
+        if ranges.len() <= max {
+            return ranges;
+        }
+        let per = ranges.len().div_ceil(max);
+        ranges
+            .chunks(per)
+            .map(|chunk| LineageRange {
+                start_ns: chunk[0].start_ns,
+                end_ns: chunk[chunk.len() - 1].end_ns,
+                changed: chunk.iter().map(|r| r.changed).sum(),
+                added: chunk.iter().map(|r| r.added).sum(),
+                removed: chunk.iter().map(|r| r.removed).sum(),
+            })
+            .collect()
     }
 
     /// The difference between two frames that are sorted by time.

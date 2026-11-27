@@ -14,6 +14,7 @@ from tabayyun.db import for_org
 from tabayyun.db.models import DEFAULT_ORG_ID
 from tabayyun.jobs import app, runtime
 from tabayyun.jobs.names import (
+    APPLY_REPAIR_TASK,
     CHECK_SOURCE_TASK,
     DELIVER_ALERT_TASK,
     FETCH_QUEUE,
@@ -35,7 +36,7 @@ from tabayyun.jobs.names import (
     SEND_INVITATION_TASK,
 )
 from tabayyun.mail import MailError, SmtpConfig
-from tabayyun.services import baselines, execution, fetches, ingest, rate_limits, suites, triage
+from tabayyun.services import baselines, corrections, execution, fetches, ingest, rate_limits, suites, triage
 from tabayyun.services import runs as runs_service
 from tabayyun.services.admin import invitations
 from tabayyun.settings import get_settings
@@ -237,3 +238,14 @@ async def requeue_stuck_alerts(timestamp: int) -> None:
     requeued = await alert_delivery.requeue_stuck(runtime.session_factory())
     if requeued:
         log.warning("alerts.requeued", count=requeued, tick=timestamp)
+
+
+@app.task(queue=RUNS_QUEUE, name=APPLY_REPAIR_TASK, retry=False)
+async def apply_repair(correction_id: str, org_id: str) -> None:
+    """Compute one proposed correction (spec 035); a failure is recorded on it, never retried."""
+    await corrections.compute(
+        for_org(runtime.session_factory(), uuid.UUID(org_id)),
+        uuid.UUID(correction_id),
+        runtime.run_cache(),
+        get_settings().correction_max_rows,
+    )

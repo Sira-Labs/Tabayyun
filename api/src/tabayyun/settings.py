@@ -146,6 +146,9 @@ class Settings(BaseSettings):
     baseline_max_rows: int = Field(
         default=5_000_000, ge=1, description="Raw rows one baseline profile may read (spec 028)."
     )
+    correction_max_rows: int = Field(
+        default=5_000_000, ge=1, description="Rows one correction may read (spec 035)."
+    )
     file_sources_root: str | None = Field(
         default=None,
         description="Folder `csv_dir` sources read under (spec 026); unset turns them off.",

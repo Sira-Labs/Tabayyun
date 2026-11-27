@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use tabayyun_core::cache::{catch_panic, Cache, StoreConfig};
 use tabayyun_core::downsample::{gap_breaks, m4, m4_window, quality_runs, window_stats};
 use tabayyun_core::frame::modal_interval;
+use tabayyun_core::repair::{repair as apply_repair, Action, Op};
 use tabayyun_core::residual::{residual as group_residual, residual_chart};
 use tabayyun_core::scatter::scatter as pair_scatter;
 use tabayyun_core::synth::{generate, inject, Rng, SynthSpec};
@@ -528,6 +529,72 @@ fn synth<'py>(
     PyRecordBatch::new(batch).into_pyarrow(py)
 }
 
+/// Apply one repair operation to `[start_ns, end_ns)` of a series (specs 034 and 035).
+///
+/// `op_json` is the operation, `{"method": "impute.linear", "max_gap_ns": 3600000000000}`.
+/// The rows are sorted by time first; samples that share a timestamp stay. Returns a dict
+/// with `method`, `unrepaired`, the counts `changed`, `added`, `removed`, `rows` (of the
+/// window after the repair), `ranges` (JSON: the touched timestamps as at most `max_ranges`
+/// runs) and `window`, the repaired rows inside the window as a `pyarrow.RecordBatch`.
+#[pyfunction]
+#[pyo3(signature = (data, meta_json, start_ns, end_ns, op_json, ts_col="ts", value_col="value", quality_col=None, max_ranges=1000))]
+#[allow(clippy::too_many_arguments)]
+fn repair<'py>(
+    py: Python<'py>,
+    data: &Bound<'_, PyAny>,
+    meta_json: &str,
+    start_ns: i64,
+    end_ns: i64,
+    op_json: &str,
+    ts_col: &str,
+    value_col: &str,
+    quality_col: Option<&str>,
+    max_ranges: usize,
+) -> PyResult<Bound<'py, PyDict>> {
+    let op: Op = serde_json::from_str(op_json).map_err(err)?;
+    let frame = frame_from_py(data, meta_json, ts_col, value_col, quality_col, None)?;
+    let (repaired, window, ranges) = py.detach(move || {
+        let frame = sorted_by_time(frame)?;
+        let repaired = apply_repair(&frame, Window::new(start_ns, end_ns), &op).map_err(err)?;
+        let ts = &repaired.frame.ts;
+        let (lo, hi) = (ts.partition_point(|&t| t < start_ns), ts.partition_point(|&t| t < end_ns));
+        let window = SeriesFrame::new(
+            repaired.frame.meta.clone(),
+            ts[lo..hi].to_vec(),
+            repaired.frame.values[lo..hi].to_vec(),
+            repaired.frame.quality[lo..hi].to_vec(),
+        )
+        .map_err(err)?;
+        let ranges = repaired.lineage.ranges(ts, max_ranges);
+        Ok::<_, PyErr>((repaired, window, ranges))
+    })?;
+    let out = PyDict::new(py);
+    out.set_item("method", repaired.method)?;
+    out.set_item("unrepaired", repaired.unrepaired)?;
+    out.set_item("changed", repaired.lineage.count(Action::Changed))?;
+    out.set_item("added", repaired.lineage.count(Action::Added))?;
+    out.set_item("removed", repaired.lineage.count(Action::Removed))?;
+    out.set_item("rows", window.len())?;
+    out.set_item("ranges", serde_json::to_string(&ranges).map_err(err)?)?;
+    out.set_item("window", PyRecordBatch::new(window.to_record_batch().map_err(err)?).into_pyarrow(py)?)?;
+    Ok(out)
+}
+
+/// Raise `ValueError` when an operation is unknown or refuses its parameters for a series
+/// with this metadata (spec 035). The operation runs on three samples one interval apart.
+#[pyfunction]
+fn validate_repair(meta_json: &str, op_json: &str) -> PyResult<()> {
+    let op: Op = serde_json::from_str(op_json).map_err(err)?;
+    let meta: SeriesMeta = serde_json::from_str(meta_json).map_err(err)?;
+    let step = meta.expected_interval_ns.filter(|ns| *ns > 0).unwrap_or(60_000_000_000);
+    // A day of samples, so that an operation on a coarser grid still has whole bins; fewer
+    // for an interval so long that the window's end would not be a timestamp any more.
+    let n = (86_400_000_000_000 / step).clamp(3, 1440).min(i64::MAX / step);
+    let ts: Vec<i64> = (0..n).map(|i| i * step).collect();
+    let frame = SeriesFrame::with_default_quality(meta, ts, vec![0.0; n as usize]).map_err(err)?;
+    apply_repair(&frame, Window::new(0, n * step), &op).map(|_| ()).map_err(err)
+}
+
 /// Parquet cache on local disk or S3 (spec 006). One instance per process is enough; it owns
 /// the store client and a small runtime, and every call releases the GIL.
 #[pyclass(name = "Cache", frozen)]
@@ -620,6 +687,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(compare_series, m)?)?;
     m.add_function(wrap_pyfunction!(residual, m)?)?;
     m.add_function(wrap_pyfunction!(scatter, m)?)?;
+    m.add_function(wrap_pyfunction!(repair, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_repair, m)?)?;
     m.add_function(wrap_pyfunction!(synth, m)?)?;
     m.add_function(wrap_pyfunction!(builtin_checks, m)?)?;
     m.add_function(wrap_pyfunction!(check_catalogue, m)?)?;

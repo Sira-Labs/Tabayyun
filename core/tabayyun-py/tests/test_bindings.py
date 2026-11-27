@@ -286,3 +286,67 @@ def test_check_catalogue_and_validate_configs():
         tc.validate_configs([{"id": "tby.nope"}])
     with pytest.raises(ValueError, match="invalid parameters for tby.spikes"):
         tc.validate_configs([{"id": "tby.spikes", "params": {"window": "wide"}}])
+
+
+def test_repair_window_and_ranges():
+    minute = 60 * 10**9
+    ts = [m * minute for m in (0, 1, 4, 5, 6, 8, 9)]
+    table = pa.table({"ts": pa.array(ts, pa.timestamp("ns", tz="UTC")), "value": [1.0] * 7})
+    meta = {"id": "s", "expected_interval_ns": minute}
+    out = tc.repair(table, meta, 2 * minute, 9 * minute, {"method": "impute.linear"})
+    assert set(out) == {"method", "unrepaired", "changed", "added", "removed", "rows", "ranges", "window"}
+    assert (out["method"], out["unrepaired"]) == ("impute.linear", 0)
+    assert (out["changed"], out["added"], out["removed"], out["rows"]) == (0, 3, 0, 7)
+    assert out["ranges"] == [
+        {"start_ns": 2 * minute, "end_ns": 3 * minute + 1, "changed": 0, "added": 2, "removed": 0},
+        {"start_ns": 7 * minute, "end_ns": 7 * minute + 1, "changed": 0, "added": 1, "removed": 0},
+    ]
+    window = out["window"]
+    assert window.schema.names[:3] == ["ts", "value", "quality"]
+    # Only the window's rows, the estimated ones marked as such; the table is as it was.
+    assert window.column("ts").cast(pa.int64()).to_pylist() == [m * minute for m in range(2, 9)]
+    assert window.column("value").to_pylist() == [1.0] * 7
+    estimated = [q for q in window.column("quality").to_pylist() if q != window.column("quality")[2].as_py()]
+    assert len(estimated) == 3 and table.num_rows == 7
+    joined = tc.repair(table, meta, 2 * minute, 9 * minute, {"method": "impute.linear"}, max_ranges=1)
+    assert joined["ranges"] == [
+        {"start_ns": 2 * minute, "end_ns": 7 * minute + 1, "changed": 0, "added": 3, "removed": 0}
+    ]
+    # Rows in any order give the same answer.
+    shuffled = table.take([3, 0, 6, 1, 5, 2, 4])
+    again = tc.repair(shuffled, meta, 2 * minute, 9 * minute, {"method": "impute.linear"})
+    assert again["window"].equals(window) and again["ranges"] == out["ranges"]
+
+
+def test_repair_refuses_a_bad_operation():
+    minute = 60 * 10**9
+    table = pa.table({"ts": pa.array([0, minute], pa.timestamp("ns", tz="UTC")), "value": [1.0, 2.0]})
+    meta = {"id": "s", "expected_interval_ns": minute}
+    for op, message in [
+        ({"method": "smooth"}, "unknown variant"),
+        ({"method": "clamp", "minimum": 1.0}, "unknown field"),
+        ({"method": "mask", "unexpected": 1}, "unknown field"),
+        ({"method": "transform.affine", "scale": 0.0}, "scale"),
+        ({"method": "impute.like_day", "days": 0}, "days"),
+        ({"method": "align.resample"}, "grid_ns"),
+    ]:
+        with pytest.raises(ValueError, match=message):
+            tc.repair(table, meta, 0, 2 * minute, op)
+        with pytest.raises(ValueError, match=message):
+            tc.validate_repair(meta, op)
+    with pytest.raises(ValueError, match="window"):
+        tc.repair(table, meta, minute, minute, {"method": "mask"})
+    for op in [
+        {"method": "mask"},
+        {"method": "clamp", "min": 0.0},
+        {"method": "dedupe", "keep": "mean"},
+        {"method": "impute.linear", "max_gap_ns": 5 * minute},
+        {"method": "impute.like_day", "days": 2, "same_weekday": True},
+        {"method": "align.resample", "grid_ns": 15 * minute},
+        {"method": "transform.affine", "scale": 2.0, "offset": 1.0},
+    ]:
+        tc.validate_repair(meta, op)
+    # An interval of more than a century: the samples the operation is tried on still fit.
+    tc.validate_repair({"id": "s", "expected_interval_ns": 4 * 10**18}, {"method": "mask"})
+    # Without metadata there is still an interval to try the operation on.
+    tc.validate_repair({"id": "s"}, {"method": "impute.like_day"})

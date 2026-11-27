@@ -53,6 +53,9 @@ EXPECTED_TABLES = {
     "alert_notifications",
     # Spec 032.
     "score_days",
+    # Spec 035.
+    "corrections",
+    "corrected_ranges",
 }
 HYPERTABLES = {"findings", "metrics", "scores"}
 

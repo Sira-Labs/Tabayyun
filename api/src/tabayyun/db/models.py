@@ -352,6 +352,74 @@ class SeriesBaseline(TenantMixin, Base):
     created_at: Mapped[datetime] = _created_at()
 
 
+CORRECTION_STATUSES = ("proposed", "computed", "failed", "approved", "rejected")
+
+
+class Correction(TenantMixin, Base):
+    """One proposed repair of a window of a series and its corrected-layer version (spec 035)."""
+
+    __tablename__ = "corrections"
+    __table_args__ = (
+        UniqueConstraint("series_id", "version"),
+        CheckConstraint(_in("status", CORRECTION_STATUSES), name="status"),
+        CheckConstraint("version >= 1", name="version"),
+        CheckConstraint("window_end_ns > window_start_ns", name="window"),
+        # A series' corrections, newest version first.
+        Index("ix_corrections_series_id_version", "series_id", text("version DESC")),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    series_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("series.id", ondelete="CASCADE"), nullable=False
+    )
+    # Allocated when proposed; the cache layer of its rows is `corrected/v{version}`.
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="proposed")
+    method: Mapped[str] = mapped_column(Text, nullable=False)
+    # The operation's parameters without `method`; `*_ns` values are integers.
+    params: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    window_start_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    window_end_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    # The finding that motivated it; no foreign key, `findings` is a hypertable.
+    finding_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # Highest approved version when it was computed; null is the raw layer.
+    base_version: Mapped[int | None] = mapped_column(Integer)
+    # `{rows, changed, added, removed, unrepaired}` once computed.
+    stats: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    error: Mapped[str | None] = mapped_column(Text)
+    proposed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    decision_note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+    computed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CorrectedRange(TenantMixin, Base):
+    """A run of samples a correction changed, added or removed (spec 035). The values before
+    are the base layer's, the values after the version's in the cache."""
+
+    __tablename__ = "corrected_ranges"
+    __table_args__ = (
+        Index("ix_corrected_ranges_correction_id_range_start_ns", "correction_id", "range_start_ns"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    correction_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("corrections.id", ondelete="CASCADE"), nullable=False
+    )
+    range_start_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    range_end_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    changed: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    added: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    removed: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
+
 class Dataset(TenantMixin, Base):
     __tablename__ = "datasets"
 

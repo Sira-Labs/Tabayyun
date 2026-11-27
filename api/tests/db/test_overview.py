@@ -12,6 +12,7 @@ from admin_support import BOB, MIA, NED, ORG_B
 from synth_csv import faulty_csv
 from tabayyun.authz.scope import Scope
 from tabayyun.db.models import DEFAULT_ORG_ID, DEFAULT_WORKSPACE_ID
+from tabayyun.routers import overview as overview_router
 from tabayyun.services import overview
 from tenancy import org_session
 
@@ -32,6 +33,9 @@ class World:
 
     def __init__(self, env, client) -> None:
         self.env, self.client = env, client
+        # The API answers for the day the test wrote its rows on, also when the suite runs
+        # across midnight UTC.
+        env.apps[-1].dependency_overrides[overview_router.today] = lambda: TODAY
 
     async def series(self, name: str, asset_path: str | None = None) -> str:
         rows = "ts,value\n" + "".join(f"2026-01-01T{h:02d}:00:00Z,{h}\n" for h in range(24))

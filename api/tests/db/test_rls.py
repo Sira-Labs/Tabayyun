@@ -122,6 +122,13 @@ async def _seed_org(app: Any, prefix: str) -> dict[str, str]:
         )
         assert alert.status_code == 201, alert.text
         assert (await c.post(f"/api/alerts/{alert.json()['id']}/test")).status_code == 202
+        # Spec 035: a computed correction of the second series, with the range it touched.
+        extent = (await c.get(f"/api/series/{s2}/chart")).json()["extent"]
+        correction = await c.post(
+            f"/api/series/{s2}/corrections",
+            json={"method": "mask", "from": extent["start"], "to": extent["end"], "reason": "seed"},
+        )
+        assert correction.status_code == 201 and correction.json()["status"] == "computed", correction.text
     return {
         "source": source.json()["id"],
         "run": run["id"],
@@ -132,6 +139,7 @@ async def _seed_org(app: Any, prefix: str) -> dict[str, str]:
         "suite": suite.json()["id"],
         "filter": saved.json()["id"],
         "alert": alert.json()["id"],
+        "correction": correction.json()["id"],
     }
 
 
@@ -478,6 +486,17 @@ ROUTES = [
     ("DELETE", "/api/alerts/{rule_id}", "alert", None),
     ("POST", "/api/alerts/{rule_id}/test", "alert", None),
     ("GET", "/api/alerts/{rule_id}/notifications", "alert", None),
+    # Spec 035: corrections.
+    (
+        "POST",
+        "/api/series/{series_id}/corrections",
+        "series",
+        {"method": "mask", "from": "0", "to": "1", "reason": "x"},
+    ),
+    ("GET", "/api/series/{series_id}/corrections", "series", None),
+    ("GET", "/api/corrections/{correction_id}", "correction", None),
+    ("POST", "/api/corrections/{correction_id}/approve", "correction", None),
+    ("POST", "/api/corrections/{correction_id}/reject", "correction", None),
 ]
 READ_BACK = {
     "run": "/api/runs/{}",
@@ -488,6 +507,7 @@ READ_BACK = {
     "source": "/api/sources/{}",
     "suite": "/api/suites/{}",
     "alert": "/api/alerts/{}",
+    "correction": "/api/corrections/{}",
 }
 # Scoped to the signed-in user, not to a tenant: `test_auth_flow.py` checks that another user's
 # session gives 404 (spec 013).
@@ -614,7 +634,7 @@ async def test_other_org_gets_404_for_every_admin_route(seed, app_for, method, t
             # Only the seeded events: the refused request wrote none in org B.
             seeded = (
                 "('org.renamed', 'source.created', 'suite.created', 'series.baseline_refresh_requested', "
-                "'alert_rule.created', 'alert_rule.tested')"
+                "'alert_rule.created', 'alert_rule.tested', 'correction.proposed')"
             )
             assert (
                 conn.execute(
