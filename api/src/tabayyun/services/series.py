@@ -64,12 +64,14 @@ class MetadataError(ValueError):
 
 @dataclass(frozen=True)
 class SeriesStats:
-    """Aggregates shown next to a series: latest score, unresolved findings, runs."""
+    """Aggregates shown next to a series: latest score, unresolved findings, runs, and the
+    newest score of its corrected layer beside the raw layer scored the same way (spec 036)."""
 
     latest_score: dict[str, Any] | None
     open_findings: int
     n_runs: int
     last_run_at: datetime | None
+    corrected_score: dict[str, Any] | None = None
 
 
 # Validation
@@ -260,8 +262,15 @@ async def series_stats(
     )
     runs = (
         select(Score.series_id, func.count(func.distinct(Score.run_id)), func.max(Score.computed_at))
-        .where(Score.series_id.in_(series_ids))
+        # A corrected layer's score names its run too and is newer than it: runs are raw rows.
+        .where(Score.series_id.in_(series_ids), Score.layer == "raw")
         .group_by(Score.series_id)
+    )
+    corrected = (
+        select(Score.series_id, Score.overall, Score.computed_at, Score.baseline)
+        .where(Score.series_id.in_(series_ids), Score.layer == "corrected")
+        .ext(distinct_on(Score.series_id))
+        .order_by(Score.series_id, Score.computed_at.desc())
     )
     findings = (
         select(Finding.series_id, func.count())
@@ -273,14 +282,33 @@ async def series_stats(
     }
     run_rows = {sid: (int(n), last) for sid, n, last in await session.execute(runs)}
     open_counts = {sid: int(n) for sid, n in await session.execute(findings)}
+    pairs = {
+        sid: corrected_score(overall, at, baseline)
+        for sid, overall, at, baseline in await session.execute(corrected)
+    }
     return {
         sid: SeriesStats(
             latest_score=scores.get(sid),
             open_findings=open_counts.get(sid, 0),
             n_runs=run_rows.get(sid, (0, None))[0],
             last_run_at=run_rows.get(sid, (0, None))[1],
+            corrected_score=pairs.get(sid),
         )
         for sid in series_ids
+    }
+
+
+def corrected_score(
+    overall: float, computed_at: datetime, baseline: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """A corrected layer's score as the series shows it: its number and version, and the raw
+    layer's number scored the same way."""
+    base = baseline or {}
+    return {
+        "overall": overall,
+        "computed_at": computed_at,
+        "version": base.get("version"),
+        "raw": {"overall": base.get("overall")},
     }
 
 

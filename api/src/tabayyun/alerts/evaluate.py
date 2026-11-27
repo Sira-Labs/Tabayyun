@@ -85,7 +85,8 @@ async def _scores(
         await session.execute(
             select(Score, Series.name, Series.asset_path)
             .join(Series, Series.id == Score.series_id)
-            .where(Score.run_id == run_id, Series.workspace_id == scope.workspace_id)
+            # Alerts read the raw layer: a corrected layer's score names its run too (spec 036).
+            .where(Score.run_id == run_id, Score.layer == "raw", Series.workspace_id == scope.workspace_id)
             .order_by(Series.name, Score.series_id)
         )
     ).all()
@@ -97,6 +98,7 @@ async def _scores(
         .where(
             Score.series_id.in_([score.series_id for score, _, _ in current]),
             Score.computed_at < computed_at,
+            Score.layer == "raw",
         )
         .ext(distinct_on(Score.series_id))
         .order_by(Score.series_id, Score.computed_at.desc())

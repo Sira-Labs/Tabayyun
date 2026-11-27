@@ -16,8 +16,8 @@ from tabayyun import core
 from tabayyun.auth.deps import client_ip
 from tabayyun.authz import Principal, ReadScope, Scope, WriteScope, get_principal, get_session
 from tabayyun.db import for_org
-from tabayyun.db.models import Series, SeriesBaseline
-from tabayyun.routers.windows import read_or_503, window_or_422
+from tabayyun.db.models import Score, Series, SeriesBaseline
+from tabayyun.routers.windows import layer_or_422, read_layer_or_503, version_or_422, window_or_422
 from tabayyun.services import baselines as baselines_service
 from tabayyun.services import findings as findings_service
 from tabayyun.services import series as series_service
@@ -40,6 +40,22 @@ class LatestScore(BaseModel):
     computed_at: datetime
 
 
+class RawScore(BaseModel):
+    """The raw layer scored like the corrected one beside it."""
+
+    overall: float | None
+
+
+class CorrectedScore(BaseModel):
+    """The newest score of a series' corrected layer (spec 036): its number, the corrected
+    version that was scored, and the raw layer scored with the same checks and window."""
+
+    overall: float
+    computed_at: datetime
+    version: int | None
+    raw: RawScore
+
+
 class SeriesSummary(BaseModel):
     """One row of `GET /api/series`."""
 
@@ -50,6 +66,7 @@ class SeriesSummary(BaseModel):
     unit: str | None
     kind: str
     latest_score: LatestScore | None
+    corrected_score: CorrectedScore | None
     open_findings: int
     last_run_at: datetime | None
 
@@ -107,6 +124,7 @@ def _summary_fields(series: Series, stats: series_service.SeriesStats) -> dict[s
         "unit": series.unit,
         "kind": series.kind,
         "latest_score": stats.latest_score,
+        "corrected_score": stats.corrected_score,
         "open_findings": stats.open_findings,
         "last_run_at": stats.last_run_at,
     }
@@ -262,12 +280,34 @@ class ScoreOut(BaseModel):
     dimensions: dict[str, Any]
     n_findings: int
     computed_at: datetime
+    # For a row of the layer `corrected` (spec 036): the raw layer scored the same way,
+    # `{overall, dimensions, n_findings}`, and the corrected version that was scored.
+    baseline: dict[str, Any] | None
+    version: int | None
 
 
 class ScoreList(BaseModel):
     """Score rows of one series, newest first."""
 
     items: list[ScoreOut]
+
+
+def _score_out(score: Score) -> ScoreOut:
+    """One score row; a corrected one with its baseline and, apart from it, its version."""
+    base = dict(score.baseline) if score.baseline is not None else None
+    version = base.pop("version", None) if base is not None else None
+    return ScoreOut(
+        series_id=str(score.series_id),
+        run_id=str(score.run_id),
+        layer=score.layer,
+        method_version=score.method_version,
+        overall=score.overall,
+        dimensions=score.dimensions,
+        n_findings=score.n_findings,
+        computed_at=score.computed_at,
+        baseline=base,
+        version=version,
+    )
 
 
 async def _series_id_or_404(session: AsyncSession, scope: Scope, series_id: str) -> uuid.UUID:
@@ -328,8 +368,9 @@ async def list_scores(
     scope: ReadScope,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     run_id: str | None = None,
+    layer: Literal["raw", "corrected"] | None = None,
 ) -> ScoreList:
-    """Score rows newest first; `run_id` selects the rows one run wrote."""
+    """Score rows newest first; `run_id` selects the rows one run wrote, `layer` one layer's."""
     parsed = await _series_id_or_404(session, scope, series_id)
     parsed_run: uuid.UUID | None = None
     if run_id is not None:
@@ -337,22 +378,8 @@ async def list_scores(
             parsed_run = uuid.UUID(run_id)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="run_id is not a UUID") from exc
-    rows = await findings_service.list_scores(session, parsed, limit=limit, run_id=parsed_run)
-    return ScoreList(
-        items=[
-            ScoreOut(
-                series_id=str(s.series_id),
-                run_id=str(s.run_id),
-                layer=s.layer,
-                method_version=s.method_version,
-                overall=s.overall,
-                dimensions=s.dimensions,
-                n_findings=s.n_findings,
-                computed_at=s.computed_at,
-            )
-            for s in rows
-        ]
-    )
+    rows = await findings_service.list_scores(session, parsed, limit=limit, run_id=parsed_run, layer=layer)
+    return ScoreList(items=[_score_out(s) for s in rows])
 
 
 # Chart and profile (spec 025)
@@ -391,6 +418,9 @@ class ChartOut(BaseModel):
     ts: list[str]
     values: list[float | None]
     quality: list[QualityRunOut]
+    # Only in the answer to a request that names a layer other than raw (spec 036): the
+    # version that was read, null for a series without an approved correction.
+    layer_version: int | None = None
 
 
 class BandOut(BaseModel):
@@ -408,9 +438,14 @@ class ProfileOut(BaseModel):
     profile: dict[str, Any] | None
     quality_counts: dict[str, int]
     band: BandOut | None
+    # Only in the answer to a request that names a layer other than raw (spec 036).
+    layer: str | None = None
+    layer_version: int | None = None
 
 
-Layer = Literal["raw"]
+LayerQuery = Annotated[
+    str | None, Query(description="raw (the default), corrected@latest or corrected@v{n}", max_length=64)
+]
 
 
 async def _series_or_404(session: AsyncSession, scope: Scope, series_id: str) -> Series:
@@ -425,7 +460,7 @@ def _window_out(window: tuple[int, int] | None) -> TimeWindow | None:
     return TimeWindow.model_validate({"from": str(window[0]), "to": str(window[1])}) if window else None
 
 
-@router.get("/{series_id}/chart", response_model=ChartOut)
+@router.get("/{series_id}/chart", response_model=ChartOut, response_model_exclude_unset=True)
 async def get_chart(
     series_id: str,
     request: Request,
@@ -435,15 +470,20 @@ async def get_chart(
     from_: Annotated[str | None, Query(alias="from")] = None,
     to: str | None = None,
     width_px: Annotated[int, Query(ge=100, le=4000)] = 1200,
-    layer: Layer = "raw",
+    layer: LayerQuery = None,
 ) -> ChartOut | Response:
-    """M4-downsampled points of a window (default: the whole extent, or its latest week).
+    """M4-downsampled points of a window (default: the whole extent, or its latest week) of the
+    raw layer, or of the corrected layer when `layer` names it (spec 036).
 
-    422 `window_too_large` when the window holds more rows than `TABAYYUN_CHART_MAX_ROWS`.
+    422 `window_too_large` when the window holds more rows than `TABAYYUN_CHART_MAX_ROWS`,
+    422 `unknown_layer_version` for a `corrected@v{n}` that was never approved.
     """
+    ref = layer_or_422(layer)
     series = await _series_or_404(session, scope, series_id)
     requested = window_or_422(from_, to)
-    ext = await series_chart.extent(session, series.id, layer)
+    read_version, layer_mark = await version_or_422(session, series, ref)
+    # Windows, the extent and the row limit are the raw layer's coverage for every layer.
+    ext = await series_chart.extent(session, series.id)
     window = requested or (series_chart.default_chart_window(ext) if ext else None)
     if window is not None:
         try:
@@ -451,11 +491,16 @@ async def get_chart(
         except series_chart.WindowTooLargeError as exc:
             raise HTTPException(status_code=422, detail="window_too_large") from exc
     version = ext.version if ext else None
-    tag = series_chart.etag("chart", series.id, layer, window, width_px, version, series.updated_at)
+    # A raw answer's tag is what it always was; another layer's also names the version read
+    # and the state of the layer up to it, so an approval changes it.
+    parts: tuple[object, ...] = () if ref.is_raw else (read_version, layer_mark)
+    tag = series_chart.etag(
+        "chart", series.id, ref.name, window, width_px, version, series.updated_at, *parts
+    )
     headers = {"ETag": tag, "Cache-Control": "private, no-cache"}
     if request.headers.get("if-none-match") == tag:
         return Response(status_code=304, headers=headers)
-    batch = await read_or_503(request.app.state.run_cache, series, window)
+    batch = await read_layer_or_503(request.app.state.run_cache, session, series, window, read_version)
     points = (
         await series_chart.chart_points(batch, *window, width_px, series.expected_interval_ns)
         if window
@@ -463,9 +508,10 @@ async def get_chart(
     )
     response.headers.update(headers)
     return ChartOut(
+        **({} if ref.is_raw else {"layer_version": read_version}),
         window=_window_out(window),
         extent=ExtentOut(start=str(ext.start_ns), end=str(ext.end_ns)) if ext else None,
-        layer=layer,
+        layer=ref.name,
         width_px=width_px,
         n_raw=points.n_raw,
         ts=[str(t) for t in points.ts],
@@ -474,7 +520,7 @@ async def get_chart(
     )
 
 
-@router.get("/{series_id}/profile", response_model=ProfileOut)
+@router.get("/{series_id}/profile", response_model=ProfileOut, response_model_exclude_unset=True)
 async def get_profile(
     series_id: str,
     request: Request,
@@ -482,22 +528,27 @@ async def get_profile(
     scope: ReadScope,
     from_: Annotated[str | None, Query(alias="from")] = None,
     to: str | None = None,
-    layer: Layer = "raw",
+    layer: LayerQuery = None,
 ) -> ProfileOut:
-    """The profile of a window without bad samples (default: the trailing 28 days) and the band."""
+    """The profile of a window without bad samples (default: the trailing 28 days) and the
+    band, of the raw layer or of the corrected layer when `layer` names it (spec 036)."""
+    ref = layer_or_422(layer)
     series = await _series_or_404(session, scope, series_id)
     requested = window_or_422(from_, to)
-    ext = await series_chart.extent(session, series.id, layer)
+    read_version, _ = await version_or_422(session, series, ref)
+    ext = await series_chart.extent(session, series.id)
     window = requested or (series_chart.default_profile_window(ext) if ext else None)
     if window is not None:
         try:
             series_chart.check_size(ext, *window, request.app.state.settings.chart_max_rows)
         except series_chart.WindowTooLargeError as exc:
             raise HTTPException(status_code=422, detail="window_too_large") from exc
-    batch = await read_or_503(request.app.state.run_cache, series, window)
+    batch = await read_layer_or_503(request.app.state.run_cache, session, series, window, read_version)
     profile = await series_chart.window_profile(batch, str(series.id))
     band = series_chart.band(series, profile)
+    named: dict[str, Any] = {} if ref.is_raw else {"layer": ref.name, "layer_version": read_version}
     return ProfileOut(
+        **named,
         window=_window_out(window),
         profile=profile,
         quality_counts=series_chart.quality_counts(batch),

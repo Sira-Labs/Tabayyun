@@ -728,6 +728,9 @@ class Score(OrgMixin, Base):
     dimensions: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
     n_findings: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # On a row of the layer `corrected`: the raw layer scored the same way, `{overall,
+    # dimensions, n_findings, version}` with the corrected version that was read (spec 036).
+    baseline: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
 
 # The dimensions a score can hold, in the order the overview shows them (spec 032).

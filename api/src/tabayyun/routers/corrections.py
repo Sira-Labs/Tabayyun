@@ -9,8 +9,10 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Any
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tabayyun.auth.deps import client_ip
@@ -18,10 +20,12 @@ from tabayyun.authz import Principal, ReadScope, Scope, WriteScope, get_principa
 from tabayyun.db import for_org
 from tabayyun.db.models import Correction, Series
 from tabayyun.services import corrections as service
+from tabayyun.services import rescoring
 from tabayyun.services import series as series_service
 from tabayyun.services.admin import audit
 
 router = APIRouter(prefix="/api", tags=["corrections"])
+log = structlog.get_logger()
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 ActorDep = Annotated[Principal, Depends(get_principal)]
@@ -193,7 +197,9 @@ async def _decide(
     principal: Principal,
     scope: Scope,
 ) -> dict[str, Any]:
-    """Approve or reject, with the audit event; a refusal is 409 with its code."""
+    """Approve or reject, with the audit event; a refusal is 409 with its code. An approval
+    also has the series' corrected layer scored (spec 036): queued with it, or run after it
+    with inline jobs."""
     correction, series = await _correction(session, scope, correction_id)
     decide = service.approve if action == "approved" else service.reject
     try:
@@ -209,7 +215,31 @@ async def _decide(
         workspace_id=scope.workspace_id,
         details=service.audit_details(correction, series),
     )
-    return await _out(session, correction)
+    out = await _out(session, correction)
+    if action != "approved":
+        return out
+    if not request.app.state.settings.inline_jobs:
+        await rescoring.enqueue(session, series.id, scope.org_id)
+        return out
+    # The re-scoring runs in its own transactions and must see the approval.
+    series_id = series.id
+    await session.commit()
+    await _rescore_inline(request.app.state, scope.org_id, series_id)
+    return out
+
+
+async def _rescore_inline(state: Any, org_id: uuid.UUID, series_id: uuid.UUID) -> None:
+    """Score the corrected layer after the approval committed (inline jobs). The approval
+    stands whatever happens here: a database error is logged, as a failed job would be."""
+    try:
+        await rescoring.rescore(
+            for_org(state.session_factory, org_id),
+            series_id,
+            state.run_cache,
+            state.settings.correction_max_rows,
+        )
+    except SQLAlchemyError:
+        log.exception("rescore.failed", series_id=str(series_id))
 
 
 @router.post("/corrections/{correction_id}/approve")

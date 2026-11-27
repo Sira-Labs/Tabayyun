@@ -113,14 +113,16 @@ async def record_score_day(
     dimensions: Mapping[str, Any],
     n_findings: int,
     computed_at: datetime,
+    layer: str = LAYER,
 ) -> None:
-    """Keep the score as its series' score of that UTC day, in the caller's transaction; an
-    older score of the same day is replaced, a newer one stays."""
+    """Keep the score as its series' score of that UTC day in `layer` (raw unless named), in
+    the caller's transaction; an older score of the same day is replaced, a newer one stays.
+    The overview reads the raw layer only."""
     values = {
         "org_id": scope.org_id,
         "workspace_id": scope.workspace_id,
         "series_id": series_id,
-        "layer": LAYER,
+        "layer": layer,
         "day": computed_at.astimezone(UTC).date(),
         "overall": overall,
         **{d: dimensions.get(d) for d in SCORE_DIMENSIONS},
