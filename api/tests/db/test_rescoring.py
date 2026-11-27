@@ -282,3 +282,27 @@ def test_checks_across_series_are_left_out():
     default, across = rescoring.single_series_configs(None, dataset_run=True)
     assert default is None
     assert across == ["tby.balance_residual", "tby.correlation_break", "tby.redundant_disagreement"]
+
+
+async def test_a_result_of_an_older_layer_is_not_stored(lab, monkeypatch):  # noqa: F811
+    """A correction approved while a re-scoring computes makes its result one of an older
+    layer: it is not stored, and the newest row stays the one of that approval."""
+    real = rescoring._scores
+    state: dict = {}
+
+    async def overtaken(cache, inputs, max_rows):
+        scores = await real(cache, inputs, max_rows)
+        if "client" in state:
+            # Approved after the rows were read; its own re-scoring runs inside this request.
+            client, made = state.pop("client"), state.pop("made")
+            assert (await client.post(f"/api/corrections/{made['id']}/approve")).status_code == 200
+        return scores
+
+    monkeypatch.setattr(rescoring, "_scores", overtaken)
+    async with lab.client() as c:
+        await approve(lab, c, max_gap_ns=str(6 * HOUR))
+        state.update(client=c, made=await lab.propose(c, "mask", 20, 24))
+        outcome = await rescore(lab)
+        assert (outcome.status, outcome.version) == ("superseded", 1)
+        assert [r.baseline["version"] for r in corrected_rows(lab)] == [1, 2]
+        assert (await c.get(f"/api/series/{lab.sid}")).json()["corrected_score"]["version"] == 2

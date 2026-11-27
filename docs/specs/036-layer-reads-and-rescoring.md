@@ -94,8 +94,9 @@ approved (run in the request in inline mode).
    holds for a newest score from an upload run too (its window and checks are the run's).
 4. **Nothing to score.** A series that was never scored, a window without rows or with more
    rows than `TABAYYUN_CORRECTION_MAX_ROWS` (by the coverage estimate, and by the rows
-   read), a cache error, or checks the core refuses: no row is written, the reason is
-   logged, and the approval stands.
+   read), a cache error, checks the core refuses, or a correction approved while the job
+   computed (its own job follows): no row is written, the reason is logged, and the
+   approval stands.
 5. **Version.** The row's version is the highest approved version when the rows were read
    (stored in `scores.baseline`, returned as the item's `version`); a later approval queues
    the job again and its row is newer. `corrected_score` is the newest such row.
@@ -151,6 +152,10 @@ approved (run in the request in inline mode).
   a layer in two places and would take them for raw ones.
 - Corrected reads carry `ts`, `value` and `quality`, no `ingest_ts`; nothing after the read
   on these five routes uses it.
+- From the review: the result is stored under the lock on the series row that approvals
+  take, and only when the approved corrections are still those the rows were read with.
+  Otherwise two re-scorings that overlap could leave the older layer's score as the newest
+  row. The skipped one is `superseded`; the approval that overtook it queued its own.
 - Not exercised: `rescore_corrected` through a running worker (the tests check the queued
   job and call `rescoring.rescore`), the downgrade of 0021 on its own, the inline path's
   database error, and all of this on staging's data.

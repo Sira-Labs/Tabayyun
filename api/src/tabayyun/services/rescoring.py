@@ -27,6 +27,7 @@ from tabayyun.db.models import Run, Score, Series
 from tabayyun.jobs.names import RESCORE_CORRECTED_TASK, RUNS_QUEUE
 from tabayyun.services import baselines as baselines_service
 from tabayyun.services import corrections, dataset_runs, series_chart
+from tabayyun.services import layers as layer_names
 from tabayyun.services import overview as overview_service
 from tabayyun.services import series as series_service
 from tabayyun.services.cache import CacheError, RunCache
@@ -40,8 +41,16 @@ RAW = "raw"
 SERIES_SCOPE = "series"
 
 Status = Literal[
-    "scored", "never_scored", "not_corrected", "too_large", "no_data", "cache_error", "check_error"
+    "scored",
+    "never_scored",
+    "not_corrected",
+    "too_large",
+    "no_data",
+    "cache_error",
+    "check_error",
+    "superseded",
 ]
+LATEST = layer_names.parse_layer("corrected@latest")
 
 
 @dataclass(frozen=True)
@@ -64,6 +73,8 @@ class _Inputs:
     end_ns: int
     now_ns: int
     version: int
+    # The state of the approved corrections when the rows were read (`layer_names.resolve`).
+    mark: str
     layers: list[corrections.Layered]
     meta: core.SeriesMetaIn
     configs: list[dict[str, Any]] | None
@@ -120,7 +131,7 @@ async def _inputs(session: AsyncSession, series_id: uuid.UUID, max_rows: int) ->
     window = None if run is None else _window(run)
     if run is None or window is None:
         return "never_scored"
-    version = await corrections.latest_approved(session, series_id)
+    version, mark = await layer_names.resolve(session, series_id, LATEST)
     if version is None:
         return "not_corrected"
     try:
@@ -142,6 +153,7 @@ async def _inputs(session: AsyncSession, series_id: uuid.UUID, max_rows: int) ->
         end_ns=window[1],
         now_ns=run.now_ns if run.now_ns is not None else window[1],
         version=version,
+        mark=mark,
         layers=layers,
         meta=meta,
         configs=configs,
@@ -200,11 +212,20 @@ async def _scores(cache: RunCache, inputs: _Inputs, max_rows: int) -> tuple[core
 
 async def _store(
     factory: async_sessionmaker[AsyncSession], inputs: _Inputs, corrected: core.Score, raw: core.Score
-) -> None:
+) -> bool:
     """One `scores` row of the layer `corrected` with the raw result as its baseline, and the
-    day's `score_days` row of that layer, in one transaction."""
+    day's `score_days` row of that layer, in one transaction.
+
+    False, and nothing stored, when a correction of the series was approved since the rows
+    were read: the result is of a layer that is no longer the series', and that approval
+    queued its own re-scoring. The series row is locked as for an approval, so stored rows
+    follow the approvals in order and an older layer's score is never the newest row.
+    """
     series = inputs.series
     async with factory() as session, session.begin():
+        await session.execute(select(Series.id).where(Series.id == series.id).with_for_update())
+        if await layer_names.resolve(session, series.id, LATEST) != (inputs.version, inputs.mark):
+            return False
         # The database's clock, as for approvals: a later approval's row is the newer one.
         computed_at = (await session.execute(select(func.clock_timestamp()))).scalar_one()
         session.add(
@@ -236,6 +257,7 @@ async def _store(
             computed_at=computed_at,
             layer=CORRECTED,
         )
+    return True
 
 
 async def rescore(
@@ -265,7 +287,9 @@ async def rescore(
         run_log.info("rescore.skipped", reason=scores, version=inputs.version)
         return Outcome(status=scores, version=inputs.version)
     corrected, raw = scores
-    await _store(factory, inputs, corrected, raw)
+    if not await _store(factory, inputs, corrected, raw):
+        run_log.info("rescore.skipped", reason="superseded", version=inputs.version)
+        return Outcome(status="superseded", version=inputs.version)
     run_log.info(
         "rescore.scored",
         version=inputs.version,
