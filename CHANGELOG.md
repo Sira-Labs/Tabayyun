@@ -17,8 +17,14 @@ All notable changes to this project are documented here. The format follows
   approved corrections and stores the repaired window as the next version of the corrected
   layer (`corrected/v{n}` in the cache), and an editor approves or rejects it. What a
   correction changed is recorded as ranges with counts; the raw layer is never written. No
-  endpoint reads the corrected layer yet and there is no page for it: both follow in
-  sprint 11.
+  page shows it yet (sprint 11).
+- Reading a layer (spec 036): the series chart and profile, the compare chart, the scatter
+  and a group's residual take `layer=raw` (the default), `corrected@latest` or, for one
+  series, `corrected@v{n}`. Without `layer` every answer is what it was.
+- The corrected layer's score (spec 036): approving a correction scores the series'
+  corrected layer with the checks of its last run, and its raw layer the same way. The
+  series answers both (`corrected_score` with `raw`), and `GET /api/series/{id}/scores`
+  filters by `layer`.
 
 ### Changed
 - Procrastinate 3.12 with migration 0019, which runs its three "pre" schema migrations: jobs

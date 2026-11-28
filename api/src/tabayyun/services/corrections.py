@@ -349,6 +349,35 @@ async def approved_layers(
     return [Layered(int(v), int(s), int(e)) for v, s, e in (await session.execute(stmt)).all()]
 
 
+async def _read(
+    cache: RunCache, series: Series, layer: str, start_ns: int, end_ns: int
+) -> pa.RecordBatch | None:
+    return await asyncio.to_thread(
+        cache.read_layer,
+        layer=layer,
+        source_id=str(series.source_id),
+        series_id=str(series.id),
+        start_ns=start_ns,
+        end_ns=end_ns,
+    )
+
+
+async def read_overlays(
+    cache: RunCache, series: Series, layers: Sequence[Layered], start_ns: int, end_ns: int
+) -> list[tuple[int, int, pa.RecordBatch | None]]:
+    """What `overlay` lays over the raw rows of `[start_ns, end_ns)`: for each correction in
+    order, the part of its window inside the read and its rows there.
+
+    Raises:
+        CacheError: the store cannot be opened or read.
+    """
+    parts: list[tuple[int, int, pa.RecordBatch | None]] = []
+    for layer in layers:
+        lo, hi = max(start_ns, layer.start_ns), min(end_ns, layer.end_ns)
+        parts.append((lo, hi, await _read(cache, series, corrected_layer(layer.version), lo, hi)))
+    return parts
+
+
 async def read_composed(
     cache: RunCache, series: Series, layers: Sequence[Layered], start_ns: int, end_ns: int
 ) -> pa.RecordBatch | None:
@@ -357,28 +386,8 @@ async def read_composed(
     Raises:
         CacheError: the store cannot be opened or read.
     """
-    source_id, series_id = str(series.source_id), str(series.id)
-    raw = await asyncio.to_thread(
-        cache.read_layer,
-        layer=RAW_LAYER,
-        source_id=source_id,
-        series_id=series_id,
-        start_ns=start_ns,
-        end_ns=end_ns,
-    )
-    parts: list[tuple[int, int, pa.RecordBatch | None]] = []
-    for layer in layers:
-        lo, hi = max(start_ns, layer.start_ns), min(end_ns, layer.end_ns)
-        rows = await asyncio.to_thread(
-            cache.read_layer,
-            layer=corrected_layer(layer.version),
-            source_id=source_id,
-            series_id=series_id,
-            start_ns=lo,
-            end_ns=hi,
-        )
-        parts.append((lo, hi, rows))
-    return overlay(raw, parts)
+    raw = await _read(cache, series, RAW_LAYER, start_ns, end_ns)
+    return overlay(raw, await read_overlays(cache, series, layers, start_ns, end_ns))
 
 
 async def read_layer(

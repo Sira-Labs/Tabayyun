@@ -20,6 +20,7 @@ REOPEN_EXPIRED_MUTES_TASK = "tabayyun.reopen_expired_mutes"
 DELIVER_ALERT_TASK = "tabayyun.deliver_alert"
 REQUEUE_STUCK_ALERTS_TASK = "tabayyun.requeue_stuck_alerts"
 APPLY_REPAIR_TASK = "tabayyun.apply_repair"
+RESCORE_CORRECTED_TASK = "tabayyun.rescore_corrected"
 # Postgres application_name prefix of the worker's connections; the suffix after "/" is the
 # commit it runs, which /api/version lists (see `worker_application_name`).
 WORKER_APPLICATION_NAME = "tabayyun-worker"

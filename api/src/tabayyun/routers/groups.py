@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tabayyun.authz import ReadScope, WriteScope, get_session
 from tabayyun.db.models import SeriesGroup
-from tabayyun.routers.windows import read_or_503, window_or_422
+from tabayyun.routers.windows import layer_or_422, read_layer_or_503, version_or_422, window_or_422
 from tabayyun.services import compare, series_chart
 from tabayyun.services import groups as groups_service
 
@@ -198,9 +198,13 @@ class ResidualOut(BaseModel):
     residual: list[float | None] = Field(description="null where the line breaks across skipped bins")
     band: BandOut | None
     missing: list[str]
+    # Only when the request names a layer other than raw (spec 036): the layer, and the version
+    # read of each member by series id.
+    layer: str | None = None
+    layer_versions: dict[str, int | None] | None = None
 
 
-@router.get("/{group_id}/residual", response_model=ResidualOut)
+@router.get("/{group_id}/residual", response_model=ResidualOut, response_model_exclude_unset=True)
 async def get_residual(
     group_id: str,
     request: Request,
@@ -209,13 +213,17 @@ async def get_residual(
     from_: Annotated[str | None, Query(alias="from")] = None,
     to: str | None = None,
     width_px: Annotated[int, Query(ge=100, le=4000)] = 1200,
+    layer: Annotated[
+        str | None, Query(description="raw (the default) or corrected@latest", max_length=64)
+    ] = None,
 ) -> ResidualOut:
     """Inputs minus outputs of a balance, or A − B of a two-member group, on the checks' grid
     and downsampled to the chart's bins (spec 018). Default window: the last 7 days of the
-    members' data.
+    members' data. `layer=corrected@latest` reads each member's corrected layer (spec 036).
 
     422 for a group of another kind with three or more members, and for `window_too_large`.
     """
+    ref = layer_or_422(layer, versions=False)
     group = await groups_service.get_group(session, scope, _parse_id(group_id))
     if group is None:
         raise HTTPException(status_code=404, detail="series group not found")
@@ -228,8 +236,13 @@ async def get_residual(
     found = await compare.extents(session, series)
     window = window_or_422(from_, to) or compare.default_window(found)
     balance = kind == "balance"
+    versions = {s.id: (await version_or_422(session, s, ref))[0] for s in series}
+    named: dict[str, Any] = (
+        {} if ref.is_raw else {"layer": ref.name, "layer_versions": {str(k): v for k, v in versions.items()}}
+    )
     if window is None:
         return ResidualOut(
+            **named,
             kind=kind,
             grid_ns=0,
             window=None,
@@ -245,7 +258,7 @@ async def get_residual(
     cache = request.app.state.run_cache
     batches = {}
     for s in series:
-        batch = await read_or_503(cache, s, window)
+        batch = await read_layer_or_503(cache, session, s, window, versions[s.id])
         if batch is not None:
             batches[str(s.id)] = batch
     try:
@@ -253,6 +266,7 @@ async def get_residual(
     except compare.NoResidualError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return ResidualOut(
+        **named,
         kind=out.kind,
         grid_ns=out.grid_ns,
         window={"from": str(window[0]), "to": str(window[1])},

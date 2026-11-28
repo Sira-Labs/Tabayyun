@@ -490,10 +490,18 @@ async def list_metrics(
 
 
 async def list_scores(
-    session: AsyncSession, series_id: uuid.UUID, *, limit: int, run_id: uuid.UUID | None = None
+    session: AsyncSession,
+    series_id: uuid.UUID,
+    *,
+    limit: int,
+    run_id: uuid.UUID | None = None,
+    layer: str | None = None,
 ) -> Sequence[Score]:
-    """Score rows of one series, newest first; only the given run's rows when `run_id` is set."""
+    """Score rows of one series, newest first; only the given run's rows when `run_id` is set,
+    only one layer's (`raw` or `corrected`) when `layer` is."""
     stmt = select(Score).where(Score.series_id == series_id)
+    if layer is not None:
+        stmt = stmt.where(Score.layer == layer)
     if run_id is not None:
         stmt = stmt.where(Score.run_id == run_id)
     stmt = stmt.order_by(Score.computed_at.desc()).limit(limit)

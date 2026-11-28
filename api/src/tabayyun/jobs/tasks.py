@@ -30,13 +30,24 @@ from tabayyun.jobs.names import (
     REFRESH_BASELINES_TASK,
     REOPEN_EXPIRED_MUTES_TASK,
     REQUEUE_STUCK_ALERTS_TASK,
+    RESCORE_CORRECTED_TASK,
     RUN_CHECKS_TASK,
     RUN_DUE_SUITES_TASK,
     RUNS_QUEUE,
     SEND_INVITATION_TASK,
 )
 from tabayyun.mail import MailError, SmtpConfig
-from tabayyun.services import baselines, corrections, execution, fetches, ingest, rate_limits, suites, triage
+from tabayyun.services import (
+    baselines,
+    corrections,
+    execution,
+    fetches,
+    ingest,
+    rate_limits,
+    rescoring,
+    suites,
+    triage,
+)
 from tabayyun.services import runs as runs_service
 from tabayyun.services.admin import invitations
 from tabayyun.settings import get_settings
@@ -246,6 +257,18 @@ async def apply_repair(correction_id: str, org_id: str) -> None:
     await corrections.compute(
         for_org(runtime.session_factory(), uuid.UUID(org_id)),
         uuid.UUID(correction_id),
+        runtime.run_cache(),
+        get_settings().correction_max_rows,
+    )
+
+
+@app.task(queue=RUNS_QUEUE, name=RESCORE_CORRECTED_TASK, retry=False)
+async def rescore_corrected(series_id: str, org_id: str) -> None:
+    """Score a series' corrected layer beside its raw one after an approval (spec 036); when
+    there is nothing to score the reason is logged, and it is never retried."""
+    await rescoring.rescore(
+        for_org(runtime.session_factory(), uuid.UUID(org_id)),
+        uuid.UUID(series_id),
         runtime.run_cache(),
         get_settings().correction_max_rows,
     )
